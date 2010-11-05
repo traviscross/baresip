@@ -1,0 +1,17 @@
+TODO:
+
+-------------------------------------------------------------------------------
+Version v0.1.1:
+
+  opengl: fix vertical refresh
+  add SIP keepalive with configurable interval
+  add support for SIP outbound
+  add RTP keepalive with configurable interval (rtpkeep=X)
+  upgrade to draft-ietf-avt-app-rtp-keepalive-09.txt (RTCP/RTP mux)
+  RFC5761 Multiplexing RTP Data and Control Packets on a Single Port
+  bug: SDL and keyboard events, modifier not working for * and #
+  configurable audio TX-thread
+? draft-ietf-mmusic-image-attributes-06
+? static.c: build in $(BUILD)
+
+-------------------------------------------------------------------------------

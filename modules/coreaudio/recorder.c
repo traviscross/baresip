@@ -1,0 +1,171 @@
+/**
+ * @file recorder.c  Apple Coreaudio sound driver - recorder
+ *
+ * Copyright (C) 2010 Creytiv.com
+ */
+#include <AudioToolbox/AudioQueue.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <re.h>
+#include <baresip.h>
+#include "coreaudio.h"
+
+
+#define BUFC 3
+
+
+struct ausrc_st {
+	struct ausrc *as;      /* inheritance */
+	AudioQueueRef queue;
+	AudioQueueBufferRef buf[BUFC];
+	pthread_mutex_t mutex;
+	ausrc_read_h *rh;
+	void *arg;
+	unsigned int ptime;
+};
+
+
+static void ausrc_destructor(void *data)
+{
+	struct ausrc_st *st = data;
+	uint32_t i;
+
+	pthread_mutex_lock(&st->mutex);
+	st->rh = NULL;
+	pthread_mutex_unlock(&st->mutex);
+
+	audio_session_disable();
+
+	if (st->queue) {
+		AudioQueuePause(st->queue);
+		AudioQueueStop(st->queue, true);
+
+		for (i=0; i<ARRAY_SIZE(st->buf); i++)
+			if (st->buf[i])
+				AudioQueueFreeBuffer(st->queue, st->buf[i]);
+
+		AudioQueueDispose(st->queue, true);
+	}
+
+	mem_deref(st->as);
+
+	pthread_mutex_destroy(&st->mutex);
+}
+
+
+static void record_handler(void *userData, AudioQueueRef inQ,
+			   AudioQueueBufferRef inQB,
+			   const AudioTimeStamp *inStartTime,
+			   UInt32 inNumPackets,
+			   const AudioStreamPacketDescription *inPacketDesc)
+{
+	struct ausrc_st *st = userData;
+	unsigned int ptime;
+	ausrc_read_h *rh;
+	void *arg;
+	(void)inStartTime;
+	(void)inNumPackets;
+	(void)inPacketDesc;
+
+	pthread_mutex_lock(&st->mutex);
+	ptime = st->ptime;
+	rh  = st->rh;
+	arg = st->arg;
+	pthread_mutex_unlock(&st->mutex);
+
+	if (!rh)
+		return;
+
+	rh(inQB->mAudioData, inQB->mAudioDataByteSize, arg);
+
+	AudioQueueEnqueueBuffer(inQ, inQB, 0, NULL);
+
+	/* Force a sleep here, coreaudio's timing is too fast */
+#if !TARGET_OS_IPHONE
+#define ENCODE_TIME   500
+	usleep((ptime * 1000) - ENCODE_TIME);
+#endif
+}
+
+
+int coreaudio_recorder_alloc(struct ausrc_st **stp, struct ausrc *as,
+			     struct ausrc_prm *prm, const char *device,
+			     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
+{
+	AudioStreamBasicDescription fmt;
+	struct ausrc_st *st;
+	uint32_t bytc, i;
+	OSStatus status;
+	int err;
+
+	(void)device;
+	(void)errh;
+
+	st = mem_zalloc(sizeof(*st), ausrc_destructor);
+	if (!st)
+		return ENOMEM;
+
+	st->ptime = (prm->frame_size * 1000) / (prm->srate * prm->ch);
+	st->as  = mem_ref(as);
+	st->rh  = rh;
+	st->arg = arg;
+
+	err = pthread_mutex_init(&st->mutex, NULL);
+	if (err)
+		goto out;
+
+	err = audio_session_enable();
+	if (err)
+		goto out;
+
+	fmt.mSampleRate       = (Float64)prm->srate;
+	fmt.mFormatID         = audio_fmt(prm->fmt);
+	fmt.mFormatFlags      = kLinearPCMFormatFlagIsSignedInteger |
+		                kAudioFormatFlagIsPacked;
+#ifdef __BIG_ENDIAN__
+	fmt.mFormatFlags     |= kAudioFormatFlagIsBigEndian;
+#endif
+
+	fmt.mFramesPerPacket  = 1;
+	fmt.mBytesPerFrame    = prm->ch * bytesps(prm->fmt);
+	fmt.mBytesPerPacket   = prm->ch * bytesps(prm->fmt);
+	fmt.mChannelsPerFrame = prm->ch;
+	fmt.mBitsPerChannel   = 8*bytesps(prm->fmt);
+
+	status = AudioQueueNewInput(&fmt, record_handler, st, NULL,
+				     kCFRunLoopCommonModes, 0, &st->queue);
+	if (status) {
+		re_fprintf(stderr, "AudioQueueNewInput error: %i\n", status);
+		err = ENODEV;
+		goto out;
+	}
+
+	bytc = prm->frame_size * bytesps(prm->fmt);
+
+	for (i=0; i<ARRAY_SIZE(st->buf); i++)  {
+
+		status = AudioQueueAllocateBuffer(st->queue, bytc,
+						  &st->buf[i]);
+		if (status)  {
+			err = ENOMEM;
+			goto out;
+		}
+
+		AudioQueueEnqueueBuffer(st->queue, st->buf[i], 0, NULL);
+	}
+
+	status = AudioQueueStart(st->queue, NULL);
+	if (status)  {
+		re_fprintf(stderr, "AudioQueueStart error %i\n", status);
+		err = ENODEV;
+		goto out;
+	}
+
+ out:
+	if (err)
+		mem_deref(st);
+	else
+		*stp = st;
+
+	return err;
+}

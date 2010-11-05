@@ -1,0 +1,46 @@
+#
+# srcs.mk All application source files.
+#
+# Copyright (C) 2010 Creytiv.com
+#
+SRCS	+= aubuf.c
+SRCS	+= aucodec.c
+SRCS	+= audio.c
+SRCS	+= aufile.c
+SRCS	+= aufilt.c
+SRCS	+= auloop.c
+SRCS	+= auplay.c
+SRCS	+= ausrc.c
+SRCS	+= calc.c
+SRCS	+= call.c
+SRCS	+= conf.c
+SRCS	+= contact.c
+SRCS	+= mctrl.c
+SRCS	+= menc.c
+SRCS	+= message.c
+SRCS	+= mnat.c
+SRCS	+= natbd.c
+SRCS	+= net.c
+SRCS	+= options.c
+SRCS	+= os.c
+SRCS	+= play.c
+SRCS	+= realtime.c
+SRCS	+= stream.c
+SRCS	+= ua.c
+SRCS	+= ui.c
+SRCS	+= uuid.c
+SRCS	+= vidcodec.c
+SRCS	+= vidisp.c
+SRCS	+= vidsrc.c
+SRCS	+= vutil.c
+
+ifneq ($(USE_VIDEO),)
+SRCS	+= video.c
+SRCS	+= vidloop.c
+endif
+
+ifneq ($(STATIC),)
+SRCS	+= static.c
+endif
+
+APP_SRCS += main.c

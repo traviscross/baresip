@@ -1,0 +1,19 @@
+; baresip_thumb.pkg
+;
+;Language - standard language definitions
+&EN
+
+; standard SIS file header
+#{"baresip"},(0x20011300),1,0,0
+
+;Supports Series 80 v 2.0
+(0x101F8ED2), 0, 0, 0, {"Series80ProductID"}
+
+;Files to install
+"\epoc32\release\thumb\urel\baresip.exe" 
+-"!:\system\apps\baresip\baresip.exe"
+
+"\epoc32\release\thumb\urel\mod_cons.dll" -"!:\system\lib\mod_cons.dll"
+"\epoc32\release\thumb\urel\mod_g711.dll" -"!:\system\lib\mod_g711.dll"
+"\epoc32\release\thumb\urel\mod_l16.dll"  -"!:\system\lib\mod_l16.dll"
+"\epoc32\release\thumb\urel\mod_mda.dll"  -"!:\system\lib\mod_mda.dll"

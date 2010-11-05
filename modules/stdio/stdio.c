@@ -1,0 +1,194 @@
+/**
+ * @file stdio.c Standard Input/Output UI module
+ *
+ * Copyright (C) 2010 Creytiv.com
+ */
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <re.h>
+#include <baresip.h>
+
+
+#define DEBUG_MODULE "stdio"
+#define DEBUG_LEVEL 5
+#include <re_dbg.h>
+
+
+enum {
+	RELEASE_VAL = 250  /**< Key release value in [ms] */
+};
+
+struct ui_st {
+	struct ui *ui; /* base class */
+	struct tmr tmr;
+	struct termios term;
+	bool term_set;
+	ui_input_h *h;
+	void *arg;
+};
+
+
+/* We only allow one instance */
+static struct ui_st *_ui;
+static struct ui *stdio;
+
+
+static void ui_destructor(void *data)
+{
+	struct ui_st *st = data;
+
+	fd_close(STDIN_FILENO);
+
+	if (st->term_set)
+		tcsetattr(STDIN_FILENO, TCSANOW, &st->term);
+
+	tmr_cancel(&st->tmr);
+	mem_deref(st->ui);
+
+	_ui = NULL;
+}
+
+
+static int stderr_handler(const char *p, size_t size, void *arg)
+{
+	(void)arg;
+
+	if (write(STDERR_FILENO, p, size) < 0)
+		return errno;
+
+	return 0;
+}
+
+
+static void report_key(struct ui_st *ui, char key)
+{
+	struct re_printf pf;
+
+	pf.vph = stderr_handler;
+
+	if (ui->h)
+		ui->h(key, &pf, ui->arg);
+}
+
+
+static void timeout(void *arg)
+{
+	struct ui_st *st = arg;
+
+	/* Emulate key-release */
+	report_key(st, 0x00);
+}
+
+
+static void ui_fd_handler(int flags, void *arg)
+{
+	struct ui_st *st = arg;
+	char key;
+
+	if (FD_READ != flags) {
+		DEBUG_WARNING("fd_handler: unexpected flags=0x%02x\n", flags);
+		return;
+	}
+
+	if (1 != read(STDIN_FILENO, &key, 1)) {
+		return;
+	}
+
+	report_key(st, key);
+
+	tmr_start(&st->tmr, RELEASE_VAL, timeout, st);
+}
+
+
+static int term_setup(struct ui_st *st)
+{
+	struct termios now;
+
+	if (tcgetattr(STDIN_FILENO, &st->term) < 0)
+		return errno;
+
+	now = st->term;
+
+	now.c_lflag |= ISIG;
+	now.c_lflag &= ~(ECHO|ECHONL|ICANON|IEXTEN);
+
+	/* required on Solaris */
+	now.c_cc[VMIN] = 1;
+	now.c_cc[VTIME] = 0;
+
+	if (tcsetattr(STDIN_FILENO, TCSANOW, &now) < 0)
+		return errno;
+
+	st->term_set = true;
+
+	return 0;
+}
+
+
+static int ui_alloc(struct ui_st **stp, struct ui_prm *prm,
+		    ui_input_h *ih, void *arg)
+{
+	struct ui_st *st;
+	int err;
+
+	(void)prm;
+
+	if (!stp)
+		return EINVAL;
+
+	if (_ui) {
+		*stp = mem_ref(_ui);
+		return 0;
+	}
+
+	st = mem_zalloc(sizeof(*st), ui_destructor);
+	if (!st)
+		return ENOMEM;
+
+	st->ui = mem_ref(stdio);
+	tmr_init(&st->tmr);
+
+	err = fd_listen(STDIN_FILENO, FD_READ, ui_fd_handler, st);
+	if (err)
+		goto out;
+
+	err = term_setup(st);
+	if (err) {
+		DEBUG_NOTICE("could not setup terminal: %s\n", strerror(err));
+		err = 0;
+	}
+
+	st->h   = ih;
+	st->arg = arg;
+
+ out:
+	if (err)
+		mem_deref(st);
+	else
+		*stp = _ui = st;
+
+	return err;
+}
+
+
+static int module_init(void)
+{
+	return ui_register(&stdio, "stdio", ui_alloc, NULL);
+}
+
+
+static int module_close(void)
+{
+	stdio = mem_deref(stdio);
+	return 0;
+}
+
+
+const struct mod_export DECL_EXPORTS(stdio) = {
+	"stdio",
+	"ui",
+	module_init,
+	module_close
+};

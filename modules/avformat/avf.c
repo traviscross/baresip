@@ -1,0 +1,339 @@
+/**
+ * @file avf.c  FFmpeg avformat video-source
+ *
+ * Copyright (C) 2010 Creytiv.com
+ */
+#define _BSD_SOURCE 1
+#include <unistd.h>
+#include <string.h>
+#include <pthread.h>
+#include <re.h>
+#include <baresip.h>
+#include <libavformat/avformat.h>
+#include <libavdevice/avdevice.h>
+#include <libavcodec/avcodec.h>
+#include <libswscale/swscale.h>
+
+
+/* extra const-correctness added in 0.9.0 */
+/* note: macports has LIBSWSCALE_VERSION_MAJOR == 1 */
+/* #if LIBSWSCALE_VERSION_INT >= ((0<<16) + (9<<8) + (0)) */
+#if LIBSWSCALE_VERSION_MINOR >= 9
+#define SRCSLICE_CAST (const uint8_t **)
+#else
+#define SRCSLICE_CAST (uint8_t **)
+#endif
+
+
+struct vidsrc_st {
+	struct vidsrc *vs;  /* inheritance */
+	pthread_t thread;
+	bool run;
+	AVFormatContext *ic;
+	AVCodec *codec;
+	AVCodecContext *ctx;
+	struct SwsContext *sws;
+	struct vidsz app_sz;
+	struct vidsz sz;
+	vidsrc_frame_h *frameh;
+	void *arg;
+	int sindex;
+	int fps;
+};
+
+
+static struct vidsrc *mod_avf;
+
+
+static void destructor(void *data)
+{
+	struct vidsrc_st *st = data;
+
+	if (st->run) {
+		st->run = false;
+		pthread_join(st->thread, NULL);
+	}
+
+	if (st->sws)
+		sws_freeContext(st->sws);
+
+	if (st->ctx && st->ctx->codec)
+		avcodec_close(st->ctx);
+
+	if (st->ic)
+		av_close_input_file(st->ic);
+
+	mem_deref(st->vs);
+}
+
+
+static void vidframe_set(struct vidframe *vf, struct vidsz *sz,
+			 uint8_t *data[4], int linesize[4])
+{
+	int i;
+
+	if (!vf || !sz)
+		return;
+
+	for (i=0; i<4; i++) {
+		vf->data[i]     = data[i];
+		vf->linesize[i] = linesize[i];
+	}
+
+	vf->size  = *sz;
+	vf->valid = true;
+}
+
+
+static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
+{
+	AVPicture pict;
+	struct vidframe vf;
+	struct vidsz sz;
+
+	vf.valid = false;
+
+	if (st->codec) {
+		AVFrame frame;
+		int got_pict, ret;
+
+#if LIBAVCODEC_VERSION_INT <= ((52<<16)+(23<<8)+0)
+		ret = avcodec_decode_video(st->ctx, &frame, &got_pict,
+					   pkt->data, pkt->size);
+#else
+		ret = avcodec_decode_video2(st->ctx, &frame,
+					    &got_pict, pkt);
+#endif
+		if (ret < 0 || !got_pict)
+			return;
+
+		sz.w = st->ctx->width;
+		sz.h = st->ctx->height;
+
+		/* check if size changed */
+		if (!vidsz_cmp(&sz, &st->sz)) {
+			re_printf("size changed: %d x %d  ---> %d x %d\n",
+				  st->sz.w, st->sz.h, sz.w, sz.h);
+			st->sz = sz;
+
+			if (st->sws) {
+				sws_freeContext(st->sws);
+				st->sws = NULL;
+			}
+		}
+
+		if (!st->sws) {
+			re_printf("scaling: %d x %d  --->  %d x %d\n",
+				  st->sz.w, st->sz.h,
+				  st->app_sz.w, st->app_sz.h);
+
+			st->sws = sws_getContext(st->sz.w, st->sz.h,
+						 st->ctx->pix_fmt,
+						 st->app_sz.w, st->app_sz.h,
+						 PIX_FMT_YUV420P,
+						 SWS_BICUBIC,
+						 NULL, NULL, NULL);
+			if (!st->sws)
+				return;
+		}
+
+		ret = avpicture_alloc(&pict, PIX_FMT_YUV420P,
+				      st->app_sz.w, st->app_sz.h);
+		if (ret < 0)
+			return;
+
+		/* todo: keep aspect ratio? */
+		ret = sws_scale(st->sws,
+				SRCSLICE_CAST frame.data, frame.linesize,
+				0, st->sz.h, pict.data, pict.linesize);
+		if (ret <= 0)
+			goto end;
+
+		vidframe_set(&vf, &st->app_sz, pict.data, pict.linesize);
+
+		st->frameh(&vf, st->arg);
+
+	end:
+		avpicture_free(&pict);
+	}
+	else {
+		avpicture_fill(&pict, pkt->data, PIX_FMT_YUV420P,
+			       st->sz.w, st->sz.h);
+
+		vidframe_set(&vf, &st->app_sz, pict.data, pict.linesize);
+
+		st->frameh(&vf, st->arg);
+	}
+}
+
+
+static void *read_thread(void *data)
+{
+	struct vidsrc_st *st = data;
+
+	while (st->run) {
+		AVPacket pkt;
+
+		av_init_packet(&pkt);
+
+		if (av_read_frame(st->ic, &pkt) < 0) {
+			usleep(1000000);
+			av_seek_frame(st->ic, -1, 0, 0);
+			continue;
+		}
+
+		if (pkt.stream_index != st->sindex)
+			goto out;
+
+		handle_packet(st, &pkt);
+
+		/* simulate framerate */
+		usleep(1000000/st->fps);
+
+	out:
+		av_free_packet(&pkt);
+	}
+
+	return NULL;
+}
+
+
+static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
+		 struct vidsrc_prm *prm, const char *fmt,
+		 const char *dev, vidsrc_frame_h *frameh,
+		 vidsrc_error_h *errorh, void *arg)
+{
+	AVFormatParameters prms;
+	struct vidsrc_st *st;
+	bool found_stream = false;
+	uint32_t i;
+	int ret, err = 0;
+
+	(void)errorh;
+
+	if (!frameh)
+		return EINVAL;
+
+	st = mem_zalloc(sizeof(*st), destructor);
+	if (!st)
+		return ENOMEM;
+
+	st->vs     = mem_ref(vs);
+	st->frameh = frameh;
+	st->arg    = arg;
+
+	if (prm) {
+		st->app_sz = prm->size;
+		st->fps    = prm->fps;
+	}
+	else {
+		st->fps = 25;
+	}
+
+	/* Params */
+	memset(&prms, 0, sizeof(prms));
+
+	prms.time_base          = (AVRational){1, st->fps};
+	prms.channels           = 1;
+	prms.width              = prm ? prm->size.w : 0;
+	prms.height             = prm ? prm->size.h : 0;
+	prms.pix_fmt            = PIX_FMT_YUV420P;
+	prms.channel            = 0;
+	prms.standard           = "pal";
+
+	ret = av_open_input_file(&st->ic, dev, av_find_input_format(fmt),
+				 0, &prms);
+	if (ret < 0) {
+		err = ENOENT;
+		goto out;
+	}
+
+	if (av_find_stream_info(st->ic) < 0) {
+		re_printf("%s: no stream info\n", dev);
+		err = ENOENT;
+		goto out;
+	}
+
+#if 0
+	dump_format(st->ic, 0, dev, 0);
+#endif
+
+	for (i=0; i<st->ic->nb_streams; i++) {
+		const struct AVStream *strm = st->ic->streams[i];
+		AVCodecContext *ctx = strm->codec;
+
+		if (ctx->codec_type != CODEC_TYPE_VIDEO)
+			continue;
+
+		re_printf("stream %u:  %u x %u  codec=%s  time_base=%d/%d\n",
+			  i, ctx->width, ctx->height, ctx->codec_name,
+			  ctx->time_base.num, ctx->time_base.den);
+
+		st->sz.w   = ctx->width;
+		st->sz.h   = ctx->height;
+		st->ctx    = ctx;
+		st->sindex = strm->index;
+
+		if (ctx->codec_id != CODEC_ID_NONE) {
+
+			st->codec = avcodec_find_decoder(ctx->codec_id);
+			if (!st->codec) {
+				err = ENOENT;
+				goto out;
+			}
+			if (avcodec_open(ctx, st->codec) < 0) {
+				err = ENOENT;
+				goto out;
+			}
+		}
+
+		found_stream = true;
+		break;
+	}
+
+	if (!found_stream) {
+		err = ENOENT;
+		goto out;
+	}
+
+	st->run = true;
+	err = pthread_create(&st->thread, NULL, read_thread, st);
+	if (err) {
+		st->run = false;
+		goto out;
+	}
+
+ out:
+	if (err)
+		mem_deref(st);
+	else
+		*stp = st;
+
+	return err;
+}
+
+
+static int module_init(void)
+{
+	/* register all codecs, demux and protocols */
+	avcodec_register_all();
+	avdevice_register_all();
+	av_register_all();
+
+	return vidsrc_register(&mod_avf, "avformat", alloc);
+}
+
+
+static int module_close(void)
+{
+	mod_avf = mem_deref(mod_avf);
+	return 0;
+}
+
+
+EXPORT_SYM const struct mod_export DECL_EXPORTS(avformat) = {
+	"avformat",
+	"vidsrc",
+	module_init,
+	module_close
+};

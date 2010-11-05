@@ -1,0 +1,87 @@
+/**
+ * @file baresip.mmp  Symbian makefile for baresip application
+ *
+ * Copyright (C) 2010 Creytiv.com
+ */
+TARGET        baresip.exe
+TARGETTYPE    exe
+UID           0x100039CE 0x20011300
+
+#ifdef EKA2
+VENDORID      0
+CAPABILITY    NetworkServices
+
+SOURCEPATH      .
+START RESOURCE  baresip_reg.rss
+#ifdef WINSCW
+TARGETPATH 	    \private\10003a3f\apps
+#else
+TARGETPATH 	    \private\10003a3f\import\apps
+#endif
+END
+#endif
+
+MACRO         HAVE_PWD_H
+MACRO         HAVE_UNISTD_H
+//MACRO         USE_VIDEO
+
+SOURCEPATH    ..\..\src
+SOURCE        aubuf.c
+SOURCE        aucodec.c
+SOURCE        audio.c
+SOURCE        aufile.c
+SOURCE        aufilt.c
+SOURCE        auloop.c
+SOURCE        auplay.c
+SOURCE        ausrc.c
+SOURCE        calc.c
+SOURCE        call.c
+SOURCE        conf.c
+SOURCE        contact.c
+SOURCE        main.c
+SOURCE        mctrl.c
+SOURCE        menc.c
+SOURCE        message.c
+SOURCE        mnat.c
+SOURCE        natbd.c
+SOURCE        net.c
+SOURCE        options.c
+SOURCE        os.c
+SOURCE        play.c
+SOURCE        stream.c
+SOURCE        stub.cpp
+SOURCE        ua.c
+SOURCE        ui.c
+SOURCE        uuid.c
+SOURCE        vidcodec.c
+
+/* Static modules */
+MACRO         STATIC
+
+SOURCEPATH    .
+SOURCE        static.c
+
+SOURCEPATH    ..\..\modules\cons
+SOURCE        cons.c
+
+SOURCEPATH    ..\..\modules\g711
+SOURCE        g711.c
+
+SOURCEPATH    ..\..\modules\mda
+SOURCE        mda.c player.cpp recorder.cpp util.cpp
+LIBRARY       mediaclientaudiostream.lib mediaclientaudioinputstream.lib
+
+#ifdef EKA2
+SOURCEPATH    .
+SOURCE        ecrt.cpp
+#endif
+
+SYSTEMINCLUDE   . ..\..\include
+SYSTEMINCLUDE \epoc32\include \epoc32\include\libc \epoc32\include\re
+LIBRARY       estlib.lib euser.lib
+LIBRARY       esock.lib insock.lib
+STATICLIBRARY resdp.lib resipsess.lib resip.lib restun.lib redns.lib re.lib
+#ifndef EKA2
+STATICLIBRARY ecrt0.lib
+STATICLIBRARY libgcc.a
+#endif
