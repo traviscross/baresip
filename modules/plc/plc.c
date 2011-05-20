@@ -18,9 +18,9 @@ struct aufilt_st {
 static struct aufilt *filt;
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct aufilt_st *st = data;
+	struct aufilt_st *st = arg;
 
 	mem_deref(st->af);
 }
@@ -77,6 +77,7 @@ static int dec(struct aufilt_st *st, struct mbuf *mb)
 		re_printf("plc: concealing %u bytes\n", st->psize);
 
 		if (mbuf_get_space(mb) < st->psize) {
+
 			int err = mbuf_resize(mb, st->psize);
 			if (err)
 				return err;
@@ -84,7 +85,7 @@ static int dec(struct aufilt_st *st, struct mbuf *mb)
 
 		nsamp = plc_fillin(&st->plc, (int16_t *)mbuf_buf(mb), nsamp);
 
-		mb->end = mb->pos + st->psize;
+		mb->end = mb->pos + 2 * nsamp;
 	}
 
 	return 0;

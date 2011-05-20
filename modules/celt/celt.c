@@ -23,11 +23,11 @@
  *    http://tools.ietf.org/html/draft-valin-celt-rtp-profile-02
  *    http://tools.ietf.org/html/draft-valin-celt-codec-01
  *
- * TODO:
- *
- * - decode low-overhead param and use it
- * - switch to and from low-overhead mode
  */
+
+#ifdef CELT_GET_FRAME_SIZE
+#define CELT_OLD_API 1
+#endif
 
 
 enum {
@@ -58,9 +58,9 @@ static uint32_t celt_low_overhead = 0;  /* can be 0 or 1 */
 static struct aucodec *celtv[2];
 
 
-static void celt_destructor(void *data)
+static void celt_destructor(void *arg)
 {
-	struct aucodec_st *st = data;
+	struct aucodec_st *st = arg;
 
 	if (st->enc)
 		celt_encoder_destroy(st->enc);
@@ -80,13 +80,6 @@ static void decode_param(const struct pl *name, const struct pl *val,
 	struct aucodec_st *st = arg;
 	int err;
 
-	DEBUG_NOTICE("CELT param: \"%r\" = \"%r\"\n", name, val);
-
-	/* TODO: is low-overhead mode by default OFF
-	   if the param is not present ?
-	   c->low_overhead = false;
-	*/
-
 	if (0 == pl_strcasecmp(name, "bitrate")) {
 		st->bitrate = pl_u32(val) * 1000;
 	}
@@ -97,9 +90,6 @@ static void decode_param(const struct pl *name, const struct pl *val,
 			DEBUG_WARNING("frame-size is NOT even: %u\n",
 				      st->frame_size);
 		}
-	}
-	else if (0 == pl_strcasecmp(name, "mapping")) {
-		DEBUG_NOTICE("TODO: decode mapping (%r)\n", val);
 	}
 	else if (0 == pl_strcasecmp(name, "low-overhead")) {
 		struct pl fs, bpfv;
@@ -147,7 +137,6 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	struct aucodec_st *st;
 	const uint32_t srate = aucodec_srate(ac);
 	const uint8_t ch = aucodec_ch(ac);
-	celt_int32 skip;
 	int err = 0;
 
 	(void)decp;
@@ -162,8 +151,6 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	st->low_overhead = celt_low_overhead;
 
 	if (encp && encp->ptime) {
-		/* TODO: how to calculate ptime/frame_size ?
-		   e.g. ptime=40 in app, ptime=20 in celt */
 		st->frame_size = calc_nsamp(srate, ch, encp->ptime);
 		DEBUG_NOTICE("calc ptime=%u  ---> frame_size=%u\n",
 			     encp->ptime, st->frame_size);
@@ -186,18 +173,21 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 #ifdef CELT_GET_FRAME_SIZE
 	celt_mode_info(st->mode, CELT_GET_FRAME_SIZE, &st->frame_size);
 #endif
-	celt_mode_info(st->mode, CELT_GET_LOOKAHEAD, &skip);
 
 	st->fsize = 2 * st->frame_size * ch;
 	st->bytes_per_packet = (st->bitrate * st->frame_size / srate + 4)/8;
 
 	DEBUG_NOTICE("alloc: frame_size=%u bitrate=%ubit/s fsize=%u"
-		     " bytes_per_packet=%u lookahead=%u\n",
+		     " bytes_per_packet=%u\n",
 		     st->frame_size, st->bitrate, st->fsize,
-		     st->bytes_per_packet, skip);
+		     st->bytes_per_packet);
 
 	/* Encoder */
+#ifdef CELT_OLD_API
 	st->enc = celt_encoder_create(st->mode, ch, NULL);
+#else
+	st->enc = celt_encoder_create(srate, ch, NULL);
+#endif
 	if (!st->enc) {
 		DEBUG_WARNING("alloc: could not create CELT encoder\n");
 		err = EPROTO;
@@ -205,7 +195,11 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	}
 
 	/* Decoder */
+#ifdef CELT_OLD_API
 	st->dec = celt_decoder_create(st->mode, ch, NULL);
+#else
+	st->dec = celt_decoder_create(srate, ch, NULL);
+#endif
 	if (!st->dec) {
 		DEBUG_WARNING("alloc: could not create CELT decoder\n");
 		err = EPROTO;
@@ -381,26 +375,6 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 
 	return err;
 }
-
-
-#if 0 /* todo */
-static int sdp_fmtp_enc(char *fmtp, size_t sz, uint32_t srate)
-{
-	if (celt_low_overhead) {
-		uint16_t bpf;
-		bpf = (DEFAULT_BITRATE * DEFAULT_FRAME_SIZE / mc->srate + 4)/8;
-		return mbuf_printf(mb,
-				   "low-overhead=%u/%u",
-				   DEFAULT_FRAME_SIZE, bpf);
-	}
-	else {
-		return mbuf_printf(mb,
-				   "frame-size=%u;bitrate=%u",
-				   DEFAULT_FRAME_SIZE,
-				   DEFAULT_BITRATE/1000);
-	}
-}
-#endif
 
 
 static int module_init(void)

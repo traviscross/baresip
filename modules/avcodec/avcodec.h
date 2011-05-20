@@ -31,6 +31,7 @@ struct vidcodec_st {
 	int64_t pts;
 #endif
 	struct mbuf *mb_frag;
+	bool got_keyframe;
 
 	enum CodecID codec_id;
 	union {

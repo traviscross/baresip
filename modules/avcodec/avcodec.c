@@ -22,14 +22,14 @@ enum {
 	DEFAULT_GOP_SIZE =   10,
 };
 
-static struct vidcodec *h263, *h264;
+static struct vidcodec *h263, *h264, *mpg4;
 static char h264_fmtp[256];
 static const uint8_t h264_level_idc = 0x0c;
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct vidcodec_st *st = data;
+	struct vidcodec_st *st = arg;
 
 	mem_deref(st->vc);
 
@@ -150,7 +150,7 @@ static int init_encoder_x264(struct vidcodec_st *st, struct vidcodec_prm *prm)
 	xprm.analyse.i_trellis = 0;
 	xprm.i_bframe_adaptive = X264_B_ADAPT_NONE;
 #if X264_BUILD >= 70
-	xprm.rc.b_mb_tree = 0; /* todo: needed, not in ubuntu */
+	xprm.rc.b_mb_tree = 0;
 #endif
 
 	/* slice-based threading (--tune=zerolatency) */
@@ -158,7 +158,6 @@ static int init_encoder_x264(struct vidcodec_st *st, struct vidcodec_prm *prm)
 	xprm.rc.i_lookahead = 0;
 	xprm.i_sync_lookahead = 0;
 	xprm.i_bframe = 0;
-	/*xprm.b_sliced_threads = 1; todo: handle thread/ts first */
 #endif
 
 	/* put SPS/PPS before each keyframe */
@@ -220,6 +219,8 @@ static int alloc(struct vidcodec_st **stp, struct vidcodec *vc,
 		st->codec_id = CODEC_ID_H263;
 	else if (0 == str_casecmp(name, "H264"))
 		st->codec_id = CODEC_ID_H264;
+	else if (0 == str_casecmp(name, "MP4V-ES"))
+		st->codec_id = CODEC_ID_MPEG4;
 	else {
 		err = EINVAL;
 		goto out;
@@ -276,6 +277,34 @@ static int alloc(struct vidcodec_st **stp, struct vidcodec *vc,
 }
 
 
+static int general_packetize(struct vidcodec_st *st, struct mbuf *mb)
+{
+	int err = 0;
+
+	/* Assemble frame into smaller packets */
+	while (!err) {
+		size_t sz, left = mbuf_get_left(mb);
+		bool last = (left < MAX_RTP_SIZE);
+		if (!left)
+			break;
+
+		sz = last ? left : MAX_RTP_SIZE;
+
+		st->mb_frag->pos = st->mb_frag->end = RTP_PRESZ;
+		err = mbuf_write_mem(st->mb_frag, mbuf_buf(mb), sz);
+		if (err)
+			break;
+
+		st->mb_frag->pos = RTP_PRESZ;
+		err = st->sendh(last, st->mb_frag, st->arg);
+
+		mbuf_advance(mb, sz);
+	}
+
+	return err;
+}
+
+
 static int enc(struct vidcodec_st *st, bool update,
 	       const struct vidframe *frame)
 {
@@ -323,6 +352,10 @@ static int enc(struct vidcodec_st *st, bool update,
 		err = h264_packetize(st, st->enc.mb);
 		break;
 
+	case CODEC_ID_MPEG4:
+		err = general_packetize(st, st->enc.mb);
+		break;
+
 	default:
 		err = EPROTO;
 		break;
@@ -332,8 +365,8 @@ static int enc(struct vidcodec_st *st, bool update,
 }
 
 
-/* TODO:
- * - check input/output size
+/*
+ * TODO: check input/output size
  */
 static int ffdecode(struct vidcodec_st *st, struct vidframe *frame,
 		    bool eof, struct mbuf *src)
@@ -349,6 +382,11 @@ static int ffdecode(struct vidcodec_st *st, struct vidframe *frame,
 		return 0;
 
 	st->dec.mb->pos = 0;
+
+	if (!st->got_keyframe) {
+		err = EPROTO;
+		goto out;
+	}
 
 #if LIBAVCODEC_VERSION_INT <= ((52<<16)+(23<<8)+0)
 	ret = avcodec_decode_video(st->dec.ctx, st->dec.pict, &got_picture,
@@ -409,6 +447,9 @@ static int dec_h263(struct vidcodec_st *st, struct vidframe *frame,
 	if (err)
 		return err;
 
+	if (!st->got_keyframe && h263_hdr.i == I_FRAME)
+		st->got_keyframe = true;
+
 	return ffdecode(st, frame, eof, src);
 }
 
@@ -424,6 +465,19 @@ static int dec_h264(struct vidcodec_st *st, struct vidframe *frame,
 	err = h264_decode(st, src);
 	if (err)
 		return err;
+
+	return ffdecode(st, frame, eof, src);
+}
+
+
+static int dec_mpeg4(struct vidcodec_st *st, struct vidframe *frame,
+		     bool eof, struct mbuf *src)
+{
+	if (!src)
+		return 0;
+
+	/* let the decoder handle this */
+	st->got_keyframe = true;
 
 	return ffdecode(st, frame, eof, src);
 }
@@ -459,7 +513,7 @@ static int module_init(void)
 	av_log_set_level(AV_LOG_WARNING);
 #endif
 
-	/* TODO: add two h264 codecs */
+	/* XXX: add two h264 codecs */
 	err |= vidcodec_register(&h264, 0,    "H264",
 				 h264_fmtp,
 				 alloc,
@@ -474,6 +528,10 @@ static int module_init(void)
 				 "F=1;CIF=1;CIF4=1",
 				 alloc, enc, dec_h263);
 
+	err |= vidcodec_register(&mpg4, 0, "MP4V-ES",
+				 "profile-level-id=3",
+				 alloc, enc, dec_mpeg4);
+
 	return err;
 }
 
@@ -482,6 +540,7 @@ static int module_close(void)
 {
 	h263 = mem_deref(h263);
 	h264 = mem_deref(h264);
+	mpg4 = mem_deref(mpg4);
 
 	return 0;
 }

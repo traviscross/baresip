@@ -23,34 +23,34 @@ enum {
 	RTP_KEEPALIVE_Tr = 15,    /**< RTP keepalive interval in [seconds] */
 };
 
+
+enum stream_type {
+	STREAM_UNKNOWN = 0,
+	STREAM_AUDIO,
+	STREAM_VIDEO
+};
+
+
 /** Defines a generic media stream */
 struct stream {
 	MAGIC_DECL
 
 	struct le le;            /**< Linked list element                   */
-	const char *name;        /**< Stream name                           */
-	struct sdp_media *media; /**< SDP Media line                        */
+	enum stream_type type;   /**< Type of stream (audio, video...)      */
+	struct call *call;       /**< Ref. to call object                   */
+	struct sdp_media *sdp;   /**< SDP Media line                        */
 	struct rtp_sock *rtp;    /**< RTP Socket                            */
+	struct rtpkeep *rtpkeep; /**< RTP Keepalive                         */
 	struct jbuf *jbuf;       /**< Jitter Buffer for incoming RTP        */
-	struct sa rtp_remote;    /**< Remote RTP IP address and port        */
-	struct sa rtcp_remote;   /**< Remote RTCP address                   */
 	struct mnat_media *mns;  /**< Media NAT traversal state             */
 	struct menc_st *menc;    /**< Media Encryption                      */
-	uint32_t ts_tx;          /**< Timestamp for outgoing RTP            */
 	uint32_t ssrc_rx;        /**< Incoming syncronizing source          */
 	uint32_t pseq;           /**< Sequence number for incoming RTP      */
-	bool active;             /**< Stream is active flag                 */
 	bool nack_pli;           /**< Send NACK/PLI to peer                 */
 	bool rtcp;               /**< Enable RTCP                           */
-	int label;               /**< Media stream label                    */
+	bool rtcp_mux;           /**< RTP/RTCP multiplex supported by peer  */
 	stream_recv_h *rh;       /**< Stream receive handler                */
 	void *arg;               /**< Handler argument                      */
-
-#ifdef DEPRECATED_KEEPALIVE
-	struct tmr tmr_ka;       /**< Keep-alive timer                      */
-	uint8_t pt_ka;           /**< Payload type for keepalive            */
-	bool ka_flag;            /**< Keep-alive flag, set by stream_send() */
-#endif
 
 	struct tmr tmr_stats;
 	struct {
@@ -65,18 +65,21 @@ struct stream {
 };
 
 
-static inline uint16_t lostcalc(struct stream *s, uint16_t seq)
+static inline int lostcalc(struct stream *s, uint16_t seq)
 {
-	uint16_t lostc;
+	const uint16_t delta = seq - s->pseq;
+	int lostc;
 
 	if (s->pseq == (uint32_t)-1)
 		lostc = 0;
-	else if (seq > s->pseq)
-		lostc = seq - s->pseq - 1;
-	else if ((uint32_t)(seq + 0x8000) < s->pseq)
-		lostc = seq + 0xffff - s->pseq;
-	else
+	else if (delta == 0)
+		return -1;
+	else if (delta < 3000)
+		lostc = delta - 1;
+	else if (delta < 0xff9c)
 		lostc = 0;
+	else
+		return -2;
 
 	s->pseq = seq;
 
@@ -84,121 +87,16 @@ static inline uint16_t lostcalc(struct stream *s, uint16_t seq)
 }
 
 
-static void stream_poll(struct stream *s)
-{
-	struct rtp_header hdr;
-	void *mb = NULL;
-	int err;
-
-	if (!s)
-		return;
-
-	err = jbuf_get(s->jbuf, &hdr, &mb);
-	if (err)
-		return;
-
-	s->rh(&hdr, mb, s->arg);
-
-	mem_deref(mb);
-}
-
-
-#ifdef DEPRECATED_KEEPALIVE
-static void ka_send(struct stream *s)
-{
-	struct mbuf *mb;
-	int err = ENOMEM;
-
-	if (s->pt_ka < PT_DYN_MIN || s->pt_ka > PT_DYN_MAX)
-		return;
-
-	mb = mbuf_alloc(RTP_HEADER_SIZE);
-	if (!mb)
-		goto out;
-
-	mb->pos = mb->end = RTP_HEADER_SIZE;
-	err = stream_send(s, false, s->pt_ka, s->ts_tx, mb);
-
- out:
-	mem_deref(mb);
-
-	if (err) {
-		DEBUG_WARNING("ka_send: %s\n", strerror(err));
-	}
-}
-
-
-/**
- * Find a dynamic payload type that is not used
- *
- * @param m SDP Media
- *
- * @return Unused payload type, -1 if no found
- */
-static int find_unused_pt(const struct sdp_media *m)
-{
-	int pt;
-
-	for (pt = PT_DYN_MAX; pt>=PT_DYN_MIN; pt--) {
-
-		if (!sdp_media_format(m, false, NULL, pt, NULL, -1, -1))
-			return pt;
-	}
-
-	return -1;
-}
-
-
-/**
- * See draft-ietf-avt-app-rtp-keepalive
- *
- *   Keepalive packets MUST be sent every Tr seconds.  Tr SHOULD be
- *   configurable, and otherwise MUST default to 15 seconds.
- *
- *   The agent SHOULD only send RTP keepalive when it does not send
- *   regular RTP paquets.
- *
- * Logic:
- *
- * We check for RTP activity every 7.5 seconds, and clear the ka_flag.
- * The ka_flag is set for every transmitted RTP packet. If the ka_flag
- * is not set, it means that we have not sent any RTP packet in the
- * last period of 7.5 - 15 seconds. Start transmitting RTP keepalives
- * every 15 seconds after that.
- */
-static void keepalive_handler(void *arg)
+static void stream_destructor(void *arg)
 {
 	struct stream *s = arg;
-	uint64_t delay = (1000 * RTP_KEEPALIVE_Tr) / 2;
-
-	/* Between 7.5 - 15 seconds of RTP inactivity? */
-	if (!s->ka_flag) {
-		ka_send(s);
-		delay = 1000 * RTP_KEEPALIVE_Tr;
-	}
-
-	/* always clear keepalive-flag */
-	s->ka_flag = false;
-
-	tmr_start(&s->tmr_ka, delay, keepalive_handler, s);
-}
-#endif
-
-
-static void stream_destructor(void *data)
-{
-	struct stream *s = data;
 
 	list_unlink(&s->le);
-#ifdef DEPRECATED_KEEPALIVE
-	tmr_cancel(&s->tmr_ka);
-#endif
 	tmr_cancel(&s->tmr_stats);
-
-	/* note: must be done before freeing socket */
+	mem_deref(s->rtpkeep);
+	mem_deref(s->sdp);
 	mem_deref(s->menc);
 	mem_deref(s->mns);
-
 	mem_deref(s->jbuf);
 	mem_deref(s->rtp);
 }
@@ -209,19 +107,13 @@ static void rtp_recv(const struct sa *src, const struct rtp_header *hdr,
 {
 	struct stream *s = arg;
 	bool flush = false;
-	uint16_t lostc;
 	int err;
 
 	if (!mbuf_get_left(mb))
 		return;
 
-	if (!(sdp_media_ldir(s->media) & SDP_RECVONLY))
+	if (!(sdp_media_ldir(s->sdp) & SDP_RECVONLY))
 		return;
-
-	lostc = lostcalc(s, hdr->seq);
-	if (lostc > 0) {
-		DEBUG_NOTICE("lost/oos %s packets: (%u)   \n", s->name, lostc);
-	}
 
 	++s->stats.n_rx;
 	s->stats.b_rx += mbuf_get_left(mb);
@@ -229,25 +121,47 @@ static void rtp_recv(const struct sa *src, const struct rtp_header *hdr,
 	if (hdr->ssrc != s->ssrc_rx) {
 		if (s->ssrc_rx) {
 			flush = true;
-			DEBUG_NOTICE("%p: SSRC changed %x -> %x"
+			DEBUG_NOTICE("%s: SSRC changed %x -> %x"
 					" (%u bytes from %J)\n",
-				     s, s->ssrc_rx, hdr->ssrc,
+				     sdp_media_name(s->sdp),
+				     s->ssrc_rx, hdr->ssrc,
 				     mbuf_get_left(mb), src);
 		}
 		s->ssrc_rx = hdr->ssrc;
 	}
 
-	/* Put frame in Jitter Buffer */
-	if (flush)
-		jbuf_flush(s->jbuf);
-	err = jbuf_put(s->jbuf, hdr, mb);
-	if (err) {
-		(void)re_printf("recv: dropping %u bytes from %J\n",
-				mb->end, src);
-	}
+	if (s->jbuf) {
 
-	/* Poll the jitter buffer */
-	stream_poll(s);
+		struct rtp_header hdr2;
+		void *mb2 = NULL;
+
+		/* Put frame in Jitter Buffer */
+		if (flush)
+			jbuf_flush(s->jbuf);
+
+		err = jbuf_put(s->jbuf, hdr, mb);
+		if (err) {
+			(void)re_printf("%s: dropping %u bytes from %J (%s)\n",
+					sdp_media_name(s->sdp), mb->end,
+					src, strerror(err));
+		}
+
+		if (jbuf_get(s->jbuf, &hdr2, &mb2))
+			memset(&hdr2, 0, sizeof(hdr2));
+
+		if (lostcalc(s, hdr2.seq) > 0)
+			s->rh(hdr, NULL, s->arg);
+
+		s->rh(&hdr2, mb2, s->arg);
+
+		mem_deref(mb2);
+	}
+	else {
+		if (lostcalc(s, hdr->seq) > 0)
+			s->rh(hdr, NULL, s->arg);
+
+		s->rh(hdr, mb, s->arg);
+	}
 }
 
 
@@ -263,7 +177,7 @@ static void rtcp_handler(const struct sa *src, struct rtcp_msg *msg, void *arg)
 #ifdef USE_VIDEO
 	case RTCP_FIR:
 		DEBUG_NOTICE("got RTCP FIR from %J\n", src);
-		if (!str_casecmp(s->name, "video"))
+		if (s->type == STREAM_VIDEO)
 			video_update_picture((struct video *)s->arg);
 		break;
 
@@ -291,7 +205,6 @@ static int stream_sock_alloc(struct stream *s)
 
 	/* we listen on all interfaces */
 	sa_init(&laddr, sa_af(net_laddr()));
-	sa_init(&s->rtcp_remote, sa_af(net_laddr()));
 
 	err = rtp_listen(&s->rtp, IPPROTO_UDP, &laddr,
 			 config.avt.rtp_ports.min, config.avt.rtp_ports.max,
@@ -339,13 +252,17 @@ static void tmr_stats_handler(void *arg)
 }
 
 
-int stream_alloc(struct stream **sp, struct call *call, const char *name,
-		 int label, stream_recv_h *rh, void *arg)
+int stream_alloc(struct stream **sp, struct call *call,
+		 struct sdp_session *sdp_sess,
+		 const char *name, int label,
+		 const struct mnat *mnat, struct mnat_sess *mnat_sess,
+		 const struct menc *menc,
+		 stream_recv_h *rh, void *arg)
 {
 	struct stream *s;
 	int err;
 
-	if (!sp || !rh)
+	if (!sp || !call || !rh)
 		return EINVAL;
 
 	s = mem_zalloc(sizeof(*s), stream_destructor);
@@ -354,22 +271,65 @@ int stream_alloc(struct stream **sp, struct call *call, const char *name,
 
 	MAGIC_INIT(s);
 
-#ifdef DEPRECATED_KEEPALIVE
-	tmr_init(&s->tmr_ka);
-#endif
 	tmr_init(&s->tmr_stats);
 
-	s->name  = name;
-	s->label = label;
+	s->call  = call;
+
+	if (!str_casecmp(name, "audio"))
+		s->type = STREAM_AUDIO;
+	else if (!str_casecmp(name, "video"))
+		s->type = STREAM_VIDEO;
+	else
+		s->type = STREAM_UNKNOWN;
+
 	s->rh    = rh;
 	s->arg   = arg;
-#ifdef DEPRECATED_KEEPALIVE
-	s->pt_ka = PT_NONE;
-#endif
 	s->pseq  = -1;
 	s->rtcp  = config.avt.rtcp_enable;
 
 	err = stream_sock_alloc(s);
+	if (err)
+		goto out;
+
+	/* Jitter buffer */
+	if (config.jbuf.delay.min && config.jbuf.delay.max) {
+
+		err = jbuf_alloc(&s->jbuf, config.jbuf.delay.min,
+				 config.jbuf.delay.max);
+		if (err)
+			goto out;
+	}
+
+	err = sdp_media_add(&s->sdp, sdp_sess, name,
+			    sa_port(rtp_local(s->rtp)),
+			    menc2transp(menc));
+	if (err)
+		goto out;
+
+	if (label) {
+		err |= sdp_media_set_lattr(s->sdp, true,
+					   "label", "%d", label);
+	}
+
+	/* RFC 5761 */
+	if (config.avt.rtcp_mux)
+		err |= sdp_media_set_lattr(s->sdp, true, "rtcp-mux", NULL);
+
+	if (mnat) {
+		err |= mnat->mediah(&s->mns, mnat_sess, IPPROTO_UDP,
+				    rtp_sock(s->rtp),
+				    (s->rtcp && !config.avt.rtcp_mux)
+				    ? rtcp_sock(s->rtp) : NULL,
+				    s->sdp);
+	}
+
+	if (menc) {
+		err |= menc->alloch(&s->menc, (struct menc *)menc,
+				    IPPROTO_UDP, rtp_sock(s->rtp),
+				    s->rtcp ? rtcp_sock(s->rtp) : NULL,
+				    s->sdp);
+	}
+
 	if (err)
 		goto out;
 
@@ -385,52 +345,9 @@ int stream_alloc(struct stream **sp, struct call *call, const char *name,
 }
 
 
-void stream_set_sdpmedia(struct stream *s, struct sdp_media *m)
-{
-	if (!s)
-		return;
-
-	s->media = m;
-}
-
-
 struct sdp_media *stream_sdpmedia(const struct stream *s)
 {
-	return s ? s->media : NULL;
-}
-
-
-int stream_menc_set(struct stream *s, const char *type)
-{
-	int err;
-
-	if (!s)
-		return EINVAL;
-
-	if (!type)
-		return 0;
-
-	err = menc_alloc(&s->menc, type, IPPROTO_UDP, rtp_sock(s->rtp),
-			 s->rtcp ? rtcp_sock(s->rtp) : NULL, s->media);
-	if (err) {
-		DEBUG_WARNING("media-encryption not found: %s\n", type);
-		return err;
-	}
-
-	return err;
-}
-
-
-int stream_mnat_init(struct stream *s, const struct mnat *mnat,
-		     struct mnat_sess *mnat_sess)
-{
-	if (!s)
-		return EINVAL;
-
-	return mnat->mediah(&s->mns, mnat_sess, IPPROTO_UDP,
-			    rtp_sock(s->rtp),
-			    s->rtcp ? rtcp_sock(s->rtp) : NULL,
-			    s->media);
+	return s ? s->sdp : NULL;
 }
 
 
@@ -439,48 +356,32 @@ int stream_start(struct stream *s)
 	if (!s)
 		return EINVAL;
 
-	/* Jitter buffer */
-	if (!s->jbuf) {
-		int err = jbuf_alloc(&s->jbuf, config.jbuf.delay.min,
-				     config.jbuf.delay.max);
-		if (err)
-			return err;
-	}
-
 	tmr_start(&s->tmr_stats, 1, tmr_stats_handler, s);
-
-	s->active = true;
 
 	return 0;
 }
 
 
-void stream_stop(struct stream *s)
-{
-	if (!s)
-		return;
-
-	s->active = false;
-#ifdef DEPRECATED_KEEPALIVE
-	tmr_cancel(&s->tmr_ka);
-#endif
-}
-
-
 void stream_start_keepalive(struct stream *s)
 {
+	const char *rtpkeep;
+
 	if (!s)
 		return;
 
-#ifdef DEPRECATED_KEEPALIVE
-	if (sdp_media_rformat(s->media, NULL)) {
-		const int pt = find_unused_pt(s->media);
-		if (pt >= 0) {
-			s->pt_ka = pt;
-			tmr_start(&s->tmr_ka, 0, keepalive_handler, s);
+	rtpkeep = ua_param(call_get_ua(s->call), "rtpkeep");
+
+	s->rtpkeep = mem_deref(s->rtpkeep);
+
+	if (rtpkeep && sdp_media_rformat(s->sdp, NULL)) {
+		int err;
+		err = rtpkeep_alloc(&s->rtpkeep, rtpkeep,
+				    IPPROTO_UDP, s->rtp, s->sdp);
+		if (err) {
+			DEBUG_WARNING("rtpkeep_alloc failed: %s\n",
+				      strerror(err));
 		}
 	}
-#endif
 }
 
 
@@ -489,91 +390,77 @@ int stream_send(struct stream *s, bool marker, uint8_t pt, uint32_t ts,
 {
 	int err;
 
-	if (!s || !sa_isset(&s->rtp_remote, SA_ALL))
+	if (!s)
 		return EINVAL;
 
-	if (sdp_media_dir(s->media) != SDP_SENDRECV) {
-
-#ifdef DEPRECATED_KEEPALIVE
-		if (pt != s->pt_ka)
-			return 0;
-#else
+	if (!sa_isset(sdp_media_raddr(s->sdp), SA_ALL))
 		return 0;
-#endif
-	}
+	if (sdp_media_dir(s->sdp) != SDP_SENDRECV)
+		return 0;
 
 	s->stats.b_tx += mbuf_get_left(mb);
 
-	err = rtp_send(s->rtp, &s->rtp_remote, marker, pt, ts, mb);
+	err = rtp_send(s->rtp, sdp_media_raddr(s->sdp), marker, pt, ts, mb);
 
-	s->ts_tx = ts;
-#ifdef DEPRECATED_KEEPALIVE
-	s->ka_flag = true;
-#endif
+	rtpkeep_refresh(s->rtpkeep, ts);
+
 	++s->stats.n_tx;
 
 	return err;
 }
 
 
-const struct sa *stream_local(const struct stream *s)
-{
-	return s ? rtp_local(s->rtp) : NULL;
-}
-
-
 void stream_remote_set(struct stream *s, const char *cname)
 {
+	struct sa rtcp;
+
 	if (!s)
 		return;
 
-	sa_cpy(&s->rtp_remote, sdp_media_raddr(s->media));
-	sdp_media_raddr_rtcp(s->media, &s->rtcp_remote);
+	/* RFC 5761 */
+	if (config.avt.rtcp_mux && sdp_media_rattr(s->sdp, "rtcp-mux")) {
 
-	rtcp_start(s->rtp, cname, &s->rtcp_remote);
-}
+		if (!s->rtcp_mux)
+			(void)re_printf("%s: RTP/RTCP multiplexing enabled\n",
+					sdp_media_name(s->sdp));
+		s->rtcp_mux = true;
+	}
 
+	rtcp_enable_mux(s->rtp, s->rtcp_mux);
 
-int stream_sdp_attr_encode(const struct stream *s, struct sdp_media *m)
-{
-	int err = 0;
+	sdp_media_raddr_rtcp(s->sdp, &rtcp);
 
-	if (!s)
-		return EINVAL;
-
-	if (s->label)
-		err |= sdp_media_set_lattr(m, true, "label", "%d", s->label);
-
-	return err;
+	rtcp_start(s->rtp, cname,
+		   s->rtcp_mux ? sdp_media_raddr(s->sdp): &rtcp);
 }
 
 
 void stream_sdp_attr_decode(struct stream *s)
 {
 	const char *attr;
-	int err = 0;
+	int err;
 
 	if (!s)
 		return;
 
 	if (s->menc && menc_get(s->menc)->updateh) {
-		err |= menc_get(s->menc)->updateh(s->menc);
+		err = menc_get(s->menc)->updateh(s->menc);
+		if (err) {
+			DEBUG_WARNING("menc update: %s\n", strerror(err));
+		}
 	}
 
 	/* RFC 4585 */
-	attr = sdp_media_rattr(s->media, "rtcp-fb");
+	attr = sdp_media_rattr(s->sdp, "rtcp-fb");
 	if (attr) {
 		if (0 == re_regex(attr, strlen(attr), "nack")) {
-			DEBUG_NOTICE("Peer supports NACK PLI (%s)\n", attr);
+			if (!s->nack_pli) {
+				DEBUG_NOTICE("Peer supports NACK PLI (%s)\n",
+					     attr);
+			}
 			s->nack_pli = true;
 		}
 	}
-}
-
-
-void *stream_arg(const struct stream *s)
-{
-	return s ? s->arg : NULL;
 }
 
 
@@ -585,7 +472,7 @@ int stream_jbuf_stat(struct re_printf *pf, const struct stream *s)
 	if (!s)
 		return EINVAL;
 
-	err  = re_hprintf(pf, " %s:", s->name);
+	err  = re_hprintf(pf, " %s:", sdp_media_name(s->sdp));
 
 	err |= jbuf_stats(s->jbuf, &stat);
 	if (err) {
@@ -601,27 +488,12 @@ int stream_jbuf_stat(struct re_printf *pf, const struct stream *s)
 }
 
 
-void stream_set_active(struct stream *s, bool active)
-{
-	if (!s)
-		return;
-
-	s->active = active;
-}
-
-
-bool stream_is_active(const struct stream *s)
-{
-	return s ? s->active : false;
-}
-
-
 void stream_hold(struct stream *s, bool hold)
 {
 	if (!s)
 		return;
 
-	sdp_media_set_ldir(s->media, hold ? SDP_SENDONLY : SDP_SENDRECV);
+	sdp_media_set_ldir(s->sdp, hold ? SDP_SENDONLY : SDP_SENDRECV);
 }
 
 
@@ -661,16 +533,45 @@ void stream_reset(struct stream *s)
 }
 
 
+void stream_set_bw(struct stream *s, uint32_t bps)
+{
+	if (!s)
+		return;
+
+	sdp_media_set_lbandwidth(s->sdp, SDP_BANDWIDTH_AS, bps / 1024);
+}
+
+
+bool stream_has_media(const struct stream *s)
+{
+	bool has;
+
+	if (!s)
+		return false;
+
+	has = sdp_media_rformat(s->sdp, NULL) != NULL;
+	if (has)
+		return sdp_media_rport(s->sdp) != 0;
+
+	return false;
+}
+
+
 int stream_debug(struct re_printf *pf, const struct stream *s)
 {
+	struct sa rrtcp;
 	int err;
 
 	if (!s)
 		return 0;
 
-	err  = re_hprintf(pf, " %s RTP remote=%J, RTCP remote=%J dir=%s\n",
-			  s->name, &s->rtp_remote, &s->rtcp_remote,
-			  sdp_dir_name(sdp_media_dir(s->media)));
+	err  = re_hprintf(pf, " %s dir=%s\n", sdp_media_name(s->sdp),
+			  sdp_dir_name(sdp_media_dir(s->sdp)));
+
+	sdp_media_raddr_rtcp(s->sdp, &rrtcp);
+	err |= re_hprintf(pf, " remote: %J/%J\n",
+			  sdp_media_raddr(s->sdp), &rrtcp);
+
 	err |= rtp_debug(pf, s->rtp);
 	err |= jbuf_debug(pf, s->jbuf);
 
@@ -683,6 +584,6 @@ int stream_print(struct re_printf *pf, const struct stream *s)
 	if (!s)
 		return 0;
 
-	return re_hprintf(pf, " %s=%u/%u", s->name,
+	return re_hprintf(pf, " %s=%u/%u", sdp_media_name(s->sdp),
 			  s->stats.bitrate_tx, s->stats.bitrate_rx);
 }

@@ -18,6 +18,7 @@
 enum {SILENCE_DUR = 2000};
 
 struct play {
+	struct le le;
 	struct play **playp;
 	struct lock *lock;
 	struct mbuf *what;
@@ -26,6 +27,9 @@ struct play {
 	int repeat;
 	bool eof;
 };
+
+
+static struct list playl;
 
 
 static void tmr_polling(void *arg);
@@ -104,10 +108,11 @@ static bool write_handler(uint8_t *buf, size_t sz, void *arg)
 }
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct play *play = data;
+	struct play *play = arg;
 
+	list_unlink(&play->le);
 	tmr_cancel(&play->tmr);
 
 	lock_write_get(play->lock);
@@ -146,6 +151,7 @@ static int play_alloc(struct play **playp, struct mbuf *what,
 	if (err)
 		goto out;
 
+	list_append(&playl, &play->le, play);
 	tmr_start(&play->tmr, 1000, tmr_polling, play);
 
  out:
@@ -204,4 +210,10 @@ int play_file(struct play **playp, const char *filename, int repeat)
 	mem_deref(mb);
 
 	return err;
+}
+
+
+void play_close(void)
+{
+	list_flush(&playl);
 }

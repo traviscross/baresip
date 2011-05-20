@@ -23,9 +23,9 @@ static struct aufilt *filt;
 static const int quality = 0;  /* 0-10 */
 
 
-static void resamp_destructor(void *data)
+static void resamp_destructor(void *arg)
 {
-	struct aufilt_st *st = data;
+	struct aufilt_st *st = arg;
 
 	if (st->enc)
 		speex_resampler_destroy(st->enc);

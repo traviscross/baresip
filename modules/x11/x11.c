@@ -39,13 +39,32 @@ struct vidisp_st {
 
 static struct vidisp *vid;       /**< X11 Video-display      */
 
+static struct {
+	int shm_error;
+	int (*errorh) (Display *, XErrorEvent *);
+} x11;
+
+
+/* NOTE: Global handler */
+static int error_handler(Display *d, XErrorEvent *e)
+{
+	if (e->error_code == BadAccess)
+		x11.shm_error = 1;
+	else if (x11.errorh)
+		return x11.errorh(d, e);
+
+	return 0;
+}
+
 
 static void destructor(void *arg)
 {
 	struct vidisp_st *st = arg;
 
-	if (st->image)
+	if (st->image) {
+		st->image->data = NULL;
 		XDestroyImage(st->image);
+	}
 
 	if (st->gc)
 		XFreeGC(st->disp, st->gc);
@@ -122,12 +141,21 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 
 	st->shm.readOnly = true;
 
+	x11.shm_error = 0;
+	x11.errorh = XSetErrorHandler(error_handler);
+
 	if (!XShmAttach(st->disp, &st->shm)) {
 		re_printf("failed to attach X to shared memory\n");
 		return ENOMEM;
 	}
 
-	st->xshmat = true;
+	XSync(st->disp, False);
+	XSetErrorHandler(x11.errorh);
+
+	if (x11.shm_error)
+		re_printf("x11: shared memory disabled\n");
+	else
+		st->xshmat = true;
 
 	gcv.graphics_exposures = false;
 
@@ -142,9 +170,19 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 		return EINVAL;
 	}
 
-	st->image = XShmCreateImage(st->disp, attrs.visual, attrs.depth,
-				    ZPixmap, st->shm.shmaddr, &st->shm,
-				    sz->w, sz->h);
+	if (st->xshmat) {
+		st->image = XShmCreateImage(st->disp, attrs.visual,
+					    attrs.depth, ZPixmap,
+					    st->shm.shmaddr, &st->shm,
+					    sz->w, sz->h);
+	}
+	else {
+		st->image = XCreateImage(st->disp, attrs.visual,
+					 attrs.depth, ZPixmap, 0,
+					 st->shm.shmaddr,
+					 sz->w, sz->h, 32, 0);
+
+	}
 	if (!st->image) {
 		re_printf("Failed to create X image\n");
 		return ENOMEM;
@@ -159,13 +197,14 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 
 
 /* prm->view points to the XWINDOW ID */
-static int alloc(struct vidisp_st **stp, struct vidisp *vd,
-		 struct vidisp_prm *prm, const char *dev,
+static int alloc(struct vidisp_st **stp, struct vidisp_st *parent,
+		 struct vidisp *vd, struct vidisp_prm *prm, const char *dev,
 		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
 {
 	struct vidisp_st *st;
 	int err = 0;
 
+	(void)parent;
 	(void)dev;
 	(void)inputh;
 	(void)resizeh;
@@ -259,10 +298,16 @@ static int display(struct vidisp_st *st, const char *title,
 	ret = sws_scale(st->sws, SRCSLICE_CAST pict_src.data,
 			pict_src.linesize, 0, frame->size.h,
 			pict_dst.data, pict_dst.linesize);
+	if (ret <= 0)
+		return EINVAL;
 
 	/* draw */
-	XShmPutImage(st->disp, st->win, st->gc, st->image,
-		     0, 0, 0, 0, st->size.w, st->size.h, false);
+	if (st->xshmat)
+		XShmPutImage(st->disp, st->win, st->gc, st->image,
+			     0, 0, 0, 0, st->size.w, st->size.h, false);
+	else
+		XPutImage(st->disp, st->win, st->gc, st->image,
+			  0, 0, 0, 0, st->size.w, st->size.h);
 
 	XSync(st->disp, false);
 
@@ -282,7 +327,7 @@ static void hide(struct vidisp_st *st)
 
 static int module_init(void)
 {
-	return vidisp_register(&vid, "x11", alloc, display, hide);
+	return vidisp_register(&vid, "x11", alloc, NULL, display, hide);
 }
 
 

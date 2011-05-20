@@ -26,9 +26,9 @@ static struct aufilt *filt;
 
 
 #ifdef SPEEX_SET_VBR_MAX_BITRATE
-static void speex_aec_destructor(void *data)
+static void speex_aec_destructor(void *arg)
 {
-	struct aufilt_st *st = data;
+	struct aufilt_st *st = arg;
 
 	if (st->state)
 		speex_echo_state_destroy(st->state);

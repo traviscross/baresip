@@ -50,7 +50,7 @@ int menc_register(struct menc **mencp, const char *id, menc_alloc_h *alloch,
 }
 
 
-struct menc *menc_get(struct menc_st *st)
+struct menc *menc_get(const struct menc_st *st)
 {
 	return st ? st->me : NULL;
 }
@@ -63,7 +63,7 @@ const struct menc *menc_find(const char *id)
 	for (le = mencl.head; le; le = le->next) {
 		struct menc *me = le->data;
 
-		if (0 == str_casecmp(me->id, id))
+		if (0 == str_casecmp(id, me->id))
 			return me;
 	}
 
@@ -71,29 +71,15 @@ const struct menc *menc_find(const char *id)
 }
 
 
-int menc_alloc(struct menc_st **mep, const char *id, int proto,
-	       void *rtpsock, void *rtcpsock, struct sdp_media *sdpm)
-{
-	struct menc *me = (struct menc *)menc_find(id);
-	if (!me)
-		return ENOENT;
-
-	if (me->alloch)
-		return me->alloch(mep, me, proto, rtpsock, rtcpsock, sdpm);
-
-	return 0;
-}
-
-
 /**
  * Convert Media encryption type to SDP Transport
- *
- *   Freeswitch requires RTP/SAVP
- *   pjsip requires RTP/AVP
  */
-const char *menc2transp(const char *type)
+const char *menc2transp(const struct menc *menc)
 {
-	if (0 == str_casecmp(type, "srtp-mand"))
+	if (!menc)
+		return sdp_proto_rtpavp;
+
+	if (0 == str_casecmp(menc->id, "srtp-mand"))
 		return sdp_proto_rtpsavp;
 	else
 		return sdp_proto_rtpavp;

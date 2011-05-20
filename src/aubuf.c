@@ -9,6 +9,9 @@
 #include "core.h"
 
 
+#define AUBUF_DEBUG 0
+
+
 /** Locked audio-buffer with almost zero-copy */
 struct aubuf {
 	struct list afl;
@@ -18,6 +21,13 @@ struct aubuf {
 	size_t max_sz;
 	bool filling;
 	uint64_t ts;
+
+#if AUBUF_DEBUG
+	struct {
+		size_t or;
+		size_t ur;
+	} stats;
+#endif
 };
 
 
@@ -94,9 +104,10 @@ int aubuf_append(struct aubuf *ab, struct mbuf *mb)
 	ab->cur_sz += mbuf_get_left(mb);
 
 	if (ab->max_sz && ab->cur_sz > ab->max_sz) {
-#if 0
-		(void)re_printf("aubuf: overrun (cur=%u)\n",
-				ab->cur_sz);
+#if AUBUF_DEBUG
+		++ab->stats.or;
+		(void)re_printf("aubuf: %p overrun (cur=%u)\n",
+				ab, ab->cur_sz);
 #endif
 		af = list_ledata(ab->afl.head);
 		ab->cur_sz -= mbuf_get_left(af->mb);
@@ -138,9 +149,10 @@ void aubuf_read(struct aubuf *ab, uint8_t *p, size_t sz)
 	lock_write_get(ab->lock);
 
 	if (ab->cur_sz <= (ab->filling ? ab->wish_sz : 0)) {
-#if 0
-		if (!ab->filling)
-			(void)re_printf("aubuf: underrun\n");
+#if AUBUF_DEBUG
+		++ab->stats.ur;
+		(void)re_printf("aubuf: %p underrun filling=%d\n",
+				ab, ab->filling);
 #endif
 		ab->filling = true;
 		memset(p, 0, sz);
@@ -188,17 +200,11 @@ int aubuf_get(struct aubuf *ab, uint32_t ptime, uint8_t *p, size_t sz)
 
 	lock_write_get(ab->lock);
 
-	/* Not enough bytes.. */
-	if (ab->cur_sz < sz) {
-		err = ENOENT;
-		goto out;
-	}
-
 	now = tmr_jiffies();
 	if (!ab->ts)
 		ab->ts = now;
 
-	if ((uint32_t)(now - ab->ts) < ptime) {
+	if (now < ab->ts) {
 		err = ETIMEDOUT;
 		goto out;
 	}
@@ -225,6 +231,12 @@ int aubuf_debug(struct re_printf *pf, const struct aubuf *ab)
 	lock_read_get(ab->lock);
 	err = re_hprintf(pf, "wish_sz=%zu cur_sz=%zu filling=%d",
 			 ab->wish_sz, ab->cur_sz, ab->filling);
+
+#if AUBUF_DEBUG
+	err |= re_hprintf(pf, " [overrun=%u underrun=%u]",
+			  ab->stats.or, ab->stats.ur);
+#endif
+
 	lock_rel(ab->lock);
 
 	return err;

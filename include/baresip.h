@@ -11,6 +11,7 @@ extern "C" {
 
 /* forward declarations */
 struct sa;
+struct sip_msg;
 struct sdp_media;
 struct sdp_session;
 
@@ -20,6 +21,15 @@ typedef void (exit_h)(int ret);
 
 
 /* Generic Video types */
+enum vidorient {
+	VIDORIENT_UNKNOWN,
+	VIDORIENT_PORTRAIT,
+	VIDORIENT_PORTRAIT_UPSIDEDOWN,
+	VIDORIENT_LANDSCAPE_LEFT,
+	VIDORIENT_LANDSCAPE_RIGHT,
+	VIDORIENT_FACEUP,
+	VIDORIENT_FACEDOWN
+};
 
 struct vidsz {
 	int w, h;
@@ -64,10 +74,22 @@ void vidframe_yuv420p_init(struct vidframe *vf, uint8_t *ptr,
 void vidframe_rgb32_init(struct vidframe *vf, const struct vidsz *sz,
 			 uint8_t *buf);
 struct vidframe *vidframe_alloc(const struct vidsz *sz);
+struct vidframe *vidframe_clone(const struct vidframe *src);
 int vidframe_alloc_filled(struct vidframe **vfp, const struct vidsz *sz,
                           uint32_t r, uint32_t g, uint32_t b);
 int  vidframe_print(struct re_printf *pf, const struct vidframe *vf);
 void vidrect_init(struct vidrect *rect, int x, int y, int w, int h, int r);
+int  vidrect_print(struct re_printf *pf, const struct vidrect *vr);
+static inline bool vidrect_cmp(const struct vidrect *a,
+			       const struct vidrect *b)
+{
+	if (!a || !b)
+		return false;
+
+	return (a->origin.x == b->origin.x && a->origin.y == b->origin.y)
+		&& (a->size.w == b->size.w && a->size.h == b->size.h)
+		&& (a->r == b->r);
+}
 
 
 /* calc - Interface to calculation routines */
@@ -101,7 +123,7 @@ struct video *call_video(struct call *call);
 struct list *call_streaml(const struct call *call);
 bool call_has_audio(const struct call *call);
 bool call_has_video(const struct call *call);
-const struct mnat *call_mnat(const struct call *call);
+int call_video_set_shuttered(struct call *call, bool shuttered);
 
 
 /* conf */
@@ -146,6 +168,7 @@ struct conf {
 		struct vidsz size;
 		uint32_t bitrate;      /**< Encoder bitrate in [bit/s] */
 		uint32_t fps;
+		char exclude[64];      /**< CSV-list of codecs to exclude */
 	} video;
 
 	/** Jitter Buffer */
@@ -159,6 +182,7 @@ struct conf {
 		struct range rtp_ports;/**< RTP port range                   */
 		struct range rtp_bandwidth;/**< RTP Bandwidth range [bit/s]  */
 		bool rtcp_enable;      /**< RTCP is enabled                  */
+		bool rtcp_mux;         /**< RTP/RTCP multiplexing            */
 	} avt;
 
 	/** NAT Behavior Discovery */
@@ -262,11 +286,11 @@ typedef int (aufilt_alloc_h)(struct aufilt_st **stp, struct aufilt *af,
 			     const struct aufilt_prm *decprm);
 typedef int (aufilt_enc_h)(struct aufilt_st *st, struct mbuf *mb);
 typedef int (aufilt_dec_h)(struct aufilt_st *st, struct mbuf *mb);
-typedef int (aufilt_dbg_h)(struct re_printf *pf, const struct aufilt_st *st);
+typedef int (aufilt_update_h)(struct aufilt_st *st, bool speakerphone);
 
 int aufilt_register(struct aufilt **afp, const char *name,
 		    aufilt_alloc_h *alloch, aufilt_enc_h *ench,
-		    aufilt_dec_h *dech, aufilt_dbg_h *dbgh);
+		    aufilt_dec_h *dech, aufilt_update_h *updh);
 struct list *aufilt_list(void);
 
 
@@ -312,6 +336,7 @@ int  net_init(bool prefer_ipv6);
 void net_close(void);
 int  net_dnssrv_add(const struct sa *sa);
 void net_change(uint32_t interval, net_change_h *ch, void *arg);
+bool net_check(void);
 int  net_debug(struct re_printf *pf, void *unused);
 const struct sa *net_laddr(void);
 struct dnsc *net_dnsc(void);
@@ -328,6 +353,7 @@ struct play;
 int play_file(struct play **playp, const char *filename, int repeat);
 int play_tone(struct play **playp, struct mbuf *tone,
 	      int srate, int ch, int repeat);
+void play_close(void);
 
 
 /* ua */
@@ -360,16 +386,25 @@ enum statmode {
 	STATMODE_N
 };
 
+/** Video mode */
+enum vidmode {
+	VIDMODE_OFF = 0,    /**< Video disabled                */
+	VIDMODE_ON,         /**< Video enabled                 */
+	VIDMODE_SHUTTERED   /**< Video offered but not sending */
+};
+
 /** Defines the User-Agent event handler */
 typedef void (ua_event_h)(enum ua_event ev, const char *prm, void *arg);
-
-struct sip_msg;
+typedef void (ua_message_h)(const struct pl *peer, const struct pl *ctype,
+			    struct mbuf *body, void *arg);
 typedef void (options_resp_h)(int err, const struct sip_msg *msg, void *arg);
 
 /* Multiple instances */
 int  ua_alloc(struct ua **uap, const struct pl *aor);
 void ua_set_event_handler(struct ua *ua, ua_event_h *eh, void *arg);
-int  ua_connect(struct ua *ua, const char *uri);
+void ua_set_message_handler(struct ua *ua, ua_message_h *msgh);
+int  ua_connect(struct ua *ua, const char *uri, const char *mnatid,
+		enum vidmode vidmode);
 void ua_hangup(struct ua *ua);
 void ua_answer(struct ua *ua);
 void ua_play_digit(struct ua *ua, int key);
@@ -397,7 +432,7 @@ int  ua_start_all(void);
 void ua_stop_all(bool forced);
 void ua_next(void);
 int  ua_register(struct ua *ua);
-int  ua_reset_transp(void);
+int  ua_reset_transp(bool reg, bool reinvite);
 struct ua *ua_cur(void);
 int  ua_print_sip_status(struct re_printf *pf, void *unused);
 int  ua_print_reg_status(struct re_printf *pf, void *unused);
@@ -440,9 +475,9 @@ void video_loop_test(bool stop);
 struct vidsrc;
 struct vidsrc_st;
 struct vidsrc_prm {
-	void *view;         /**< Optional selfview (set by application) */
-	struct vidsz size;
-	int fps;
+	struct vidsz size;      /**< Wanted picture size        */
+	enum vidorient orient;  /**< Wanted picture orientation */
+	int fps;                /**< Wanted framerate           */
 };
 
 typedef void (vidsrc_frame_h)(const struct vidframe *frame, void *arg);
@@ -454,13 +489,13 @@ typedef int  (vidsrc_alloc_h)(struct vidsrc_st **vsp, struct vidsrc *vs,
 			      vidsrc_frame_h *frameh,
 			      vidsrc_error_h *errorh, void *arg);
 
+typedef void (vidsrc_update_h)(struct vidsrc_st *st, struct vidsrc_prm *prm,
+			       const char *dev);
+
 int vidsrc_register(struct vidsrc **vp, const char *name,
-		    vidsrc_alloc_h *alloch);
+		    vidsrc_alloc_h *alloch, vidsrc_update_h *updateh);
 const struct vidsrc *vidsrc_find(const char *name);
 struct list *vidsrc_list(void);
-int vidsrc_alloc(struct vidsrc_st **stp, const char *name,
-		 struct vidsrc_prm *prm, const char *fmt, const char *dev,
-		 vidsrc_frame_h *frameh, vidsrc_error_h *errorh, void *arg);
 
 
 /* Video Display */
@@ -473,16 +508,19 @@ struct vidisp_prm {
 typedef void (vidisp_input_h)(char key, void *arg);
 typedef void (vidisp_resize_h)(const struct vidsz *size, void *arg);
 
-typedef int  (vidisp_alloc_h)(struct vidisp_st **vp, struct vidisp *vd,
-			      struct vidisp_prm *prm,
+typedef int  (vidisp_alloc_h)(struct vidisp_st **vp, struct vidisp_st *parent,
+			      struct vidisp *vd, struct vidisp_prm *prm,
 			      const char *dev, vidisp_input_h *inputh,
 			      vidisp_resize_h *resizeh, void *arg);
+typedef int  (vidisp_update_h)(struct vidisp_st *st, bool fullscreen,
+			       enum vidorient orient,
+			       const struct vidrect *window);
 typedef int  (vidisp_disp_h)(struct vidisp_st *st, const char *title,
 			     const struct vidframe *frame);
 typedef void (vidisp_hide_h)(struct vidisp_st *st);
 
 int vidisp_register(struct vidisp **vp, const char *name,
-		    vidisp_alloc_h *alloch,
+		    vidisp_alloc_h *alloch, vidisp_update_h *updateh,
 		    vidisp_disp_h *disph, vidisp_hide_h *hideh);
 
 
@@ -555,6 +593,7 @@ void vidcodec_set_fmtp(struct vidcodec *vc, const char *fmtp);
 
 /* Audio */
 void audio_mute(struct audio *a, bool muted);
+void audio_update(struct audio *a, bool speakerphone);
 void audio_enable_txthread(struct audio *a, bool enabled);
 
 
@@ -565,6 +604,8 @@ void *video_view(const struct video *v);
 int video_selfview(struct video *v, void *view);
 int video_pip(struct video *v, const struct vidrect *rect);
 int video_set_fullscreen(struct video *v, bool fs);
+int video_set_orient(struct video *v, enum vidorient orient);
+void video_vidsrc_set_device(struct video *v, const char *dev);
 
 
 /*
@@ -593,11 +634,16 @@ typedef int (mnat_update_h)(struct mnat_sess *sess);
 int mnat_register(struct mnat **mnatp, const char *id, const char *ftag,
 		  mnat_sess_h *sessh, mnat_media_h *mediah,
 		  mnat_update_h *updateh);
-const struct mnat *mnat_find(const char *id);
 
 
 /* Real-time */
 int realtime_enable(bool enable, int fps);
+
+
+/* Audio Tones */
+int autone_sine(struct mbuf *mb, uint32_t srate,
+		uint32_t f1, int l1, uint32_t f2, int l2);
+int autone_dtmf(struct mbuf *mb, uint32_t srate, int digit);
 
 
 /* Modules */

@@ -27,6 +27,8 @@ struct menc_st {
 	srtp_policy_t policy_tx, policy_rx;
 	bool use_srtp;
 
+	void *rtpsock;
+	void *rtcpsock;
 	struct udp_helper *uh_rtp;   /**< UDP helper for RTP encryption    */
 	struct udp_helper *uh_rtcp;  /**< UDP helper for RTCP encryption   */
 	struct sdp_media *sdpm;
@@ -49,6 +51,8 @@ static void destructor(void *arg)
 	/* note: must be done before freeing socket */
 	mem_deref(st->uh_rtp);
 	mem_deref(st->uh_rtcp);
+	mem_deref(st->rtpsock);
+	mem_deref(st->rtcpsock);
 
 	if (st->srtp_tx)
 		srtp_dealloc(st->srtp_tx);
@@ -223,8 +227,7 @@ static bool menc_send_handler(int *err, struct sa *dst,
 
 
 /** Media Encryption - Decode */
-static bool menc_recv_handler(struct sa *src,
-			      struct mbuf *mb, void *arg)
+static bool menc_recv_handler(struct sa *src, struct mbuf *mb, void *arg)
 {
 	struct menc_st *st = arg;
 
@@ -283,9 +286,10 @@ static int sdp_enc(struct menc_st *st, struct sdp_media *m)
 
 
 static int alloc(struct menc_st **stp, struct menc *me, int proto,
-		 void *rtp_sock, void *rtcp_sock, struct sdp_media *sdpm)
+		 void *rtpsock, void *rtcpsock, struct sdp_media *sdpm)
 {
 	struct menc_st *st;
+	int layer = 10; /* above zero */
 	int err = 0;
 
 	if (proto != IPPROTO_UDP)
@@ -298,10 +302,18 @@ static int alloc(struct menc_st **stp, struct menc *me, int proto,
 	st->me = mem_ref(me);
 	st->sdpm = mem_ref(sdpm);
 
-	err  = udp_register_helper(&st->uh_rtp, rtp_sock, NULL, 10,
-				   menc_send_handler, menc_recv_handler, st);
-	err |= udp_register_helper(&st->uh_rtcp, rtcp_sock, NULL, 10,
-				   menc_send_rtcp, menc_recv_rtcp, st);
+	if (rtpsock) {
+		st->rtpsock = mem_ref(rtpsock);
+		err |= udp_register_helper(&st->uh_rtp, rtpsock, layer,
+					   menc_send_handler,
+					   menc_recv_handler, st);
+	}
+	if (rtcpsock) {
+		st->rtcpsock = mem_ref(rtcpsock);
+		err |= udp_register_helper(&st->uh_rtcp, rtcpsock, layer,
+					   menc_send_rtcp,
+					   menc_recv_rtcp, st);
+	}
 	if (err)
 		goto out;
 

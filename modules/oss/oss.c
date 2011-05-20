@@ -124,9 +124,9 @@ static int oss_reset(int fd, uint32_t srate, uint8_t ch, int frame_size,
 }
 
 
-static void auplay_destructor(void *data)
+static void auplay_destructor(void *arg)
 {
-	struct auplay_st *st = data;
+	struct auplay_st *st = arg;
 
 	if (st->run) {
 		st->run = false;
@@ -143,9 +143,9 @@ static void auplay_destructor(void *data)
 }
 
 
-static void ausrc_destructor(void *data)
+static void ausrc_destructor(void *arg)
 {
-	struct ausrc_st *st = data;
+	struct ausrc_st *st = arg;
 
 	if (-1 != st->fd) {
 		fd_close(st->fd);

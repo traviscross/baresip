@@ -3,7 +3,6 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
-#include <stdlib.h>
 #include <string.h>
 #include <portaudio.h>
 #include <re.h>
@@ -36,9 +35,6 @@ struct auplay_st {
 };
 
 
-static int pa_count = 0;
-static uint32_t read_device;
-static uint32_t write_device;
 static struct ausrc *ausrc;
 static struct auplay *auplay;
 
@@ -148,9 +144,9 @@ static int write_stream_open(struct auplay_st *st,
 }
 
 
-static void ausrc_destructor(void *data)
+static void ausrc_destructor(void *arg)
 {
-	struct ausrc_st *st = data;
+	struct ausrc_st *st = arg;
 
 	st->ready = false;
 
@@ -163,9 +159,9 @@ static void ausrc_destructor(void *data)
 }
 
 
-static void auplay_destructor(void *data)
+static void auplay_destructor(void *arg)
 {
-	struct auplay_st *st = data;
+	struct auplay_st *st = arg;
 
 	st->ready = false;
 
@@ -183,17 +179,10 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 		     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
-	uint32_t dev;
 	int err;
 
+	(void)device;
 	(void)errh;
-
-	dev = device ? (uint32_t)atoi(device) : read_device;
-
-	if (pa_count < 1) {
-		DEBUG_WARNING("no portaudio devices\n");
-		return ENODEV;
-	}
 
 	prm->fmt = AUFMT_S16LE;
 
@@ -205,7 +194,7 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	st->rh  = rh;
 	st->arg = arg;
 
-	err = read_stream_open(st, prm, dev);
+	err = read_stream_open(st, prm, Pa_GetDefaultInputDevice());
 	if (err)
 		goto out;
 
@@ -226,15 +215,9 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 		      auplay_write_h *wh, void *arg)
 {
 	struct auplay_st *st;
-	uint32_t dev;
 	int err;
 
-	dev = device ? (uint32_t)atoi(device) : write_device;
-
-	if (pa_count < 1) {
-		DEBUG_WARNING("no portaudio devices\n");
-		return ENODEV;
-	}
+	(void)device;
 
 	prm->fmt = AUFMT_S16LE;
 
@@ -246,7 +229,7 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 	st->wh  = wh;
 	st->arg = arg;
 
-	err = write_stream_open(st, prm, dev);
+	err = write_stream_open(st, prm, Pa_GetDefaultOutputDevice());
 	if (err)
 		goto out;
 
@@ -264,19 +247,20 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 
 static int pa_init(void)
 {
-	int i, err;
+	PaError error;
+	int i, n, err = 0;
 
-	err = Pa_Initialize();
-	if (paNoError != err) {
-		DEBUG_WARNING("PortAudio init: %s\n", Pa_GetErrorText(err));
-		return EINVAL;
+	error = Pa_Initialize();
+	if (paNoError != error) {
+		DEBUG_WARNING("PortAudio init: %s\n", Pa_GetErrorText(error));
+		return ENODEV;
 	}
 
-	pa_count = Pa_GetDeviceCount();
+	n = Pa_GetDeviceCount();
 
-	DEBUG_NOTICE("Portaudio driver: Device count %d\n", pa_count);
+	DEBUG_NOTICE("Portaudio driver: Device count %d\n", n);
 
-	for (i=0; i<pa_count; i++) {
+	for (i=0; i<n; i++) {
 		const PaDeviceInfo *info;
 
 		info = Pa_GetDeviceInfo(i);
@@ -284,14 +268,11 @@ static int pa_init(void)
 		DEBUG_INFO(" device %d: %s\n", i, info->name);
 	}
 
-	read_device  = Pa_GetDefaultInputDevice();
-	write_device = Pa_GetDefaultOutputDevice();
+	if (paNoDevice != Pa_GetDefaultInputDevice())
+		err |= ausrc_register(&ausrc, "portaudio", src_alloc);
 
-	DEBUG_INFO("pa: read_dev=%u write_dev=%u\n",
-		   read_device, write_device);
-
-	err  = ausrc_register(&ausrc, "pa", src_alloc);
-	err |= auplay_register(&auplay, "pa", play_alloc);
+	if (paNoDevice != Pa_GetDefaultOutputDevice())
+		err |= auplay_register(&auplay, "portaudio", play_alloc);
 
 	return err;
 }
@@ -299,8 +280,6 @@ static int pa_init(void)
 
 static int pa_close(void)
 {
-	pa_count = 0;
-
 	ausrc  = mem_deref(ausrc);
 	auplay = mem_deref(auplay);
 

@@ -43,11 +43,7 @@ struct conf config = {
 
 	/** Audio */
 	{
-#ifdef LINUX
-		"/dev/dsp",
-#else
 		"",
-#endif
 		{8000, 32000},
 		{1, 2},
 		0,
@@ -57,14 +53,11 @@ struct conf config = {
 
 	/** Video */
 	{
-#ifdef LINUX
-		"/dev/video0",
-#else
 		"",
-#endif
 		{352, 288},
 		384000,
-		25
+		25,
+		""
 	},
 
 	/** Jitter Buffer */
@@ -77,7 +70,8 @@ struct conf config = {
 		0xb8,
 		{1024, 49152},
 		{512000, 1024000},
-		true
+		true,
+		false
 	},
 
 	/** NAT Behavior Discovery */
@@ -169,14 +163,15 @@ static int conf_write_template(const char *file)
 	(void)re_fprintf(f, "#  addr-params:\n");
 	(void)re_fprintf(f, "#    ;outbound=sip:primary.example.com\n");
 	(void)re_fprintf(f, "#    ;regint=3600\n");
-	(void)re_fprintf(f, "#    ;sipnat={none,stun,turn}\n");
-	(void)re_fprintf(f, "#    ;medianat={none,stun,turn,ice}\n");
+	(void)re_fprintf(f, "#    ;sipnat={outbound}\n");
+	(void)re_fprintf(f, "#    ;medianat={stun,turn,ice}\n");
+	(void)re_fprintf(f, "#    ;rtpkeep={zero,stun,dyna,rtcp}\n");
 	(void)re_fprintf(f, "#    ;stunserver="
 			 "stun:[user:pass]@host[:port]\n");
-	(void)re_fprintf(f, "#    ;mediaenc={none,srtp,srtp-mand}\n");
+	(void)re_fprintf(f, "#    ;mediaenc={srtp,srtp-mand}\n");
 	(void)re_fprintf(f, "#    ;answermode={manual,early,auto}\n");
 	(void)re_fprintf(f, "#    ;ptime={10,20,30,40,...}\n");
-	(void)re_fprintf(f, "#    ;audio_codecs=pcmu,pcma,...\n");
+	(void)re_fprintf(f, "#    ;audio_codecs=speex/16000,pcma,...\n");
 	(void)re_fprintf(f, "#    ;video_codecs=h264,h263,...\n");
 	(void)re_fprintf(f, "#\n");
 	(void)re_fprintf(f, "# Examples:\n");
@@ -284,6 +279,7 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "#rtp_ports\t\t\t10000-20000\n");
 	(void)re_fprintf(f, "#rtp_bandwidth\t\t\t512-1024 # [kbit/s]\n");
 	(void)re_fprintf(f, "rtcp_enable\t\t\t1\n");
+	(void)re_fprintf(f, "rtcp_mux\t\t\t0\n");
 
 	(void)re_fprintf(f, "\n# NAT Behavior Discovery\n");
 	(void)re_fprintf(f, "natbd_interval\t\t0\t\t# in seconds\n");
@@ -298,8 +294,8 @@ static int conf_write_config_template(const char *file)
 
 #ifdef WIN32
 	(void)re_fprintf(f, "module_path\t\t\n");
-#elif defined (DARWIN)
-	(void)re_fprintf(f, "module_path\t\t/opt/local/lib/baresip/modules\n");
+#elif defined (PREFIX)
+	(void)re_fprintf(f, "module_path\t\t" PREFIX "/lib/baresip/modules\n");
 #else
 	(void)re_fprintf(f, "module_path\t\t/usr/lib/baresip/modules\n");
 #endif
@@ -314,7 +310,7 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "g722" MOD_EXT "\n");
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "g711" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "gsm" MOD_EXT "\n");
-	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "l16" MOD_EXT "\n");
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "l16" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "speex" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "celt" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "bv32" MOD_EXT "\n");
@@ -348,6 +344,7 @@ static int conf_write_config_template(const char *file)
 #else
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "avcodec" MOD_EXT "\n");
 #endif
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "vpx" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Video source modules\n");
 #ifdef USE_FFMPEG
@@ -375,9 +372,9 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "x11" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Media NAT modules\n");
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "stun" MOD_EXT "\n");
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "turn" MOD_EXT "\n");
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "ice" MOD_EXT "\n");
+	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "stun" MOD_EXT "\n");
+	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "turn" MOD_EXT "\n");
+	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "ice" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Media encoding modules\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "srtp" MOD_EXT "\n");
@@ -393,6 +390,7 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "speex_enhancement\t0 # 0-1\n");
 	(void)re_fprintf(f, "speex_vbr\t\t0 # Variable Bit Rate 0-1\n");
 	(void)re_fprintf(f, "speex_vad\t\t0 # Voice Activity Detection 0-1\n");
+	(void)re_fprintf(f, "speex_agc_level\t8000\n");
 
 	if (f)
 		(void)fclose(f);
@@ -551,7 +549,7 @@ static int dns_server_handler(const struct pl *pl, void *arg)
 
 	err = sa_decode(&sa, pl->p, pl->l);
 	if (err) {
-		DEBUG_WARNING("dns_server: coult not decode `%r'\n", pl);
+		DEBUG_WARNING("dns_server: could not decode `%r'\n", pl);
 		return err;
 	}
 
@@ -611,6 +609,8 @@ static int config_parse(struct conf *conf)
 	(void)get_video_size(conf, "video_size", &config.video.size);
 	(void)conf_get_u32(conf, "video_bitrate", &config.video.bitrate);
 	(void)conf_get_u32(conf, "video_fps", &config.video.fps);
+	(void)conf_get_str(conf, "video_exclude", config.video.exclude,
+			   sizeof(config.video.exclude));
 
 	/* Jitter buffer */
 	(void)conf_get_range(conf, "jitter_buffer_delay", &config.jbuf.delay);
@@ -624,8 +624,8 @@ static int config_parse(struct conf *conf)
 		config.avt.rtp_bandwidth.min *= 1024;
 		config.avt.rtp_bandwidth.max *= 1024;
 	}
-	if (0 == conf_get_u32(conf, "rtcp_enable", &v))
-		config.avt.rtcp_enable = !!v;
+	(void)conf_get_bool(conf, "rtcp_enable", &config.avt.rtcp_enable);
+	(void)conf_get_bool(conf, "rtcp_mux", &config.avt.rtcp_mux);
 
 	/* NAT Behavior Discovery */
 	(void)conf_get_u32(conf, "natbd_interval", &config.natbd.interval);

@@ -59,12 +59,22 @@ static void dns_refresh(void)
  */
 static void ipchange_handler(void *arg)
 {
-	struct sa la;
 	bool change = false;
 
 	(void)arg;
 
 	tmr_start(&net.tmr, net.interval * 1000, ipchange_handler, NULL);
+	change = net_check();
+	if (change && net.ch) {
+		net.ch(net.arg);
+	}
+}
+
+
+bool net_check(void)
+{
+	struct sa la;
+	bool change = false;
 
 	DEBUG_INFO("checking for IPv4 change, current: %s:%j\n",
 		   net.if_def, &net.laddr);
@@ -99,9 +109,7 @@ static void ipchange_handler(void *arg)
 	(void)net_rt_default_get(AF_INET6, net.if6_def, sizeof(net.if6_def));
 #endif
 
-	if (change && net.ch) {
-		net.ch(net.arg);
-	}
+	return change;
 }
 
 
@@ -157,7 +165,6 @@ int net_init(bool prefer_ipv6)
 	if (err) {
 		DEBUG_WARNING("net_default_source_addr_get: AF_INET (%s)\n",
 			      strerror(err));
-		return err;
 	}
 
 #ifdef HAVE_INET6
@@ -249,17 +256,19 @@ void net_change(uint32_t interval, net_change_h *ch, void *arg)
 }
 
 
-static int dns_debug(struct re_printf *pf)
+static int dns_debug(struct re_printf *pf, void *unused)
 {
 	struct sa nsv[4];
 	uint32_t i, nsn;
 	int err;
 
+	(void)unused;
+
 	nsn = ARRAY_SIZE(nsv);
 
 	err = dns_srv_get(NULL, 0, nsv, &nsn);
 	if (err)
-		return err;
+		nsn = 0;
 
 	err = re_hprintf(pf, " DNS Servers: (%u)\n", nsn);
 	for (i=0; i<nsn; i++)
@@ -276,6 +285,8 @@ static int dns_debug(struct re_printf *pf)
  *
  * @param pf     Print handler for debug output
  * @param unused Unused parameter
+ *
+ * @return 0 if success, otherwise errorcode
  */
 int net_debug(struct re_printf *pf, void *unused)
 {
@@ -295,7 +306,7 @@ int net_debug(struct re_printf *pf, void *unused)
 
 	err |= net_rt_debug(pf, NULL);
 
-	err |= dns_debug(pf);
+	err |= dns_debug(pf, NULL);
 
 	return err;
 }

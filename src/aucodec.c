@@ -1,8 +1,9 @@
 /**
- * @file aucodec.c  Audio codecs
+ * @file aucodec.c Audio Codec
  *
  * Copyright (C) 2010 Creytiv.com
  */
+
 #include <re.h>
 #include <baresip.h>
 #include "core.h"
@@ -16,9 +17,9 @@ struct aucodec_st {
 static struct list aucodecl = LIST_INIT;
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct aucodec *ac = data;
+	struct aucodec *ac = arg;
 
 	list_unlink(&ac->le);
 }
@@ -26,8 +27,8 @@ static void destructor(void *data)
 
 int aucodec_register(struct aucodec **ap, const char *pt, const char *name,
 		     uint32_t srate, uint8_t ch, const char *fmtp,
-		     aucodec_alloc_h *alloch,
-		     aucodec_enc_h *ench, aucodec_dec_h *dech)
+		     aucodec_alloc_h *alloch, aucodec_enc_h *ench,
+		     aucodec_dec_h *dech)
 {
 	struct aucodec *ac;
 
@@ -52,6 +53,7 @@ int aucodec_register(struct aucodec **ap, const char *pt, const char *name,
 	(void)re_printf("aucodec: %s %uHz %uch\n", name, srate, ch);
 
 	*ap = ac;
+
 	return 0;
 }
 
@@ -80,7 +82,8 @@ const struct aucodec *aucodec_find(const char *name, uint32_t srate, int ch)
 {
 	struct le *le;
 
-	for (le = aucodecl.head; le; le = le->next) {
+	for (le=aucodecl.head; le; le=le->next) {
+
 		struct aucodec *ac = le->data;
 
 		if (name && 0 != str_casecmp(name, ac->name))
@@ -92,7 +95,6 @@ const struct aucodec *aucodec_find(const char *name, uint32_t srate, int ch)
 		if (ch && ch != ac->ch)
 			continue;
 
-		/* Found */
 		return ac;
 	}
 
@@ -110,25 +112,13 @@ int aucodec_alloc(struct aucodec_st **sp, const char *name, uint32_t srate,
 		  int channels, struct aucodec_prm *encp,
 		  struct aucodec_prm *decp, const struct pl *sdp_fmtp)
 {
-	struct le *le;
+	struct aucodec *ac;
 
-	for (le = aucodecl.head; le; le = le->next) {
-		struct aucodec *ac = le->data;
+	ac = (struct aucodec *)aucodec_find(name, srate, channels);
+	if (!ac)
+		return ENOENT;
 
-		if (name && 0 != str_casecmp(name, ac->name))
-			continue;
-
-		if (srate && srate != ac->srate)
-			continue;
-
-		if (channels && channels != ac->ch)
-			continue;
-
-		/* Found */
-		return ac->alloch(sp, ac, encp, decp, sdp_fmtp);
-	}
-
-	return ENOENT;
+	return ac->alloch(sp, ac, encp, decp, sdp_fmtp);
 }
 
 
@@ -162,13 +152,13 @@ uint32_t aucodec_srate(const struct aucodec *ac)
 }
 
 
-uint8_t  aucodec_ch(const struct aucodec *ac)
+uint8_t aucodec_ch(const struct aucodec *ac)
 {
 	return ac ? ac->ch : 0;
 }
 
 
-struct aucodec *aucodec_get(struct aucodec_st *st)
+struct aucodec *aucodec_get(const struct aucodec_st *st)
 {
 	return st ? st->ac : NULL;
 }

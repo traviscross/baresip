@@ -3,6 +3,10 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#include <SystemConfiguration/SCNetworkReachability.h>
+#endif
 #include <string.h>
 #include <re.h>
 #include <baresip.h>
@@ -14,7 +18,6 @@
 
 
 struct mnat_sess {
-	enum ice_mode mode;
 	struct list medial;
 	struct sa srv;
 	struct stun_dns *dnsq;
@@ -38,17 +41,58 @@ struct mnat_media {
 	struct icem *icem;
 	void *sock1;
 	void *sock2;
+	bool complete;
 };
 
 
 static struct mnat *mnat;
 static struct {
+	char ifc[64];
+	enum ice_mode mode;
+	enum ice_nomination nom;
 	bool turn;
 	bool debug;
 } ice = {
+	"",
+	ICE_MODE_FULL,
+	ICE_NOMINATION_AGGRESSIVE,
 	true,
 	false
 };
+
+
+static void gather_handler(int err, uint16_t scode, const char *reason,
+			   void *arg);
+
+
+static bool is_cellular(const struct sa *laddr)
+{
+#ifdef __APPLE__
+	SCNetworkReachabilityRef r;
+	SCNetworkReachabilityFlags flags = 0;
+	bool cell = false;
+
+	r = SCNetworkReachabilityCreateWithAddressPair(NULL,
+						       &laddr->u.sa, NULL);
+	if (!r)
+		return false;
+
+	if (SCNetworkReachabilityGetFlags(r, &flags)) {
+
+#if TARGET_OS_IPHONE
+		if (flags & kSCNetworkReachabilityFlagsIsWWAN)
+			cell = true;
+#endif
+	}
+
+	CFRelease(r);
+
+	return cell;
+#else
+	(void)laddr;
+	return false;
+#endif
+}
 
 
 static void ice_printf(struct mnat_media *m, const char *fmt, ...)
@@ -61,6 +105,18 @@ static void ice_printf(struct mnat_media *m, const char *fmt, ...)
 	va_start(ap, fmt);
 	re_printf("%s: %v", m ? sdp_media_name(m->sdpm) : "ICE", fmt, &ap);
 	va_end(ap);
+}
+
+
+static bool stream_has_media(const struct sdp_media *sdpm)
+{
+	bool has;
+
+	has = sdp_media_rformat(sdpm, NULL) != NULL;
+	if (has)
+		return sdp_media_rport(sdpm) != 0;
+
+	return false;
 }
 
 
@@ -93,7 +149,7 @@ static int set_session_attributes(struct mnat_sess *s)
 {
 	int err = 0;
 
-	if (ICE_MODE_LITE == s->mode) {
+	if (ICE_MODE_LITE == ice.mode) {
 		err |= sdp_session_set_lattr(s->sdp, true,
 					     ice_attr_lite, NULL);
 	}
@@ -152,16 +208,66 @@ static int set_media_attributes(struct mnat_media *m)
 }
 
 
+static bool if_handler(const char *ifname, const struct sa *sa, void *arg)
+{
+	struct mnat_media *m = arg;
+	uint16_t lprio;
+	int err = 0;
+
+	/* Skip loopback and link-local addresses */
+	if (sa_is_loopback(sa) || sa_is_linklocal(sa))
+		return false;
+
+	/* Interface filter */
+	if (str_len(ice.ifc)) {
+
+		if (0 != str_casecmp(ifname, ice.ifc)) {
+			re_printf("ICE: skip interface: %s\n", ifname);
+			return false;
+		}
+	}
+
+	lprio = is_cellular(sa) ? 0 : 10;
+
+	DEBUG_NOTICE("%s: added interface: %s:%j (local prio %u)\n",
+		     sdp_media_name(m->sdpm), ifname, sa, lprio);
+
+	if (m->sock1)
+		err |= icem_cand_add(m->icem, 1, lprio, ifname, sa);
+	if (m->sock2)
+		err |= icem_cand_add(m->icem, 2, lprio, ifname, sa);
+
+	if (err) {
+		DEBUG_WARNING("%s:%j: icem_cand_add: %s\n",
+			      ifname, sa, strerror(err));
+	}
+
+	return false;
+}
+
+
 static int media_start(struct mnat_sess *sess, struct mnat_media *m)
 {
-	int err;
+	int err = 0;
 
-	if (ice.turn) {
-		err = icem_gather_relay(m->icem, &sess->srv,
-					sess->user, sess->pass);
-	}
-	else {
-		err = icem_gather_srflx(m->icem, &sess->srv);
+	net_if_apply(if_handler, m);
+
+	switch (ice.mode) {
+
+	default:
+	case ICE_MODE_FULL:
+		if (ice.turn) {
+			err = icem_gather_relay(m->icem, &sess->srv,
+						sess->user, sess->pass);
+		}
+		else {
+			err = icem_gather_srflx(m->icem, &sess->srv);
+		}
+		break;
+
+	case ICE_MODE_LITE:
+		gather_handler(0, 0, NULL, m);
+		break;
 	}
 
 	return err;
@@ -211,7 +317,6 @@ static int session_alloc(struct mnat_sess **sessp, struct dnsc *dnsc,
 	if (!sess)
 		return ENOMEM;
 
-	sess->mode   = ICE_MODE_FULL;
 	sess->sdp    = mem_ref(ss);
 	sess->estabh = estabh;
 	sess->arg    = arg;
@@ -221,9 +326,12 @@ static int session_alloc(struct mnat_sess **sessp, struct dnsc *dnsc,
 	if (err)
 		goto out;
 
-	err = ice_alloc(&sess->ice, sess->mode, offerer);
+	err = ice_alloc(&sess->ice, ice.mode, offerer);
 	if (err)
 		goto out;
+
+	ice_conf(sess->ice)->nom = ice.nom;
+	ice_conf(sess->ice)->debug = ice.debug;
 
 	err = set_session_attributes(sess);
 	if (err)
@@ -253,29 +361,86 @@ static bool verify_peer_ice(struct mnat_sess *ms)
 		const struct sa *raddr1;
 		struct sa raddr2;
 
+		if (!stream_has_media(m->sdpm)) {
+			DEBUG_NOTICE("stream '%s' is disabled -- ignore\n",
+				     sdp_media_name(m->sdpm));
+			continue;
+		}
+
 		raddr1 = sdp_media_raddr(m->sdpm);
 		sdp_media_raddr_rtcp(m->sdpm, &raddr2);
 
-		if (m->sock1 && !icem_verify_support(m->icem, 1, raddr1))
+		if (m->sock1 && !icem_verify_support(m->icem, 1, raddr1)) {
+			DEBUG_WARNING("%s.1: no remote candidates found"
+				      " (address = %J)\n",
+				      sdp_media_name(m->sdpm), raddr1);
 			return false;
+		}
 
-		if (m->sock2 && !icem_verify_support(m->icem, 2, &raddr2))
+		if (m->sock2 && !icem_verify_support(m->icem, 2, &raddr2)) {
+			DEBUG_WARNING("%s.2: no remote candidates found"
+				      " (address = %J)\n",
+				      sdp_media_name(m->sdpm), &raddr2);
 			return false;
+		}
 	}
 
 	return true;
 }
 
 
-static bool mc_equal(struct mnat_media *m, const struct sa *addr1,
-		     const struct sa *addr2)
+/*
+ * Update SDP Media with local addresses
+ */
+static bool refresh_laddr(struct mnat_media *m,
+			  const struct sa *addr1,
+			  const struct sa *addr2)
 {
-	if (m->sock1 && !sa_cmp(&m->addr1, addr1, SA_ALL))
-		return false;
-	if (m->sock2 && !sa_cmp(&m->addr2, addr2, SA_ALL))
-		return false;
+	bool changed = false;
 
-	return true;
+	if (m->sock1 && addr1) {
+
+		if (!sa_cmp(&m->addr1, addr1, SA_ALL)) {
+			changed = true;
+
+			if (sa_isset(&m->addr1, SA_ALL)) {
+				ice_printf(m,
+					   "comp1 local changed: %J ---> %J\n",
+					   &m->addr1, addr1);
+			}
+			else {
+				ice_printf(m,
+					   "comp1 setting local: %J\n",
+					   addr1);
+			}
+		}
+
+		sa_cpy(&m->addr1, addr1);
+		sdp_media_set_laddr(m->sdpm, &m->addr1);
+	}
+
+	if (m->sock2 && addr2) {
+
+		if (!sa_cmp(&m->addr2, addr2, SA_ALL)) {
+			changed = true;
+
+			if (sa_isset(&m->addr2, SA_ALL)) {
+				ice_printf(m,
+					   "comp2 local changed: %J ---> %J\n",
+					   &m->addr2, addr2);
+			}
+			else {
+				ice_printf(m,
+					   "comp2 setting local: %J\n",
+					   addr2);
+			}
+		}
+
+		sa_cpy(&m->addr2, addr2);
+		sdp_media_set_laddr_rtcp(m->sdpm, &m->addr2);
+	}
+
+	return changed;
 }
 
 
@@ -289,14 +454,12 @@ static void gather_handler(int err, uint16_t scode, const char *reason,
 			      strerror(err), scode, reason);
 	}
 	else {
-		if (m->sock1) {
-			sa_cpy(&m->addr1, icem_cand_default(m->icem, 1));
-			sdp_media_set_laddr(m->sdpm, &m->addr1);
-		}
-		if (m->sock2) {
-			sa_cpy(&m->addr2, icem_cand_default(m->icem, 2));
-			sdp_media_set_laddr_rtcp(m->sdpm, &m->addr2);
-		}
+		refresh_laddr(m,
+			      icem_cand_default(m->icem, 1),
+			      icem_cand_default(m->icem, 2));
+
+		DEBUG_NOTICE("%s: Default local candidates: %J / %J\n",
+			     sdp_media_name(m->sdpm), &m->addr1, &m->addr2);
 
 		set_media_attributes(m);
 
@@ -312,38 +475,32 @@ static void conncheck_handler(int err, bool update, void *arg)
 {
 	struct mnat_media *m = arg;
 	struct mnat_sess *sess = m->sess;
+	struct le *le;
+
+	DEBUG_NOTICE("%s: Conncheck is complete\n", sdp_media_name(m->sdpm));
 
 	if (err) {
 		DEBUG_WARNING("conncheck failed: %s\n", strerror(err));
 	}
 	else {
-		const struct sa *addr1, *addr2;
+		bool changed;
 
-		addr1 = icem_selected_laddr(m->icem, 1);
-		addr2 = icem_selected_laddr(m->icem, 2);
+		m->complete = true;
 
-		ice_printf(m, "Selected Local addr: RTP=%J RTCP=%J\n",
-			   addr1, addr2);
-		ice_printf(m, "%H", icem_debug, m->icem);
-
-		/* check if MC line changed */
-		if (!mc_equal(m, addr1, addr2))
+		changed = refresh_laddr(m,
+					icem_selected_laddr(m->icem, 1),
+					icem_selected_laddr(m->icem, 2));
+		if (changed)
 			sess->send_reinvite = true;
-
-		if (m->sock1) {
-			sa_cpy(&m->addr1, addr1);
-			sdp_media_set_laddr(m->sdpm, addr1);
-		}
-		if (m->sock2) {
-			sa_cpy(&m->addr2, addr2);
-			sdp_media_set_laddr_rtcp(m->sdpm, addr2);
-		}
 
 		set_media_attributes(m);
 
-		/* wait for all media lines to settle */
-		if (--sess->mediac)
-			return;
+		/* Check all conncheck flags */
+		LIST_FOREACH(&sess->medial, le) {
+			struct mnat_media *mx = le->data;
+			if (!mx->complete)
+				return;
+		}
 	}
 
 	/* call estab-handler and send re-invite */
@@ -356,47 +513,50 @@ static void conncheck_handler(int err, bool update, void *arg)
 
 static int ice_start(struct mnat_sess *sess)
 {
+	struct le *le;
 	int err;
-
-	if (sess->started)
-		return 0;
 
 	ice_printf(NULL, "ICE Start: %H", ice_debug, sess->ice);
 
-	sess->mediac = list_count(&sess->medial);
-	err = ice_conncheck_start(sess->ice);
-	if (err)
-		return err;
+	/* Update SDP media */
+	if (sess->started) {
+
+		LIST_FOREACH(&sess->medial, le) {
+			struct mnat_media *m = le->data;
+
+			icem_update(m->icem);
+
+			refresh_laddr(m,
+				      icem_selected_laddr(m->icem, 1),
+				      icem_selected_laddr(m->icem, 2));
+
+			set_media_attributes(m);
+		}
+
+		return 0;
+	}
+
+	/* Clear all conncheck flags */
+	LIST_FOREACH(&sess->medial, le) {
+		struct mnat_media *m = le->data;
+
+		if (stream_has_media(m->sdpm)) {
+			m->complete = false;
+
+			if (ice.mode == ICE_MODE_FULL) {
+				err = icem_conncheck_start(m->icem);
+				if (err)
+					return err;
+			}
+		}
+		else {
+			m->complete = true;
+		}
+	}
 
 	sess->started = true;
 
 	return 0;
-}
-
-
-static bool if_handler(const char *ifname, const struct sa *sa, void *arg)
-{
-	struct mnat_media *m = arg;
-	int err = 0;
-
-	/* Skip loopback and link-local addresses */
-	if (sa_is_loopback(sa) || sa_is_linklocal(sa))
-		return false;
-
-	/* todo: could use different local priority for different
-	   link types, i.e. VPN or 3G link */
-
-	if (m->sock1)
-		err |= icem_cand_add(m->icem, 1, 0, ifname, sa);
-	if (m->sock2)
-		err |= icem_cand_add(m->icem, 2, 0, ifname, sa);
-
-	if (err) {
-		DEBUG_WARNING("%s:%j: icem_cand_add: %s\n",
-			      ifname, sa, strerror(err));
-	}
-
-	return false;
 }
 
 
@@ -425,12 +585,12 @@ static int media_alloc(struct mnat_media **mp, struct mnat_sess *sess,
 	if (err)
 		goto out;
 
+	icem_set_name(m->icem, sdp_media_name(sdpm));
+
 	if (sock1)
 		err |= icem_comp_add(m->icem, 1, sock1);
 	if (sock2)
 		err |= icem_comp_add(m->icem, 2, sock2);
-
-	net_if_apply(if_handler, m);
 
 	if (sa_isset(&sess->srv, SA_ALL))
 		err = media_start(sess, m);
@@ -453,6 +613,7 @@ static bool sdp_attr_handler(const char *name, const char *value, void *arg)
 	return 0 != ice_sdp_decode(sess->ice, name, value);
 }
 
+
 static bool media_attr_handler(const char *name, const char *value, void *arg)
 {
 	struct mnat_media *m = arg;
@@ -460,19 +621,42 @@ static bool media_attr_handler(const char *name, const char *value, void *arg)
 }
 
 
+static int enable_turn_channels(struct mnat_sess *sess)
+{
+	struct le *le;
+	int err = 0;
+
+	for (le = sess->medial.head; le; le = le->next) {
+
+		struct mnat_media *m = le->data;
+		struct sa raddr1, raddr2;
+
+		set_media_attributes(m);
+
+		raddr1 = *sdp_media_raddr(m->sdpm);
+		sdp_media_raddr_rtcp(m->sdpm, &raddr2);
+
+		if (m->sock1 && sa_isset(&raddr1, SA_ALL))
+			err |= icem_add_chan(m->icem, 1, &raddr1);
+		if (m->sock2 && sa_isset(&raddr2, SA_ALL))
+			err |= icem_add_chan(m->icem, 2, &raddr2);
+	}
+
+	return err;
+}
+
+
+/** This can be called several times */
 static int update(struct mnat_sess *sess)
 {
 	struct le *le;
 	int err = 0;
 
-	if (!sess)
-		return EINVAL;
-
 	/* SDP session */
 	(void)sdp_session_rattr_apply(sess->sdp, NULL, sdp_attr_handler, sess);
 
 	/* SDP medialines */
-	for (le=sess->medial.head; le; le=le->next) {
+	for (le = sess->medial.head; le; le = le->next) {
 		struct mnat_media *m = le->data;
 
 		sdp_media_rattr_apply(m->sdpm, NULL, media_attr_handler, m);
@@ -484,27 +668,16 @@ static int update(struct mnat_sess *sess)
 	}
 	else if (ice.turn) {
 		DEBUG_NOTICE("ICE not supported by peer, fallback to TURN\n");
-
-		for (le=sess->medial.head; le; le=le->next) {
-
-			struct mnat_media *m = le->data;
-			struct sa raddr1, raddr2;
-
-			raddr1 = *sdp_media_raddr(m->sdpm);
-			sdp_media_raddr_rtcp(m->sdpm, &raddr2);
-
-			if (m->sock1 && sa_isset(&raddr1, SA_ALL))
-				err |= icem_add_chan(m->icem, 1, &raddr1);
-			if (m->sock2 && sa_isset(&raddr2, SA_ALL))
-				err |= icem_add_chan(m->icem, 2, &raddr2);
-		}
-
-		if (err) {
-			DEBUG_WARNING("icem_add_perm: %s\n", strerror(err));
-		}
+		err = enable_turn_channels(sess);
 	}
 	else {
 		DEBUG_WARNING("ICE not supported by peer\n");
+
+		LIST_FOREACH(&sess->medial, le) {
+			struct mnat_media *m = le->data;
+
+			set_media_attributes(m);
+		}
 	}
 
 	return err;
@@ -513,6 +686,33 @@ static int update(struct mnat_sess *sess)
 
 static int module_init(void)
 {
+#ifdef MODULE_CONF
+	struct pl pl;
+
+	conf_get_str(conf_cur(), "ice_interface", ice.ifc, sizeof(ice.ifc));
+	conf_get_bool(conf_cur(), "ice_turn", &ice.turn);
+	conf_get_bool(conf_cur(), "ice_debug", &ice.debug);
+
+	if (!conf_get(conf_cur(), "ice_nomination", &pl)) {
+		if (0 == pl_strcasecmp(&pl, "regular"))
+			ice.nom = ICE_NOMINATION_REGULAR;
+		else if (0 == pl_strcasecmp(&pl, "aggressive"))
+			ice.nom = ICE_NOMINATION_AGGRESSIVE;
+		else {
+			DEBUG_WARNING("unknown nomination: %r\n", &pl);
+		}
+	}
+	if (!conf_get(conf_cur(), "ice_mode", &pl)) {
+		if (!pl_strcasecmp(&pl, "full"))
+			ice.mode = ICE_MODE_FULL;
+		else if (!pl_strcasecmp(&pl, "lite"))
+			ice.mode = ICE_MODE_LITE;
+		else {
+			DEBUG_WARNING("unknown mode: %r\n", &pl);
+		}
+	}
+#endif
+
 	return mnat_register(&mnat, "ice", "+sip.ice",
 			     session_alloc, media_alloc, update);
 }

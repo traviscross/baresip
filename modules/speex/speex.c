@@ -58,9 +58,9 @@ static struct {
 };
 
 
-static void speex_destructor(void *data)
+static void speex_destructor(void *arg)
 {
-	struct aucodec_st *st = data;
+	struct aucodec_st *st = arg;
 
 	/* Encoder */
 	speex_bits_destroy(&st->enc.bits);

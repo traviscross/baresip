@@ -17,7 +17,8 @@ $(MOD)_SRCS	+= util.c
 CFLAGS		+= -DUSE_SDL
 $(MOD)_LFLAGS	+= -lSDL
 ifeq ($(OS),darwin)
-$(MOD)_LFLAGS	+= -lSDLmain -lobjc \
+# note: APP_LFLAGS is needed, as main.o links to -lSDLmain
+APP_LFLAGS	+= -lSDL -lSDLmain -lobjc \
 	-framework CoreFoundation -framework Foundation -framework Cocoa
 endif
 

@@ -30,6 +30,7 @@ int audio_fmt(enum aufmt fmt)
 int bytesps(enum aufmt fmt)
 {
 	switch (fmt) {
+
 	case AUFMT_S16LE: return 2;
 	case AUFMT_PCMA:  return 1;
 	case AUFMT_PCMU:  return 1;

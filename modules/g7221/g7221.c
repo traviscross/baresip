@@ -11,7 +11,9 @@
 /*
  * RFC 5577 -- RTP Payload Format for ITU-T Recommendation G.722.1
  *
- * Source: http://fisheye.freeswitch.org/browse/FreeSWITCH/libs/libg722_1
+ * Download Source code:
+ *
+ *     http://www.soft-switch.org/downloads/voipcodecs/g722_1-0.0.1.tar.gz
  */
 
 enum {DEFAULT_BITRATE = 32000};
@@ -25,9 +27,9 @@ struct aucodec_st {
 static struct aucodec *g7221[2];
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct aucodec_st *st = data;
+	struct aucodec_st *st = arg;
 
 	mem_deref(st->ac);
 }
@@ -129,7 +131,8 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 		re_printf("g722_decode: nsamp=%d\n", nsamp);
 	}
 
-	mbuf_skip_to_end(src);
+	if (src)
+		mbuf_skip_to_end(src);
 	if (nsamp > 0)
 		mbuf_set_end(dst, dst->end + nsamp*2);
 

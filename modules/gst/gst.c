@@ -76,6 +76,10 @@ static gboolean bus_watch_handler(GstBus *bus, GstMessage *msg, gpointer data)
 {
 	struct ausrc_st *st = data;
 	GMainLoop *loop = st->loop;
+	GstTagList *tag_list;
+	gchar *title;
+	GError *err;
+	gchar *d;
 
 	(void)bus;
 
@@ -96,17 +100,14 @@ static gboolean bus_watch_handler(GstBus *bus, GstMessage *msg, gpointer data)
 		}
 		break;
 
-	case GST_MESSAGE_ERROR: {
-		GError *err;
-		gchar *debug;
-
-		gst_message_parse_error(msg, &err, &debug);
+	case GST_MESSAGE_ERROR:
+		gst_message_parse_error(msg, &err, &d);
 
 		DEBUG_WARNING("Error: %d(%s) message=%s\n", err->code,
 			      strerror(err->code), err->message);
-		DEBUG_WARNING("Debug: %s\n", debug);
+		DEBUG_WARNING("Debug: %s\n", d);
 
-		g_free(debug);
+		g_free(d);
 
 		/* Call error handler */
 		if (st->errh)
@@ -117,34 +118,17 @@ static gboolean bus_watch_handler(GstBus *bus, GstMessage *msg, gpointer data)
 		st->run = false;
 		g_main_loop_quit(loop);
 		break;
-	}
 
-	case GST_MESSAGE_TAG: {
-		GstTagList *tag_list;
-		gchar *title;
-
+	case GST_MESSAGE_TAG:
 		gst_message_parse_tag(msg, &tag_list);
 
 		if (gst_tag_list_get_string(tag_list, GST_TAG_TITLE, &title)) {
 			DEBUG_NOTICE("Title: %s\n", title);
-#if 0
-			if (st->tagh)
-				st->tagh(title, st->arg);
-#endif
 			g_free(title);
 		}
-	}
-		break;
-
-	case GST_MESSAGE_BUFFERING:
-		break;
-
-	case GST_MESSAGE_STATE_CHANGED:
 		break;
 
 	default:
-		DEBUG_INFO("Bus: message type (%s)\n",
-			   gst_message_type_get_name(GST_MESSAGE_TYPE(msg)));
 		break;
 	}
 
@@ -346,9 +330,9 @@ static int gst_setup(struct ausrc_st *st)
 }
 
 
-static void gst_destructor(void *data)
+static void gst_destructor(void *arg)
 {
-	struct ausrc_st *st = data;
+	struct ausrc_st *st = arg;
 
 	if (st->run) {
 		st->run = false;

@@ -1,8 +1,11 @@
 /**
  * @file main.c  Main application code
  *
- * Copyright (C) 2010 Creytiv.com
+ * Copyright (C) 2010 - 2011 Creytiv.com
  */
+#ifdef SOLARIS
+#define __EXTENSIONS__ 1
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #ifdef HAVE_UNISTD_H
@@ -10,9 +13,6 @@
 #endif
 #if defined(DARWIN) && defined(USE_SDL)
 #include <SDL/SDL_main.h>
-#endif
-#ifdef SOLARIS
-#define __EXTENSIONS__ 1
 #endif
 #include <string.h>
 #ifdef HAVE_GETOPT
@@ -173,7 +173,7 @@ static void net_change_handler(void *arg)
 
 	re_printf("IP-address changed: %j\n", net_laddr());
 
-	ua_reset_transp();
+	ua_reset_transp(true, true);
 }
 
 
@@ -228,6 +228,7 @@ static void app_close(void)
 	ui_close();
 	contact_close();
 	net_close();
+	play_close();
 	audio_loop_test(true);
 #ifdef USE_VIDEO
 	video_loop_test(true);
@@ -298,7 +299,7 @@ int main(int argc, char *argv[])
 	int err;
 
 	(void)re_fprintf(stderr, "baresip v%s"
-			 " Copyright (C) 2010"
+			 " Copyright (C) 2010 - 2011"
 			 " Alfred E. Heggestad <aeh@db.org>\n",
 			 VERSION);
 
@@ -376,7 +377,7 @@ int main(int argc, char *argv[])
 
 	/* Automatically call peer uri if set */
 	if (app.peeruri) {
-		err = ua_connect(ua_cur(), app.peeruri);
+		err = ua_connect(ua_cur(), app.peeruri, NULL, VIDMODE_ON);
 		if (err) {
 			DEBUG_WARNING("connect failed: %s\n", strerror(err));
 		}

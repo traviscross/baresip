@@ -27,6 +27,7 @@
 
 enum {
 	SRATE = 90000,
+	MAX_MUTED_FRAMES = 3,
 };
 
 
@@ -63,18 +64,21 @@ struct video {
 	struct tmr tmr;         /**< Timer for frame-rate estimation      */
 	size_t max_rtp_size;    /**< Maximum size of outgoing RTP packets */
 	char *peer;             /**< Peer URI                             */
+	bool shuttered;         /**< Video source is shuttered            */
 };
 
 
 /** Video stream - transmitter/encoder direction */
 struct vtx {
 	struct video *video;               /**< Parent                    */
-	struct vidcodec_prm enc_prm;       /**< Encoder parameters        */
 	struct vidcodec_st *enc;           /**< Current video encoder     */
-	struct vidsrc_prm vsrc_param;      /**< Video source parameters   */
+	struct vidsrc_prm vsrc_prm;        /**< Video source parameters   */
 	struct vidsrc_st *vsrc;            /**< Video source              */
 	struct vidisp_st *selfview;        /**< Video selfview            */
+	struct vidisp_st *pip;             /**< Picture-in-picture        */
+	struct lock *lock;                 /**< Lock PIP resource         */
 	struct vidframe *mute_frame;       /**< Frame with muted video    */
+	int muted_frames;                  /**< # of muted frames sent    */
 	uint8_t pt_tx;                     /**< Outgoing RTP payload type */
 	uint32_t ts_tx;                    /**< Outgoing RTP timestamp    */
 	bool picup;                        /**< Send picture update       */
@@ -87,39 +91,46 @@ struct vtx {
 /** Video stream - receiver/decoder direction */
 struct vrx {
 	struct video *video;               /**< Parent                    */
-	struct vidcodec_prm dec_prm;       /**< Decoder parameters        */
 	struct vidcodec_st *dec;           /**< Current video decoder     */
 	struct vidisp_prm vidisp_prm;      /**< Video display parameters  */
 	struct vidisp_st *vidisp;          /**< Video display             */
+	enum vidorient orient;             /**< Display orientation       */
+	bool fullscreen;                   /**< Fullscreen flag           */
 	uint8_t pt_rx;                     /**< Incoming RTP payload type */
 	int frames;                        /**< Number of frames received */
 	int efps;                          /**< Estimated frame-rate      */
 };
 
 
-static void vtx_destructor(void *data)
+static void vtx_destructor(void *arg)
 {
-	struct vtx *vtx = data;
+	struct vtx *vtx = arg;
 
 	mem_deref(vtx->vsrc);  /* Note: Must be destroyed first */
+
+	lock_write_get(vtx->lock);
+	vtx->pip = mem_deref(vtx->pip);
+	lock_rel(vtx->lock);
+	mem_deref(vtx->lock);
+
 	mem_deref(vtx->selfview);
 	mem_deref(vtx->mute_frame);
 	mem_deref(vtx->enc);
 }
 
 
-static void vrx_destructor(void *data)
+static void vrx_destructor(void *arg)
 {
-	struct vrx *vrx = data;
+	struct vrx *vrx = arg;
 
 	mem_deref(vrx->dec);
 	mem_deref(vrx->vidisp);
 }
 
 
-static void video_destructor(void *data)
+static void video_destructor(void *arg)
 {
-	struct video *v = data;
+	struct video *v = arg;
 
 	video_stop(v);
 	tmr_cancel(&v->tmr);
@@ -131,6 +142,22 @@ static void video_destructor(void *data)
 }
 
 
+static int get_fps(const struct video *v)
+{
+	const char *attr;
+
+	/* RFC4566 */
+	attr = sdp_media_rattr(stream_sdpmedia(v->strm), "framerate");
+	if (attr) {
+		/* NOTE: fractional values are ignored */
+		const double fps = atof(attr);
+		return (int)fps;
+	}
+	else
+		return config.video.fps;
+}
+
+
 #if ENABLE_ENCODER
 /**
  * Encode video and send via RTP stream
@@ -139,10 +166,9 @@ static void video_destructor(void *data)
  */
 static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
 {
-	struct video *v = vtx->video;
 	int err;
 
-	if (!vtx->enc || !stream_is_active(v->strm))
+	if (!vtx->enc)
 		return;
 
 	/* Encode the whole picture frame */
@@ -152,7 +178,7 @@ static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
 		return;
 	}
 
-	vtx->ts_tx += (SRATE/vtx->enc_prm.fps);
+	vtx->ts_tx += (SRATE/vtx->vsrc_prm.fps);
 	vtx->picup = false;
 }
 
@@ -169,15 +195,22 @@ static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
 	++vtx->frames;
 
 	/* Is the video muted? If so insert video mute image */
-	if (vtx->muted) {
+	if (vtx->muted)
 		frame = vtx->mute_frame;
-	}
 
+	lock_write_get(vtx->lock);
 	if (vtx->selfview)
 		(void)vidisp_display(vtx->selfview, "", frame);
+	if (vtx->pip)
+		(void)vidisp_display(vtx->pip, "", frame);
+	lock_rel(vtx->lock);
+
+	if (vtx->muted && vtx->muted_frames >= MAX_MUTED_FRAMES)
+		return;
 
 	/* Encode and send */
 	encode_rtp_send(vtx, frame);
+	vtx->muted_frames++;
 }
 
 
@@ -195,20 +228,27 @@ static void vidsrc_error_handler(int err, void *arg)
 static int vtx_alloc(struct vtx **vtxp, struct video *video)
 {
 	struct vtx *vtx;
+	int err;
 
 	vtx = mem_zalloc(sizeof(*vtx), vtx_destructor);
 	if (!vtx)
 		return ENOMEM;
 
+	err = lock_alloc(&vtx->lock);
+	if (err)
+		goto out;
+
 	vtx->video = video;
 	vtx->ts_tx = 160;
 	vtx->pt_tx = PT_NONE;
-	vtx->enc_prm.size = config.video.size;
-	vtx->enc_prm.fps = config.video.fps;
 
-	*vtxp = vtx;
+ out:
+	if (err)
+		mem_deref(vtx);
+	else
+		*vtxp = vtx;
 
-	return 0;
+	return err;
 }
 
 
@@ -220,10 +260,9 @@ static int vrx_alloc(struct vrx **vrxp, struct video *video)
 	if (!vrx)
 		return ENOMEM;
 
-	vrx->video = video;
-	vrx->pt_rx = PT_NONE;
-	vrx->dec_prm.size = config.video.size;
-	vrx->dec_prm.fps = config.video.fps;
+	vrx->video  = video;
+	vrx->pt_rx  = PT_NONE;
+	vrx->orient = VIDORIENT_PORTRAIT;
 
 	*vrxp = vrx;
 
@@ -267,7 +306,8 @@ static int video_stream_decode(struct vrx *vrx, const struct rtp_header *hdr,
 	if (!frame.valid)
 		return 0;
 
-	err |= vidisp_display(vrx->vidisp, v->peer, &frame);
+	err = vidisp_display(vrx->vidisp, v->peer, &frame);
+
 	++vrx->frames;
 
 	return err;
@@ -306,7 +346,8 @@ static void stream_recv_handler(const struct rtp_header *hdr,
 	struct video *v = arg;
 	int err;
 
-	MAGIC_CHECK(v);
+	if (!mb)
+		goto out;
 
 	/* Video payload-type changed? */
 	if (hdr->pt == v->vrx->pt_rx)
@@ -321,9 +362,13 @@ static void stream_recv_handler(const struct rtp_header *hdr,
 }
 
 
-int video_alloc(struct video **vp, struct call *call)
+int video_alloc(struct video **vp, struct call *call,
+		struct sdp_session *sdp_sess, int label,
+		const struct mnat *mnat, struct mnat_sess *mnat_sess,
+		const struct menc *menc, const char *content)
 {
 	struct video *v;
+	struct le *le;
 	int err = 0;
 
 	if (!vp)
@@ -337,7 +382,25 @@ int video_alloc(struct video **vp, struct call *call)
 
 	tmr_init(&v->tmr);
 
-	err = stream_alloc(&v->strm, call, "video", 2, stream_recv_handler, v);
+	err = stream_alloc(&v->strm, call, sdp_sess, "video", label,
+			   mnat, mnat_sess, menc,
+			   stream_recv_handler, v);
+	if (err)
+		goto out;
+
+	err |= sdp_media_set_lattr(stream_sdpmedia(v->strm), true,
+				   "framerate", "%d", config.video.fps);
+
+	/* RFC 4585 */
+	err |= sdp_media_set_lattr(stream_sdpmedia(v->strm), true,
+				   "rtcp-fb", "* nack pli");
+
+	/* RFC 4796 */
+	if (content) {
+		err |= sdp_media_set_lattr(stream_sdpmedia(v->strm), true,
+					   "content", "%s", content);
+	}
+
 	if (err)
 		goto out;
 
@@ -347,6 +410,16 @@ int video_alloc(struct video **vp, struct call *call)
 		goto out;
 
 	v->max_rtp_size = 1024;
+
+	/* Video codecs */
+	for (le = list_head(ua_vidcodecl(call_get_ua(call)));
+	     le;
+	     le=le->next) {
+		struct vidcodec *vc = le->data;
+		err |= sdp_format_add(NULL, stream_sdpmedia(v->strm), false,
+				      vc->pt, vc->name, 90000, 1,
+				      NULL, vc, false, "%s", vc->fmtp);
+	}
 
  out:
 	if (err)
@@ -376,18 +449,26 @@ static void vidisp_resize_handler(const struct vidsz *sz, void *arg)
 
 	(void)re_printf("resize: %u x %u\n", sz->w, sz->h);
 
-	/* TODO: update wanted picturesize and send re-invite to peer */
+	/* XXX: update wanted picturesize and send re-invite to peer */
 }
 
 
 /* Set the video display - can be called multiple times */
 static int set_vidisp(struct vrx *vrx)
 {
+	vrx->vidisp = mem_deref(vrx->vidisp);
+
+	/* Video Display */
 	vrx->vidisp_prm.view = NULL;
-	if (!vrx->vidisp) {
-		return vidisp_alloc(&vrx->vidisp, &vrx->vidisp_prm, NULL, NULL,
-				    vidisp_input_handler,
-				    vidisp_resize_handler, vrx);
+
+	if (!vrx->video->shuttered && !vrx->vidisp) {
+		struct vidisp *vd = (struct vidisp *)vidisp_find(NULL);
+		if (!vd)
+			return ENOENT;
+
+		return vd->alloch(&vrx->vidisp, NULL, vd, &vrx->vidisp_prm,
+				  NULL, vidisp_input_handler,
+				  vidisp_resize_handler, vrx);
 	}
 
 	return 0;
@@ -397,24 +478,33 @@ static int set_vidisp(struct vrx *vrx)
 
 #if ENABLE_ENCODER
 /* Set the encoder format - can be called multiple times */
-static int set_encoder_format(struct vtx *vtx, const char *dev,
-			      struct vidsz *size)
+static int set_encoder_format(struct vtx *vtx, const char *src,
+			      const char *dev, struct vidsz *size)
 {
+	struct vidsrc *vs = (struct vidsrc *)vidsrc_find(src);
 	int err;
 
-	vtx->vsrc_param.size = *size;
-	vtx->vsrc_param.fps  = config.video.fps;
+	if (!vs)
+		return ENOENT;
+
+	vtx->vsrc_prm.size   = *size;
+	vtx->vsrc_prm.fps    = get_fps(vtx->video);
+	vtx->vsrc_prm.orient = VIDORIENT_PORTRAIT;
 
 	vtx->vsrc = mem_deref(vtx->vsrc);
-	err = vidsrc_alloc(&vtx->vsrc, NULL, &vtx->vsrc_param,
-			   NULL, dev, vidsrc_frame_handler,
-			   vidsrc_error_handler, vtx);
-	if (err) {
-		DEBUG_NOTICE("No video source: %s\n", strerror(err));
-		return err;
+
+	if (!vtx->video->shuttered) {
+		err = vs->alloch(&vtx->vsrc, vs, &vtx->vsrc_prm,
+				 NULL, dev, vidsrc_frame_handler,
+				 vidsrc_error_handler, vtx);
+		if (err) {
+			DEBUG_NOTICE("No video source: %s\n", strerror(err));
+			return err;
+		}
 	}
+
 	vtx->mute_frame = mem_deref(vtx->mute_frame);
-	err = vidframe_alloc_filled(&vtx->mute_frame, size, 0x66, 0xff, 0xff);
+	err = vidframe_alloc_filled(&vtx->mute_frame, size, 0xff, 0xff, 0xff);
 	if (err) {
 		DEBUG_NOTICE("no mute frame: %s\n", strerror(err));
 		return err;
@@ -423,6 +513,7 @@ static int set_encoder_format(struct vtx *vtx, const char *dev,
 	return err;
 }
 #endif
+
 
 enum {TMR_INTERVAL = 5};
 static void tmr_handler(void *arg)
@@ -440,7 +531,8 @@ static void tmr_handler(void *arg)
 }
 
 
-int video_start(struct video *v, const char *dev, const char *peer)
+int video_start(struct video *v, const char *src, const char *dev,
+		const char *peer)
 {
 	int err;
 
@@ -468,15 +560,15 @@ int video_start(struct video *v, const char *dev, const char *peer)
 #endif
 
 #if ENABLE_ENCODER
-	err = set_encoder_format(v->vtx, dev, &config.video.size);
+	err = set_encoder_format(v->vtx, src, dev, &config.video.size);
 	if (err) {
 		DEBUG_WARNING("could not set encoder format to"
-			      " [%ux%u -> %ux%u]: %s\n",
+			      " [%u x %u] %s\n",
 			      config.video.size.w, config.video.size.h,
-			      v->vtx->enc_prm.size.w, v->vtx->enc_prm.size.h,
 			      strerror(err));
 	}
 #else
+	(void)src;
 	(void)dev;
 #endif
 
@@ -495,8 +587,6 @@ void video_stop(struct video *v)
 
 	if (v->vtx)
 		v->vtx->vsrc = mem_deref(v->vtx->vsrc);
-
-	stream_stop(v->strm);
 }
 
 
@@ -506,6 +596,7 @@ void video_mute(struct video *v, bool muted)
 		return;
 
 	v->vtx->muted = muted;
+	v->vtx->muted_frames = 0;
 	video_update_picture(v);
 }
 
@@ -517,27 +608,78 @@ int video_selfview(struct video *v, void *view)
 	if (!v)
 		return EINVAL;
 
+	v->vtx->selfview = mem_deref(v->vtx->selfview);
+	if (!v->vtx->vsrc)
+		return 0;
+
 	if (view) {
+		memset(&vprm, 0, sizeof(vprm));
 		/* Video Display */
 		vprm.view = view;
 		if (!v->vtx->selfview) {
-			return vidisp_alloc(&v->vtx->selfview, &vprm,
-					    NULL, NULL, NULL, NULL, v);
+			struct vidisp *vd = (struct vidisp *)vidisp_find(NULL);
+			if (!vd)
+				return ENOENT;
+			return vd->alloch(&v->vtx->selfview, NULL, vd, &vprm,
+					  NULL, NULL, NULL, NULL);
 		}
-	}
-	else {
-		v->vtx->selfview = mem_deref(v->vtx->selfview);
 	}
 
 	return 0;
 }
 
 
+static int vidisp_update(struct vrx *vrx)
+{
+	struct vidisp *vd = vidisp_get(vrx->vidisp);
+	int err = 0;
+
+	if (vd->updateh) {
+		err = vd->updateh(vrx->vidisp, vrx->fullscreen,
+				  vrx->orient, NULL);
+	}
+
+	return err;
+}
+
+
 int video_pip(struct video *v, const struct vidrect *rect)
 {
-	(void)v;
-	(void)rect;
-	return ENOSYS; /* todo */
+	struct vtx *vtx;
+	struct vidisp *vd;
+	int err = 0;
+
+	if (!v || !v->vrx->vidisp)
+		return EINVAL;
+
+	DEBUG_NOTICE("pip: %H\n", vidrect_print, rect);
+
+	vtx = v->vtx;
+
+	lock_write_get(vtx->lock);
+
+	vtx->pip = mem_deref(vtx->pip);
+
+	/* If rect is NULL we just want to remove the P-I-P,
+	 * also if there is no video source, no sense in
+	 * getting a PIP
+	 */
+	if (!rect || !vtx->vsrc)
+		goto out;
+
+	vd = vidisp_get(v->vrx->vidisp);
+	err = vd->alloch(&vtx->pip, v->vrx->vidisp, vd, NULL,
+			 NULL, NULL, NULL, NULL);
+	if (err)
+		goto out;
+
+	if (vd->updateh)
+		err = vd->updateh(vtx->pip, false, 0, rect);
+
+ out:
+	lock_rel(vtx->lock);
+
+	return err;
 }
 
 
@@ -546,9 +688,41 @@ int video_set_fullscreen(struct video *v, bool fs)
 	if (!v)
 		return EINVAL;
 
-	(void)fs;
+	v->vrx->fullscreen = fs;
 
-	return ENOSYS; /* todo */
+	return vidisp_update(v->vrx);
+}
+
+
+static void vidsrc_update(struct vtx *vtx, const char *dev)
+{
+	struct vidsrc *vs = vidsrc_get(vtx->vsrc);
+
+	if (vs && vs->updateh)
+		vs->updateh(vtx->vsrc, &vtx->vsrc_prm, dev);
+}
+
+
+int video_set_orient(struct video *v, enum vidorient orient)
+{
+	int err = 0;
+
+	if (!v)
+		return EINVAL;
+
+	if (v->vtx) {
+		v->vtx->vsrc_prm.orient = orient;
+
+		vidsrc_update(v->vtx, NULL);
+	}
+
+	if (v->vrx) {
+		v->vrx->orient = orient;
+
+		err |= vidisp_update(v->vrx);
+	}
+
+	return err;
 }
 
 
@@ -560,12 +734,26 @@ static int vidcodec_send_handler(bool marker, struct mbuf *mb, void *arg)
 }
 
 
+static int vc_alloc(struct vidcodec_st **stp, struct vidcodec *vc,
+		    struct video *v, const struct pl *fmtp)
+{
+	struct vidcodec_prm prm;
+
+	prm.size    = config.video.size;
+	prm.fps     = get_fps(v);
+	prm.bitrate = config.video.bitrate;
+
+	return vc->alloch(stp, vc, vc->name, &prm, &prm, fmtp,
+			  vidcodec_send_handler, v);
+}
+
+
 #if ENABLE_ENCODER
 int video_encoder_set(struct video *v, struct vidcodec *vc,
 		      uint8_t pt_tx, const char *params)
 {
-	struct vtx *vtx;
 	struct pl fmtp = pl_null;
+	struct vtx *vtx;
 	int err = 0;
 
 	if (!v)
@@ -577,38 +765,30 @@ int video_encoder_set(struct video *v, struct vidcodec *vc,
 
 	vtx = v->vtx;
 	vtx->pt_tx = pt_tx;
-
 	vtx->enc = mem_deref(vtx->enc);
 
+	if (!vidcodec_cmp(vc, vidcodec_get(v->vrx->dec))) {
+
+		err = vc_alloc(&vtx->enc, vc, v, &fmtp);
+		if (err) {
+			DEBUG_WARNING("encoder alloc: %s\n", strerror(err));
+		}
+	}
 #if ENABLE_DECODER
-	if (vidcodec_cmp(vc, vidcodec_get(v->vrx->dec))) {
+	else
 		vtx->enc = mem_ref(v->vrx->dec);
-		return 0;
-	}
 #endif
-
-	vtx->enc_prm.bitrate = config.video.bitrate;
-
-	err = vc->alloch(&vtx->enc, vc, vc->name,
-			 &vtx->enc_prm, &v->vrx->dec_prm,
-			 &fmtp, vidcodec_send_handler, v);
-
-	if (err) {
-		DEBUG_WARNING("video_encoder_set: codec_alloc() failed (%s)\n",
-			      strerror(err));
-	}
 
 	return err;
 }
 #else
 int video_encoder_set(struct video *v, struct vidcodec *vc,
-		      uint8_t pt_tx, const char *params, uint32_t bitrate)
+		      uint8_t pt_tx, const char *params)
 {
 	(void)v;
 	(void)vc;
 	(void)pt_tx;
 	(void)params;
-	(void)bitrate;
 
 	return 0;
 }
@@ -631,20 +811,19 @@ int video_decoder_set(struct video *v, struct vidcodec *vc, uint8_t pt_rx)
 	vrx->pt_rx = pt_rx;
 	vrx->dec = mem_deref(vrx->dec);
 
+	if (!vidcodec_cmp(vc, vidcodec_get(v->vtx->enc))) {
+
+		err = vc_alloc(&vrx->dec, vc, v, NULL);
+		if (err) {
+			DEBUG_WARNING("decoder alloc: %s\n", strerror(err));
+		}
+	}
 #if ENABLE_ENCODER
-	if (v->vtx->enc && vidcodec_cmp(vc, vidcodec_get(v->vtx->enc))) {
+	else {
 		vrx->dec = mem_ref(v->vtx->enc);
-		return 0;
 	}
 #endif
 
-	err = vc->alloch(&vrx->dec, vc, vc->name,
-			 &v->vtx->enc_prm, &vrx->dec_prm,
-			 NULL, vidcodec_send_handler, v);
-	if (err) {
-		DEBUG_WARNING("set decoder: vidcodec_alloc() failed: %s\n",
-			      strerror(err));
-	}
 #else
 	(void)vc;
 	(void)pt_rx;
@@ -677,39 +856,17 @@ void *video_view(const struct video *v)
 }
 
 
-int video_sdp_attr_encode(const struct video *v, struct sdp_media *m)
+void video_vidsrc_set_device(struct video *v, const char *dev)
 {
-	int err = 0;
-
-	if (!v)
-		return EINVAL;
-
-	err |= sdp_media_set_lattr(m, true, "framerate", "%d",
-				   config.video.fps);
-
-	/* RFC 4585 */
-	err |= sdp_media_set_lattr(m, true, "rtcp-fb", "* nack pli");
-
-	err |= stream_sdp_attr_encode(v->strm, m);
-
-	return err;
+	if (v && v->vtx)
+		vidsrc_update(v->vtx, dev);
 }
 
 
-void video_sdp_attr_decode(struct video *v, struct sdp_media *m)
+void video_sdp_attr_decode(struct video *v)
 {
-	const char *attr;
-
-	if (!v || !m)
+	if (!v)
 		return;
-
-	/* RFC4566 */
-	attr = sdp_media_rattr(m, "framerate");
-	if (attr) {
-		/* NOTE: fractional values are ignored */
-		const double fps = atof(attr);
-		v->vtx->enc_prm.fps = (int)fps;
-	}
 
 	stream_sdp_attr_decode(v->strm);
 }
@@ -722,9 +879,22 @@ int video_debug(struct re_printf *pf, const struct video *v)
 	if (!v)
 		return 0;
 
-	err  = re_hprintf(pf, "\n--- Video stream ---\n");
-	err |= re_hprintf(pf, " pt_tx=%u pt_rx=%u\n",
-			  v->vtx->pt_tx, v->vrx->pt_rx);
+	err = re_hprintf(pf, "\n--- Video stream ---\n");
+
+	if (v->vtx) {
+		const struct vtx *vtx = v->vtx;
+
+		err |= re_hprintf(pf, " tx: pt=%d, %d x %d, fps=%d\n",
+				  vtx->pt_tx, vtx->vsrc_prm.size.w,
+				  vtx->vsrc_prm.size.h, vtx->vsrc_prm.fps);
+	}
+
+	if (v->vrx) {
+		const struct vrx *vrx = v->vrx;
+
+		err |= re_hprintf(pf, " rx: pt=%d\n", vrx->pt_rx);
+	}
+
 	err |= stream_debug(pf, v->strm);
 
 	return err;
@@ -737,4 +907,15 @@ int video_print(struct re_printf *pf, const struct video *v)
 		return 0;
 
 	return re_hprintf(pf, " efps=%d/%d", v->vtx->efps, v->vrx->efps);
+}
+
+
+int video_set_shuttered(struct video *v, bool shuttered)
+{
+	if (!v)
+		return EINVAL;
+
+	v->shuttered = shuttered;
+
+	return video_start(v, NULL, config.video.device, NULL);
 }

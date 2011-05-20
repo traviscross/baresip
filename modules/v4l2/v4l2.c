@@ -506,9 +506,9 @@ static int vd_open(struct vidsrc_st *st, const char *device)
 }
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct vidsrc_st *st = data;
+	struct vidsrc_st *st = arg;
 
 	if (st->run) {
 		st->run = false;
@@ -555,6 +555,9 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 
 	(void)fmt;
 	(void)errorh;
+
+	if (!str_len(dev))
+		dev = "/dev/video0";
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
@@ -608,7 +611,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 
 static int v4l_init(void)
 {
-	return vidsrc_register(&vidsrc, "v4l2", alloc);
+	return vidsrc_register(&vidsrc, "v4l2", alloc, NULL);
 }
 
 

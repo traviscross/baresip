@@ -19,7 +19,7 @@
  *
  *     http://www.webmproject.org/
  *
- * TODO: define RTP payload format
+ *     http://tools.ietf.org/html/draft-westin-payload-vp8-02
  */
 
 
@@ -31,6 +31,7 @@ enum {
 struct vidcodec_st {
 	struct vidcodec *vc;  /* base class */
 	struct mbuf *mb;
+	uint64_t picid;
 	int pts;
 	vpx_codec_ctx_t enc;
 	vpx_codec_ctx_t dec;
@@ -38,12 +39,110 @@ struct vidcodec_st {
 	void *arg;
 };
 
+/** Fragmentation information */
+enum fi {
+	FI_NONE   = 0x0,
+	FI_FIRST  = 0x1,
+	FI_MIDDLE = 0x2,
+	FI_LAST   = 0x3
+};
+
+/** VP8 Payload Descriptor */
+struct vp8desc {
+	unsigned i:1;          /**< PictureID present         */
+	unsigned n:1;          /**< Non-reference frame       */
+	unsigned fi:2;         /**< Fragmentation information */
+	unsigned b:1;          /**< Beginning VP8 frame       */
+	uint64_t picid;        /**< PictureID                 */
+};
+
+
 static struct vidcodec *vp8;
 
 
-static void destructor(void *data)
+static int picid_enc(struct mbuf *mb, uint64_t picid)
 {
-	struct vidcodec_st *st = data;
+	uint8_t b, buf[8], *p = buf + 8;
+
+	do {
+		b = picid & 0x7f;
+
+		picid >>= 7;
+
+		if (p != (buf + 8))
+			b |= 0x80;
+
+		*--p = b;
+	}
+	while (picid);
+
+	return mbuf_write_mem(mb, p, buf + 8 - p);
+}
+
+
+static int picid_dec(struct mbuf *mb, uint64_t *picid)
+{
+	uint64_t v = 0;
+	uint8_t b;
+
+	do {
+		if (mbuf_get_left(mb) < 1)
+			return EBADMSG;
+
+		b = mbuf_read_u8(mb);
+
+		v <<= 7;
+		v  |= (b & 0x7f);
+	}
+	while (b & 0x80);
+
+	*picid = v;
+
+	return 0;
+}
+
+
+static int vp8desc_enc(struct mbuf *mb, bool i, bool n, enum fi fi, bool b,
+		       uint64_t picid)
+{
+	uint8_t u8;
+	int err;
+
+	u8 = i<<4 | n<<3 | fi<<1 | b;
+
+	err = mbuf_write_u8(mb, u8);
+
+	if (i)
+		err |= picid_enc(mb, picid);
+
+	return err;
+}
+
+
+static int vp8desc_dec(struct vp8desc *desc, struct mbuf *mb)
+{
+	uint8_t u8;
+
+	if (mbuf_get_left(mb) < 1)
+		return EBADMSG;
+
+	u8 = mbuf_read_u8(mb);
+
+	desc->i  = (u8 >> 4) & 0x1;
+	desc->n  = (u8 >> 3) & 0x1;
+	desc->fi = (u8 >> 1) & 0x3;
+	desc->b  = (u8 >> 0) & 0x1;
+
+	if (desc->i)
+		return picid_dec(mb, &desc->picid);
+
+	return 0;
+}
+
+
+static void destructor(void *arg)
+{
+	struct vidcodec_st *st = arg;
 
 	vpx_codec_destroy(&st->enc);
 	vpx_codec_destroy(&st->dec);
@@ -142,10 +241,14 @@ static int alloc(struct vidcodec_st **stp, struct vidcodec *vc,
 }
 
 
-static int vpx_packetize(struct vidcodec_st *st, const uint8_t *buf, size_t sz)
+static int vpx_packetize(struct vidcodec_st *st, const uint8_t *buf, size_t sz,
+			 bool keyframe)
 {
 	struct mbuf *mb = mbuf_alloc(512);
 	const uint8_t *pmax = buf + sz;
+	bool fragmented = sz > MAX_RTP_SIZE;
+	bool begin = true;
+	enum fi fi;
 	int err = 0;
 
 	if (!mb)
@@ -156,6 +259,24 @@ static int vpx_packetize(struct vidcodec_st *st, const uint8_t *buf, size_t sz)
 		bool last = (sz < MAX_RTP_SIZE);
 
 		mb->pos = mb->end = RTP_PRESZ;
+
+		if (fragmented) {
+			if (begin)
+				fi = FI_FIRST;
+			else if (last)
+				fi = FI_LAST;
+			else
+				fi = FI_MIDDLE;
+		}
+		else {
+			fi = FI_NONE;
+		}
+
+		err = vp8desc_enc(mb, true, !keyframe, fi, begin,
+				  st->picid);
+
+		begin = false;
+
 		err = mbuf_write_mem(mb, buf, chunk);
 		if (err)
 			break;
@@ -183,6 +304,8 @@ static int enc(struct vidcodec_st *st, bool update,
 	vpx_enc_frame_flags_t flags = 0;
 	int err, i;
 
+	++st->picid;
+
 	if (update)
 		flags |= VPX_EFLAG_FORCE_KF;
 
@@ -205,12 +328,16 @@ static int enc(struct vidcodec_st *st, bool update,
 	}
 
 	while ((pkt = vpx_codec_get_cx_data(&st->enc, &iter)) ) {
+		bool key;
 
 		switch (pkt->kind) {
 
 		case VPX_CODEC_CX_FRAME_PKT:
+
+			key = pkt->data.frame.flags & VPX_FRAME_IS_KEY;
+
 			err = vpx_packetize(st, pkt->data.frame.buf,
-					    pkt->data.frame.sz);
+					    pkt->data.frame.sz, key);
 			if (err)
 				return err;
 			break;
@@ -232,10 +359,21 @@ static int enc(struct vidcodec_st *st, bool update,
 static int dec(struct vidcodec_st *st, struct vidframe *frame,
 	       bool eof, struct mbuf *src)
 {
-	vpx_codec_iter_t  iter = NULL;
-	vpx_image_t      *img;
+	struct vp8desc desc;
+	vpx_codec_iter_t iter = NULL;
 	vpx_codec_err_t res;
+	vpx_image_t *img;
 	int err;
+
+	if (!mbuf_get_left(src))
+		return 0;
+
+	err = vp8desc_dec(&desc, src);
+	if (err) {
+		re_printf("VP8: decode description failed: %s\n",
+			  strerror(err));
+		return err;
+	}
 
 	err = mbuf_write_mem(st->mb, mbuf_buf(src), mbuf_get_left(src));
 	if (err)
@@ -274,7 +412,8 @@ static int dec(struct vidcodec_st *st, struct vidframe *frame,
 
 static int module_init(void)
 {
-	return vidcodec_register(&vp8, 0, "VP8", "", alloc, enc, dec);
+	return vidcodec_register(&vp8, 0, "VP8", "version=0",
+				 alloc, enc, dec);
 }
 
 

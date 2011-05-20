@@ -18,11 +18,6 @@
 ;Files to install
 "\epoc32\release\gcce\urel\baresip.exe" -"!:\sys\bin\baresip.exe"
 
-"\epoc32\release\gcce\urel\mod_cons.dll" -"!:\sys\bin\mod_cons.dll"
-"\epoc32\release\gcce\urel\mod_g711.dll" -"!:\sys\bin\mod_g711.dll"
-"\epoc32\release\gcce\urel\mod_l16.dll"  -"!:\sys\bin\mod_l16.dll"
-"\epoc32\release\gcce\urel\mod_mda.dll"  -"!:\sys\bin\mod_mda.dll"
-
 "\epoc32\data\z\private\10003a3f\import\apps\baresip_reg.rsc" -"!:\private\10003a3f\import\apps\baresip_reg.rsc"
 
 ;required for application to be covered by backup/restore facility

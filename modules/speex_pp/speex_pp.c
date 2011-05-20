@@ -28,19 +28,21 @@ static struct {
 	int agc_enabled;
 	int vad_enabled;
 	int dereverb_enabled;
+	spx_int32_t agc_level;
 } pp_conf = {
 	1,
 	1,
 	1,
-	1
+	1,
+	8000
 };
 
 static struct aufilt *filt;
 
 
-static void speexpp_destructor(void *data)
+static void speexpp_destructor(void *arg)
 {
-	struct aufilt_st *st = data;
+	struct aufilt_st *st = arg;
 
 	if (st->state)
 		speex_preprocess_state_destroy(st->state);
@@ -74,6 +76,15 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 			     &pp_conf.denoise_enabled);
 	speex_preprocess_ctl(st->state, SPEEX_PREPROCESS_SET_AGC,
 			     &pp_conf.agc_enabled);
+
+#ifdef SPEEX_PREPROCESS_SET_AGC_TARGET
+	if (pp_conf.agc_enabled) {
+		speex_preprocess_ctl(st->state,
+				     SPEEX_PREPROCESS_SET_AGC_TARGET,
+				     &pp_conf.agc_level);
+	}
+#endif
+
 	speex_preprocess_ctl(st->state, SPEEX_PREPROCESS_SET_VAD,
 			     &pp_conf.vad_enabled);
 	speex_preprocess_ctl(st->state, SPEEX_PREPROCESS_SET_DEREVERB,
@@ -100,7 +111,7 @@ static int enc(struct aufilt_st *st, struct mbuf *mb)
 	if (mbuf_get_left(mb) != st->psize) {
 		DEBUG_WARNING("enc: expect %u bytes, got %u\n",
 			      st->psize, mbuf_get_left(mb));
-		return ENOMEM;
+		return EINVAL;
 	}
 
 	/* NOTE: Using this macro to check libspeex version */
@@ -113,14 +124,24 @@ static int enc(struct aufilt_st *st, struct mbuf *mb)
 				     (int16_t *)mbuf_buf(mb), NULL);
 #endif
 
-	/* TODO: Handle is_speech and VAD */
+	/* XXX: Handle is_speech and VAD */
 
 	return 0;
 }
 
 
+static void config_parse(struct conf *conf)
+{
+	uint32_t v;
+
+	if (0 == conf_get_u32(conf, "speex_agc_level", &v))
+		pp_conf.agc_level = v;
+}
+
+
 static int module_init(void)
 {
+	config_parse(conf_cur());
 	return aufilt_register(&filt, "speex_pp", alloc, enc, NULL, NULL);
 }
 

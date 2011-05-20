@@ -1,0 +1,39 @@
+2011-05-20 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.2.0
+
+	* baresip: Added support for SIP Outbound (RFC 5626)
+		   The SDP Content Attribute (RFC 4796)
+		   RTP/RTCP Multiplexing (RFC 5761)
+		   RTP Keepalive (draft-ietf-avt-app-rtp-keepalive-09)
+
+	* config: add 'outbound' to sipnat parameter (remove stun, turn)
+		  add rtpkeep={zero,stun,dyna,rtcp} parameter
+		  audio_codecs parameter can now specify samplerate
+		  add rtcp_mux for RTP/RTCP multiplexing on/off
+
+	* alsa: set buffersize and fix samplesize (thanks to Luigi Rizzo)
+
+	* avcodec: added support for MPEG4 video codec (RFC 3016)
+		   wait for keyframe before decoding
+
+	* celt: upgrade libcelt version and cleanups
+
+	* coreaudio: fix buffering in recorder
+
+	* ice: several improvements and fixes
+	       added new config options
+
+	* ilbc: handle asymmetric modes
+
+	* opengl: enable vertical sync
+
+	* sdl: upgrade to latest version of libSDL from mercurial
+
+	* vpx: added support for draft-westin-payload-vp8-02
+
+	* x11: handle remote display with optional shared memory
+
+	* x11grab: new video-source module (thanks to Luigi Rizzo)
+
+	* docs: updated doxygen comments

@@ -1,5 +1,5 @@
 /**
- * @file player.c  Apple Coreaudio sound driver - player
+ * @file coreaudio/player.c  Apple Coreaudio sound driver - player
  *
  * Copyright (C) 2010 Creytiv.com
  */
@@ -28,9 +28,9 @@ struct auplay_st {
 };
 
 
-static void auplay_destructor(void *data)
+static void auplay_destructor(void *arg)
 {
-	struct auplay_st *st = data;
+	struct auplay_st *st = arg;
 	uint32_t i;
 
 	pthread_mutex_lock(&st->mutex);

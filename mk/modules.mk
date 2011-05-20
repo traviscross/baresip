@@ -49,7 +49,8 @@ USE_L16   := 1
 
 ifneq ($(OS),win32)
 
-USE_ALSA  := $(shell [ -f $(SYSROOT)/include/alsa/asoundlib.h ] && echo "yes")
+USE_ALSA  := $(shell [ -f $(SYSROOT)/include/alsa/asoundlib.h ] || \
+	[ -f $(SYSROOT_ALT)/include/alsa/asoundlib.h ] && echo "yes")
 USE_BV32  := $(shell [ -f $(SYSROOT)/include/bv32/bv32.h ] || \
 	[ -f $(SYSROOT)/local/include/bv32/bv32.h ] && echo "yes")
 USE_CELT  := $(shell [ -f $(SYSROOT)/include/celt/celt.h ] || \
@@ -122,7 +123,8 @@ USE_V4L2  := $(shell [ -f $(SYSROOT)/include/libv4l2.h ] \
 USE_X11 := $(shell [ -f $(SYSROOT)/include/X11/Xlib.h ] || \
 	[ -f $(SYSROOT_ALT)/include/X11/Xlib.h ] && echo "yes")
 endif
-USE_VPX  := $(shell [ -f $(SYSROOT)/local/include/vpx/vp8.h ] \
+USE_VPX  := $(shell [ -f $(SYSROOT)/include/vpx/vp8.h ] \
+	|| [ -f $(SYSROOT)/local/include/vpx/vp8.h ] \
 	|| [ -f $(SYSROOT_ALT)/include/vpx/vp8.h ] \
 	&& echo "yes")
 endif
@@ -264,5 +266,5 @@ ifneq ($(USE_WINWAVE),)
 MODULES   += winwave
 endif
 ifneq ($(USE_X11),)
-MODULES   += x11
+MODULES   += x11 x11grab
 endif

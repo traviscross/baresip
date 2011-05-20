@@ -34,6 +34,7 @@ SOURCE        aufilt.c
 SOURCE        auloop.c
 SOURCE        auplay.c
 SOURCE        ausrc.c
+SOURCE        autone.c
 SOURCE        calc.c
 SOURCE        call.c
 SOURCE        conf.c
@@ -41,13 +42,13 @@ SOURCE        contact.c
 SOURCE        main.c
 SOURCE        mctrl.c
 SOURCE        menc.c
-SOURCE        message.c
 SOURCE        mnat.c
 SOURCE        natbd.c
 SOURCE        net.c
-SOURCE        options.c
 SOURCE        os.c
 SOURCE        play.c
+SOURCE        rtpkeep.c
+SOURCE        sipreq.c
 SOURCE        stream.c
 SOURCE        stub.cpp
 SOURCE        ua.c

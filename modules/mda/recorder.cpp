@@ -127,9 +127,9 @@ void mda_recorder::MaiscRecordComplete(TInt aError)
 }
 
 
-static void ausrc_destructor(void *data)
+static void ausrc_destructor(void *arg)
 {
-	struct ausrc_st *st = (struct ausrc_st *)data;
+	struct ausrc_st *st = (struct ausrc_st *)arg;
 
 	delete st->mda;
 

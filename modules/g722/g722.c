@@ -41,7 +41,6 @@
 
 enum {
 	G722_SAMPLE_RATE = 16000,
-	FRAME_SIZE       = 320,
 	G722_BITRATE_48k = 48000,
 	G722_BITRATE_56k = 56000,
 	G722_BITRATE_64k = 64000
@@ -56,9 +55,9 @@ struct aucodec_st {
 static struct aucodec *g722;
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct aucodec_st *st = data;
+	struct aucodec_st *st = arg;
 
 	mem_deref(st->ac);
 }
@@ -112,14 +111,15 @@ static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 	size_t n;
 	int err, len;
 
+	n = mbuf_get_left(src);
+
 	/* Make sure there is enough space */
-	if (mbuf_get_space(dst) < 160) {
-		err = mbuf_resize(dst, 2 * (dst->pos + 160));
+	if (mbuf_get_space(dst) < n/4) {
+		err = mbuf_resize(dst, 2 * (dst->pos + n/4));
 		if (err)
 			return err;
 	}
 
-	n = mbuf_get_left(src);
 	len = g722_encode(&st->enc, mbuf_buf(dst),
 			  (int16_t *)mbuf_buf(src), (int)n/2);
 	if (len <= 0) {
@@ -141,20 +141,13 @@ static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 /* src=NULL means lost packet */
 static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
-	const uint32_t n = sizeof(uint16_t) * FRAME_SIZE;
-	size_t chunk;
-	int nsamp;
-	int err;
+	int nsamp, err;
+	size_t n;
 
-	if (!src)
+	if (!mbuf_get_left(src))
 		return 0;
 
-	/* TODO: ideally we want to decode the whole packet! */
-	chunk = mbuf_get_left(src);
-	if (chunk > 160) {
-		DEBUG_NOTICE("decode: trunc large packet %u bytes\n", chunk);
-		chunk = 160;
-	}
+	n = 4 * mbuf_get_left(src);
 
 	/* Make sure there is enough space in the buffer */
 	if (mbuf_get_space(dst) < n) {
@@ -166,7 +159,7 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 	}
 
 	nsamp = g722_decode(&st->dec, (int16_t *)mbuf_buf(dst), mbuf_buf(src),
-			    (int)chunk);
+			    (int)mbuf_get_left(src));
 	if (nsamp <= 0) {
 		DEBUG_WARNING("g722_decode: nsamp=%d\n", nsamp);
 	}

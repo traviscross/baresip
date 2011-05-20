@@ -35,9 +35,9 @@ struct vidsrc_st {
 static struct vidsrc *vidsrc;
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct vidsrc_st *st = data;
+	struct vidsrc_st *st = arg;
 
 	if (st->seq_grab) {
 
@@ -307,7 +307,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 
 static int qt_init(void)
 {
-	return vidsrc_register(&vidsrc, "quicktime", alloc);
+	return vidsrc_register(&vidsrc, "quicktime", alloc, NULL);
 }
 
 

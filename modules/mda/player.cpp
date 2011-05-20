@@ -136,9 +136,9 @@ void mda_player::MaoscPlayComplete(TInt aError)
 }
 
 
-static void auplay_destructor(void *data)
+static void auplay_destructor(void *arg)
 {
-	struct auplay_st *st = (struct auplay_st *)data;
+	struct auplay_st *st = (struct auplay_st *)arg;
 
 	delete st->mda;
 

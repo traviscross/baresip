@@ -167,9 +167,6 @@
 				RelativePath="..\..\src\menc.c">
 			</File>
 			<File
-				RelativePath="..\..\src\message.c">
-			</File>
-			<File
 				RelativePath="..\..\src\mnat.c">
 			</File>
 			<File
@@ -179,19 +176,22 @@
 				RelativePath="..\..\src\net.c">
 			</File>
 			<File
-				RelativePath="..\..\src\options.c">
-			</File>
-			<File
 				RelativePath="..\..\src\os.c">
 			</File>
 			<File
 				RelativePath="..\..\src\play.c">
 			</File>
 			<File
+				RelativePath="..\..\src\rtpkeep.c">
+			</File>
+			<File
 				RelativePath=".\static.c">
 			</File>
 			<File
 				RelativePath="..\..\src\stream.c">
+			</File>
+			<File
+				RelativePath="..\..\src\sipreq.c">
 			</File>
 			<File
 				RelativePath="..\..\src\ua.c">

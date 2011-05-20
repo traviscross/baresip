@@ -74,9 +74,9 @@ static void udp_recv(const struct sa *src, struct mbuf *mb, void *arg)
 }
 
 
-static void cons_destructor(void *data)
+static void cons_destructor(void *arg)
 {
-	struct ui_st *st = data;
+	struct ui_st *st = arg;
 
 	mbuf_reset(&st->mb);
 	mbuf_reset(&st->mbr);

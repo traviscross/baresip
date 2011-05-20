@@ -510,6 +510,8 @@ void natbd_close(void)
  *
  * @param pf     Print handler for status output
  * @param unused Unused parameter
+ *
+ * @return 0 if success, otherwise errorcode
  */
 int natbd_status(struct re_printf *pf, void *unused)
 {

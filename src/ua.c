@@ -22,8 +22,6 @@
 
 enum {
 	REG_INTERVAL    = 3600,
-	SIPNAT_INTERVAL = 25,
-	SIPNAT_LAYER    = 0,
 };
 
 
@@ -41,38 +39,35 @@ struct ua {
 	struct sipreg *reg;          /**< SIP Register client                */
 	struct sip_lsnr *lsnr;       /**< SIP Request listener               */
 	struct call *call;           /**< SIP Call object                    */
-	bool reg_ok;                 /**< Registration OK flag               */
 	struct tmr tmr_alert;        /**< Incoming call alert timer          */
 	struct tmr tmr_stat;         /**< Statistics refresh timer           */
-	enum statmode statmode;      /**< Status mode                        */
 	struct mbuf dialbuf;         /**< Buffer for dialled number          */
 	struct mbuf mb_addr;         /**< Buffer for my SIP URI              */
 	struct sip_addr aor;         /**< My SIP Address-Of-Record           */
+	const struct mnat *mnat;     /**< Media NAT handling                 */
+	const struct menc *menc;     /**< Media encryption type              */
 	uint32_t regint;             /**< Registration interval in [seconds] */
-	char *mnat;                  /**< Media NAT handling type            */
-	char *menc;                  /**< Media encryption type              */
 	uint32_t ptime;              /**< Configured packet time in [ms]     */
+	enum statmode statmode;      /**< Status mode                        */
 	enum answermode answermode;  /**< Answermode for incoming calls      */
+	bool reg_ok;                 /**< Registration OK flag               */
 	ua_event_h *eh;              /**< Event handler                      */
+	ua_message_h *msgh;          /**< Incoming message handler           */
 	void *arg;                   /**< Handler argument                   */
 	char local_uri[256];         /**< Local SIP uri                      */
 	char *cuser;                 /**< SIP Contact username               */
 	char *outbound;              /**< Optional SIP outbound proxy        */
-	bool aucodecs;
-	struct list aucodecl;
-	bool vidcodecs;
-	struct list vidcodecl;
-	int sipfd;
-
-	char *stun_user;
-	char *stun_pass;
-	char *stun_host;
-	uint16_t stun_port;
-
-	/* SIP NAT */
-	char *sipnat;
-	struct stun_keepalive *ska;
-	struct turnc *turnc;
+	bool aucodecs;               /**< audio_codecs parameter is set      */
+	struct list aucodecl;        /**< List of preferred audio-codecs     */
+	bool vidcodecs;              /**< video_codecs parameter is set      */
+	struct list vidcodecl;       /**< List of preferred video-codecs     */
+	int sipfd;                   /**< Cached file-descr. for SIP conn    */
+	char *sipnat;                /**< SIP Nat mechanism                  */
+	char *rtpkeep;               /**< RTP Keepalive mechanism            */
+	char *stun_user;             /**< STUN Username                      */
+	char *stun_pass;             /**< STUN Password                      */
+	char *stun_host;             /**< STUN Hostname                      */
+	uint16_t stun_port;          /**< STUN Port number                   */
 
 	/** Statistics */
 	struct {
@@ -113,8 +108,6 @@ static struct {
 
 
 /* prototypes */
-static int ua_call_alloc(struct ua *ua, struct call **callp,
-			 const char *mnat, const char *menc);
 static void register_handler(int err, const struct sip_msg *msg, void *arg);
 
 
@@ -133,7 +126,7 @@ static uint32_t n_uas(void)
 }
 
 
-static void ua_printf(struct ua *ua, const char *fmt, ...)
+static void ua_printf(const struct ua *ua, const char *fmt, ...)
 {
 	va_list ap;
 
@@ -202,8 +195,10 @@ int ua_register(struct ua *ua)
 	struct uri uri;
 	char reg_uri[64];
 	const char *routev[1];
-	const struct mnat *mnat = mnat_find(ua->mnat);
 	char params[256] = "";
+
+	if (!ua)
+		return EINVAL;
 
 	routev[0] = ua->outbound;
 
@@ -219,10 +214,10 @@ int ua_register(struct ua *ua)
 			return ENOMEM;
 	}
 
-	if (mnat && mnat->ftag) {
+	if (ua->mnat && ua->mnat->ftag) {
 		if (re_snprintf(&params[strlen(params)],
 				sizeof(params) - strlen(params),
-				";%s", mnat->ftag) < 0)
+				";%s", ua->mnat->ftag) < 0)
 			return ENOMEM;
 	}
 
@@ -233,6 +228,7 @@ int ua_register(struct ua *ua)
 			       ua->local_uri, ua->regint, ua->cuser,
 			       routev[0] ? routev : NULL,
 			       routev[0] ? 1 : 0,
+			       str_casecmp(ua->sipnat, "outbound") ? 0 : 1,
 			       sip_auth_handler, ua, false,
 			       register_handler, ua,
 			       params[0] ? &params[1] : NULL,
@@ -272,119 +268,6 @@ static void ua_check_registrations(void)
 }
 
 
-static bool count_handler(const struct sip_hdr *hdr, const struct sip_msg *msg,
-			  void *arg)
-{
-	(void)hdr;
-	(void)msg;
-	++(*(uint32_t *)arg);
-	return false;
-}
-
-
-static uint32_t sip_hdr_count(const struct sip_msg *msg, enum sip_hdrid id)
-{
-	uint32_t n = 0;
-	sip_msg_hdr_apply(msg, true, id, count_handler, &n);
-	return n;
-}
-
-
-static void stun_mapped_addr_handler(int err, const struct sa *map, void *arg)
-{
-	struct ua *ua = arg;
-
-	(void)ua;
-
-	if (err) {
-		DEBUG_WARNING("STUN error: %s\n", strerror(err));
-		return;
-	}
-
-	(void)re_printf("STUN mapped addr: %J\n", map);
-}
-
-
-static void turnc_chan_handler(void *arg)
-{
-	struct ua *ua = arg;
-	int err;
-
-	err = ua_register(ua);
-	if (err) {
-		DEBUG_WARNING("ua_register: %s\n", strerror(err));
-	}
-}
-
-
-static void turnc_handler(int err, uint16_t scode, const char *reason,
-			  const struct sa *relay_addr,
-			  const struct sa *mapped_addr,
-			  void *arg)
-{
-	struct ua *ua = arg;
-
-	(void)ua;
-	(void)mapped_addr;
-
-	if (err || scode) {
-		DEBUG_WARNING("turn error: %s (%u %s)\n",
-			      strerror(err), scode, reason);
-		return;
-	}
-
-	(void)re_printf("TURN allocated: relay=%J\n", relay_addr);
-}
-
-
-static void handle_sipnat(struct ua *ua, const struct sip_msg *msg)
-{
-	struct sa srv;
-	int err;
-
-	/* we only support UDP for now */
-	if (msg->tp != SIP_TRANSP_UDP)
-		return;
-
-	/* TODO dns resolv? */
-	err = sa_set_str(&srv, ua->stun_host, ua->stun_port);
-	if (err)
-		return;
-
-	if (0 == str_casecmp(ua->sipnat, "stun") && !ua->ska) {
-
-		err = stun_keepalive_alloc(&ua->ska, IPPROTO_UDP, msg->sock,
-					   SIPNAT_LAYER, &srv, NULL,
-					   stun_mapped_addr_handler, ua);
-		if (err)
-			return;
-
-		stun_keepalive_enable(ua->ska, SIPNAT_INTERVAL);
-
-		(void)re_printf("STUN enabled with interval %d seconds\n",
-				SIPNAT_INTERVAL);
-	}
-	else if (0 == str_casecmp(ua->sipnat, "turn") && !ua->turnc) {
-
-		err = turnc_alloc(&ua->turnc, NULL, IPPROTO_UDP, msg->sock,
-				  SIPNAT_LAYER, &srv,
-				  ua->stun_user, ua->stun_pass,
-				  TURN_DEFAULT_LIFETIME, turnc_handler, ua);
-		if (err) {
-			DEBUG_WARNING("turn error: %s\n", strerror(err));
-			return;
-		}
-
-		/* Add Channel/Permission for SIP server */
-		err = turnc_add_chan(ua->turnc, &msg->src,
-				     turnc_chan_handler, ua);
-		if (err) {
-			DEBUG_WARNING("turn channel: %s\n", strerror(err));
-		}
-	}
-}
-
-
 static int sipmsg_fd(const struct sip_msg *msg)
 {
 	if (!msg)
@@ -420,6 +303,7 @@ static void register_handler(int err, const struct sip_msg *msg, void *arg)
 			      strerror(err));
 		(void)re_snprintf(buf, sizeof(buf), "%s", strerror(err));
 		ua_event(ua, UA_EVENT_REGISTER_FAIL, buf);
+		ua->stat.scode = 999;
 		return;
 	}
 
@@ -433,7 +317,7 @@ static void register_handler(int err, const struct sip_msg *msg, void *arg)
 
 	if (200 <= msg->scode && msg->scode <= 299) {
 
-		ua->stat.n_bindings = sip_hdr_count(msg, SIP_HDR_CONTACT);
+		ua->stat.n_bindings = sip_msg_hdr_count(msg, SIP_HDR_CONTACT);
 
 		if (!ua->reg_ok) {
 			ua->reg_ok = true;
@@ -441,8 +325,6 @@ static void register_handler(int err, const struct sip_msg *msg, void *arg)
 				  msg->scode, &msg->reason,
 				  ua->stat.ua, ua->stat.n_bindings,
 				  1==ua->stat.n_bindings?"":"s");
-			if (ua->sipnat)
-				handle_sipnat(ua, msg);
 		}
 
 		ua->sipfd = sipmsg_fd(msg);
@@ -519,21 +401,17 @@ static void alert_stop(struct ua *ua)
 }
 
 
-static void print_call_summary(struct ua *ua)
+static void print_call_summary(const struct ua *ua)
 {
-	struct mbuf mb_sum;
+	const uint32_t dur = call_duration(ua->call);
 
-	if (!ua->call)
+	if (!dur)
 		return;
-
-	mbuf_init(&mb_sum);
 
 	(void)re_fprintf(stderr, "\n");
 
-	call_summary(ua->call, &mb_sum);
-	ua_printf(ua, "Call terminated (%b)\n", mb_sum.buf, mb_sum.end);
-
-	mbuf_reset(&mb_sum);
+	ua_printf(ua, "Call terminated (duration: %H)\n",
+		  fmt_human_time, &dur);
 }
 
 
@@ -611,10 +489,10 @@ static void call_event_handler(enum call_event ev, const char *prm, void *arg)
 
 
 static int ua_call_alloc(struct ua *ua, struct call **callp,
-			 const char *mnat, const char *menc)
+			 const struct mnat *mnat, const struct menc *menc,
+			 enum vidmode vidmode, const struct sip_msg *msg)
 {
 	char dname[128] = "";
-	int err;
 
 	if (*callp) {
 		DEBUG_WARNING("call_alloc: call is already allocated\n");
@@ -623,13 +501,11 @@ static int ua_call_alloc(struct ua *ua, struct call **callp,
 
 	(void)pl_strcpy(&ua->aor.dname, dname, sizeof(dname));
 
-	err = call_alloc(callp, ua, ua->ptime, (struct mnat *)mnat_find(mnat),
-			 ua->stun_user, ua->stun_pass,
-			 ua->stun_host, ua->stun_port,
-			 menc, call_event_handler, ua,
-			 dname, ua->local_uri, ua->cuser);
-
-	return err;
+	return call_alloc(callp, ua, ua->ptime, mnat,
+			  ua->stun_user, ua->stun_pass,
+			  ua->stun_host, ua->stun_port,
+			  menc, call_event_handler, ua,
+			  dname, ua->local_uri, ua->cuser, vidmode, msg);
 }
 
 
@@ -639,7 +515,7 @@ static void handle_options(struct ua *ua, const struct sip_msg *msg)
 	struct mbuf *desc = NULL;
 	int err;
 
-	err = ua_call_alloc(ua, &call, NULL, NULL);
+	err = ua_call_alloc(ua, &call, NULL, NULL, VIDMODE_ON, NULL);
 	if (err) {
 		(void)sip_treply(NULL, uag.sip, msg, 500, "Call Error");
 		return;
@@ -671,11 +547,15 @@ static void handle_options(struct ua *ua, const struct sip_msg *msg)
 
 
 /* RFC 3428 */
-static void handle_message(const struct sip_msg *msg)
+static void handle_message(struct ua *ua, const struct sip_msg *msg)
 {
 	static const char *ctype_text = "text/plain";
 
-	if (!pl_strcasecmp(&msg->ctype, ctype_text)) {
+	if (ua->msgh) {
+		ua->msgh(&msg->from.auri, &msg->ctype, msg->mb, ua->arg);
+		(void)sip_reply(uag.sip, msg, 200, "OK");
+	}
+	else if (!pl_strcasecmp(&msg->ctype, ctype_text)) {
 		(void)re_fprintf(stderr, "\r%r: \"%b\"\n", &msg->from.auri,
 				 mbuf_buf(msg->mb), mbuf_get_left(msg->mb));
 		(void)play_file(NULL, "message.wav", 0);
@@ -691,11 +571,9 @@ static void handle_message(const struct sip_msg *msg)
 }
 
 
-static void ua_destructor(void *data)
+static void ua_destructor(void *arg)
 {
-	struct ua *ua = data;
-
-	MAGIC_CHECK(ua);
+	struct ua *ua = arg;
 
 	list_unlink(&ua->le);
 
@@ -705,8 +583,6 @@ static void ua_destructor(void *data)
 	mbuf_reset(&ua->dialbuf);
 	mbuf_reset(&ua->mb_addr);
 
-	mem_deref(ua->ska);
-	mem_deref(ua->turnc);
 	mem_deref(ua->call);
 	mem_deref(ua->reg);
 	mem_deref(ua->cuser);
@@ -715,9 +591,8 @@ static void ua_destructor(void *data)
 	mem_deref(ua->stun_user);
 	mem_deref(ua->stun_pass);
 	mem_deref(ua->stun_host);
-	mem_deref(ua->mnat);
-	mem_deref(ua->menc);
 	mem_deref(ua->sipnat);
+	mem_deref(ua->rtpkeep);
 
 	list_flush(&ua->aucodecl);
 	list_flush(&ua->vidcodecl);
@@ -784,31 +659,39 @@ static int stunsrv_decode(struct ua *ua)
 /** Decode media parameters */
 static int media_decode(struct ua *ua)
 {
-	struct pl mnat, menc, ptime;
+	struct pl mnat, menc, ptime, rtpkeep;
 	int err = 0;
 
 	/* Decode media nat parameter */
 	ua->mnat = NULL;
 	if (0 == sip_param_decode(&ua->aor.params, "medianat", &mnat)) {
-		err = pl_strdup(&ua->mnat, &mnat);
-		if (err)
-			return err;
 
-		ua_printf(ua, "Using medianat: %s\n", ua->mnat);
+		char mnatid[64];
 
-		if (!mnat_find(ua->mnat)) {
-			DEBUG_WARNING("mnat not found: %s\n", ua->mnat);
+		ua_printf(ua, "Using medianat: %r\n", &mnat);
+
+		(void)pl_strcpy(&mnat, mnatid, sizeof(mnatid));
+
+		ua->mnat = mnat_find(mnatid);
+		if (!ua->mnat) {
+			DEBUG_WARNING("medianat not found: %r\n", &mnat);
 		}
 	}
 
 	/* Media encryption */
 	ua->menc = NULL;
 	if (0 == sip_param_decode(&ua->aor.params, "mediaenc", &menc)) {
-		err = pl_strdup(&ua->menc, &menc);
-		if (err)
-			return err;
 
-		ua_printf(ua, "Using media encryption `%s'\n", ua->menc);
+		char mencid[64];
+
+		ua_printf(ua, "Using media encryption `%r'\n", &menc);
+
+		(void)pl_strcpy(&menc, mencid, sizeof(mencid));
+
+		ua->menc = menc_find(mencid);
+		if (!ua->menc) {
+			DEBUG_WARNING("mediaenc not found: %r\n", &menc);
+		}
 	}
 
 	/* Decode ptime parameter */
@@ -819,6 +702,13 @@ static int media_decode(struct ua *ua)
 			return EINVAL;
 		}
 		DEBUG_NOTICE("setting ptime=%u\n", ua->ptime);
+	}
+
+	if (!sip_param_decode(&ua->aor.params, "rtpkeep", &rtpkeep)) {
+
+		ua_printf(ua, "Using RTP keepalive: %r\n", &rtpkeep);
+
+		err = pl_strdup(&ua->rtpkeep, &rtpkeep);
 	}
 
 	return err;
@@ -883,12 +773,27 @@ static int audio_codecs_decode(struct ua *ua)
 
 		while (0 == csl_parse(&acs, cname, sizeof(cname))) {
 			struct aucodec *ac;
+			struct pl pl_cname, pl_srate, pl_ch = PL_INIT;
+			uint32_t srate = 8000;
+			uint8_t ch = 1;
 
-			/* todo: decode sample-rate and channels */
-			ac = (struct aucodec *)aucodec_find(cname, 8000, 1);
+			/* Format: "codec/srate/ch" */
+			if (0 == re_regex(cname, strlen(cname),
+					  "[^/]+/[0-9]+[/]*[0-9]*",
+					  &pl_cname, &pl_srate,
+					  NULL, &pl_ch)) {
+				(void)pl_strcpy(&pl_cname, cname,
+						sizeof(cname));
+				srate = pl_u32(&pl_srate);
+				if (pl_isset(&pl_ch))
+					ch = pl_u32(&pl_ch);
+			}
+
+			ac = (struct aucodec *)aucodec_find(cname, srate, ch);
 			if (!ac) {
-				DEBUG_WARNING("audio codec not found: %s\n",
-					      cname);
+				DEBUG_WARNING("audio codec not found:"
+					      " %s/%u/%d\n",
+					      cname, srate, ch);
 				continue;
 			}
 
@@ -971,7 +876,11 @@ static bool request_handler(const struct sip_msg *msg, void *arg)
 		return true;
 	}
 	else if (!pl_strcmp(&msg->met, "MESSAGE")) {
-		handle_message(msg);
+		handle_message(ua, msg);
+		return true;
+	}
+	else if (!pl_strcmp(&msg->met, "PING")) {
+		(void)sip_reply(uag.sip, msg, 200, "Pong");
 		return true;
 	}
 
@@ -1070,6 +979,15 @@ void ua_set_event_handler(struct ua *ua, ua_event_h *eh, void *arg)
 }
 
 
+void ua_set_message_handler(struct ua *ua, ua_message_h *msgh)
+{
+	if (!ua)
+		return;
+
+	ua->msgh = msgh;
+}
+
+
 static int ua_start(struct ua *ua)
 {
 	if (!ua->regint)
@@ -1079,8 +997,10 @@ static int ua_start(struct ua *ua)
 }
 
 
-int ua_connect(struct ua *ua, const char *uri)
+int ua_connect(struct ua *ua, const char *uri, const char *mnatid,
+	       enum vidmode vidmode)
 {
+	const struct mnat *mnat;
 	struct pl pl;
 	size_t len;
 	int err = 0;
@@ -1091,6 +1011,8 @@ int ua_connect(struct ua *ua, const char *uri)
 	len = strlen(uri);
 	if (len > 0) {
 		mbuf_reset(&ua->dialbuf);
+
+		err |= mbuf_printf(&ua->dialbuf, "<");
 
 		/* Append sip: scheme if missing */
 		if (0 != re_regex(uri, len, "sip:"))
@@ -1126,12 +1048,22 @@ int ua_connect(struct ua *ua, const char *uri)
 
 		/* Append any optional parameters */
 		err |= mbuf_write_pl(&ua->dialbuf, &ua->aor.uri.params);
+
+		err |= mbuf_printf(&ua->dialbuf, ">");
 	}
 
 	if (err)
 		return err;
 
-	err = ua_call_alloc(ua, &ua->call, ua->mnat, ua->menc);
+	/* override medianat per call */
+	if (mnatid) {
+		mnat = mnat_find(mnatid);
+	}
+	else
+		mnat = ua->mnat;
+
+	err = ua_call_alloc(ua, &ua->call, mnat, ua->menc, vidmode,
+			    NULL);
 	if (err)
 		return err;
 
@@ -1227,7 +1159,10 @@ int ua_options_send(struct ua *ua, const char *uri,
 	if (!ua)
 		return EINVAL;
 
-	err = sip_options_send(ua, uri, resph, arg);
+	err = sip_req_send(ua, "OPTIONS", uri, resph, arg,
+			   "Accept: application/sdp\r\n"
+			   "Content-Length: 0\r\n"
+			   "\r\n");
 	if (err) {
 		DEBUG_WARNING("send options: (%s)\n", strerror(err));
 	}
@@ -1266,19 +1201,20 @@ static void im_resp_handler(int err, const struct sip_msg *msg, void *arg)
  */
 int ua_im_send(struct ua *ua, struct mbuf *peer, struct mbuf *msg)
 {
+	char *uri = NULL;
 	int err = 0;
 
 	if (!ua || !msg)
 		return EINVAL;
 
+	msg->pos = 0;
+
 	if (ua->call) {
-		err = sip_message_send(ua, call_peeruri(ua->call), msg,
-				       im_resp_handler, ua);
+		err = str_dup(&uri, call_peeruri(ua->call));
 	}
 	else if (peer) {
 		struct sip_addr addr;
 		struct pl pl;
-		char *uri = NULL;
 
 		pl_set_mbuf(&pl, peer);
 
@@ -1287,13 +1223,19 @@ int ua_im_send(struct ua *ua, struct mbuf *peer, struct mbuf *msg)
 			return err;
 
 		err = pl_strdup(&uri, &addr.auri);
-		if (err)
-			return err;
-
-		err = sip_message_send(ua, uri, msg, im_resp_handler, ua);
-
-		mem_deref(uri);
 	}
+	if (err)
+		return err;
+
+	err = sip_req_send(ua, "MESSAGE", uri, im_resp_handler, ua,
+			   "Accept: text/plain\r\n"
+			   "Content-Type: text/plain\r\n"
+			   "Content-Length: %u\r\n"
+			   "\r\n%b",
+			   mbuf_get_left(msg),
+			   mbuf_buf(msg), mbuf_get_left(msg));
+
+	mem_deref(uri);
 
 	return err;
 }
@@ -1501,7 +1443,8 @@ static void sipsess_conn_handler(const struct sip_msg *msg, void *arg)
 		return;
 	}
 
-	err = ua_call_alloc(ua, &ua->call, ua->mnat, ua->menc);
+	err = ua_call_alloc(ua, &ua->call, ua->mnat, ua->menc,
+			    VIDMODE_ON, msg);
 	if (err) {
 		DEBUG_WARNING("call_alloc: %s\n", strerror(err));
 		goto error;
@@ -1522,6 +1465,12 @@ static void sipsess_conn_handler(const struct sip_msg *msg, void *arg)
 
 /**
  * Initialise the User-Agents
+ *
+ * @param software SIP User-Agent string
+ * @param udp      Enable UDP transport
+ * @param tcp      Enable TCP transport
+ * @param tls      Enable TLS transport
+ * @param exith    SIP Exit handler
  *
  * @return 0 if success, otherwise errorcode
  */
@@ -1574,8 +1523,6 @@ void ua_close(void)
 void ua_stack_suspend(void)
 {
 	struct le *le;
-
-	DEBUG_NOTICE("***** STACK SUSPEND\n");
 
 	for (le = uag.ual.head; le; le = le->next) {
 		struct ua *ua = le->data;
@@ -1645,7 +1592,8 @@ int ua_start_all(void)
 
 void ua_stop_all(bool forced)
 {
-	(void)re_fprintf(stderr, "Un-registering %u useragents..\n", n_uas());
+	(void)re_fprintf(stderr, "Un-registering %u useragents.. %s\n",
+			 n_uas(), forced ? "(Forced)" : "");
 
 	if (forced)
 		sipsess_close_all(uag.sock);
@@ -1657,13 +1605,15 @@ void ua_stop_all(bool forced)
 }
 
 
-int ua_reset_transp(void)
+int ua_reset_transp(bool reg, bool reinvite)
 {
 	struct le *le;
 	int err;
 
 	/* Update SIP transports */
 	sip_transp_flush(uag.sip);
+
+	(void)net_check();
 	err = ua_add_transp();
 	if (err)
 		return err;
@@ -1672,11 +1622,13 @@ int ua_reset_transp(void)
 	for (le = uag.ual.head; le; le = le->next) {
 		struct ua *ua = le->data;
 
-		ua->reg_ok = false;
-		err |= ua_register(ua);
+		if (reg) {
+			ua->reg_ok = false;
+			err |= ua_register(ua);
+		}
 
 		/* update all active calls */
-		if (ua->call)
+		if (reinvite && ua->call)
 			err |= call_reset_transp(ua->call);
 	}
 
@@ -1797,4 +1749,16 @@ struct list *ua_vidcodecl(struct ua *ua)
 int ua_sipfd(const struct ua *ua)
 {
 	return ua ? ua->sipfd : -1;
+}
+
+
+const char *ua_param(const struct ua *ua, const char *key)
+{
+	if (!ua)
+		return NULL;
+
+	if (!str_casecmp(key, "rtpkeep"))
+		return ua->rtpkeep;
+
+	return NULL;
 }

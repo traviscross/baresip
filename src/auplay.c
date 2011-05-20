@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
+
 #include <re.h>
 #include <baresip.h>
 #include "core.h"
@@ -11,9 +12,9 @@
 static struct list auplayl = LIST_INIT;
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct auplay *ap = data;
+	struct auplay *ap = arg;
 
 	list_unlink(&ap->le);
 }
@@ -39,6 +40,7 @@ int auplay_register(struct auplay **app, const char *name,
 	(void)re_printf("auplay: %s\n", name);
 
 	*app = ap;
+
 	return 0;
 }
 
@@ -47,13 +49,13 @@ const struct auplay *auplay_find(const char *name)
 {
 	struct le *le;
 
-	for (le = auplayl.head; le; le = le->next) {
+	for (le=auplayl.head; le; le=le->next) {
+
 		struct auplay *ap = le->data;
 
 		if (name && 0 != str_casecmp(name, ap->name))
 			continue;
 
-		/* Found */
 		return ap;
 	}
 

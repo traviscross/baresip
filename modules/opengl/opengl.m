@@ -17,9 +17,6 @@
 #endif
 
 
-/* TODO: vertical sync */
-
-
 struct vidisp_st {
 	struct vidisp *vd;              /**< Inheritance (1st)     */
 	struct vidsz size;              /**< Current size          */
@@ -190,8 +187,8 @@ static int setup_shader(struct vidisp_st *st, int width, int height)
 }
 
 
-static int alloc(struct vidisp_st **stp, struct vidisp *vd,
-		 struct vidisp_prm *prm, const char *dev,
+static int alloc(struct vidisp_st **stp, struct vidisp_st *parent,
+		 struct vidisp *vd, struct vidisp_prm *prm, const char *dev,
 		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
 {
 	NSOpenGLPixelFormatAttribute attr[] = {
@@ -203,14 +200,14 @@ static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 	NSOpenGLPixelFormat *fmt;
 	NSAutoreleasePool *pool;
 	struct vidisp_st *st;
+	GLint vsync = 1;
 	int err = 0;
 
+	(void)parent;
 	(void)dev;
 	(void)inputh;
 	(void)resizeh;
 	(void)arg;
-
-	re_printf("opengl alloc: view=%p\n", prm ? prm->view : 0);
 
 	pool = [[NSAutoreleasePool alloc] init];
 	if (!pool)
@@ -252,6 +249,9 @@ static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 		if (prm)
 			prm->view = [st->win contentView];
 	}
+
+	/* Enable vertical sync */
+	[st->ctx setValues:&vsync forParameter:NSOpenGLCPSwapInterval];
 
  out:
 	if (err)
@@ -374,7 +374,6 @@ static inline void draw_rgb(const uint8_t *pic, int w, int h)
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_TEXTURE_2D);
 
-	/* todo: the 3 lines below is also in vidview_draw(), check if needed*/
 	glViewport(0, 0, w, h);
 
 	glMatrixMode(GL_PROJECTION);
@@ -544,7 +543,7 @@ static int module_init(void)
 	if (!app)
 		return ENOSYS;
 
-	err = vidisp_register(&vid, "opengl", alloc, display, hide);
+	err = vidisp_register(&vid, "opengl", alloc, NULL, display, hide);
 	if (err)
 		return err;
 

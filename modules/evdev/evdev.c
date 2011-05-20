@@ -49,9 +49,10 @@ static void evdev_close(struct ui_st *st)
 }
 
 
-static void evdev_destructor(void *data)
+static void evdev_destructor(void *arg)
 {
-	struct ui_st *st = data;
+	struct ui_st *st = arg;
+
 	evdev_close(st);
 	mem_deref(st->ui);
 }
@@ -60,6 +61,7 @@ static void evdev_destructor(void *data)
 static int code2ascii(uint16_t modifier, uint16_t code)
 {
 	switch (code) {
+
 	case KEY_0:          return '0';
 	case KEY_1:          return '1';
 	case KEY_2:          return '2';
@@ -189,6 +191,9 @@ static void evdev_fd_handler(int flags, void *arg)
 			else
 				reportkey(st, ascii);
 			modifier = 0;
+		}
+		else if (0 == ev->value) {
+			reportkey(st, 0x00);
 		}
 	}
 }

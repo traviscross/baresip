@@ -24,9 +24,24 @@ static struct ausrc *ausrc;
 static struct auplay *auplay;
 
 
-int alsa_reset(snd_pcm_t *pcm, uint32_t srate, uint8_t ch)
+static inline snd_pcm_format_t audio_fmt(enum aufmt fmt)
+{
+	switch (fmt) {
+
+	default:
+	case AUFMT_S16LE: return SND_PCM_FORMAT_S16_LE;
+	case AUFMT_PCMU:  return SND_PCM_FORMAT_MU_LAW;
+	case AUFMT_PCMA:  return SND_PCM_FORMAT_A_LAW;
+	}
+}
+
+
+int alsa_reset(snd_pcm_t *pcm, uint32_t srate, uint32_t ch, enum aufmt fmt,
+	       uint32_t frame_size)
 {
 	snd_pcm_hw_params_t *hw_params = NULL;
+	const snd_pcm_format_t pcmfmt = audio_fmt(fmt);
+	snd_pcm_uframes_t period = frame_size, bufsize = frame_size * 10;
 	int err;
 
 	err = snd_pcm_hw_params_malloc(&hw_params);
@@ -51,11 +66,10 @@ int alsa_reset(snd_pcm_t *pcm, uint32_t srate, uint8_t ch)
 		goto out;
 	}
 
-	err = snd_pcm_hw_params_set_format(pcm, hw_params,
-					   SND_PCM_FORMAT_S16_LE);
+	err = snd_pcm_hw_params_set_format(pcm, hw_params, pcmfmt);
 	if (err < 0) {
-		DEBUG_WARNING("cannot set sample format (%s)\n",
-			      snd_strerror(err));
+		DEBUG_WARNING("cannot set sample format %d (%s)\n",
+			      pcmfmt, snd_strerror(err));
 		goto out;
 	}
 
@@ -71,6 +85,19 @@ int alsa_reset(snd_pcm_t *pcm, uint32_t srate, uint8_t ch)
 		DEBUG_WARNING("cannot set channel count to %d (%s)\n",
 			      ch, snd_strerror(err));
 		goto out;
+	}
+
+	err = snd_pcm_hw_params_set_period_size_near(pcm, hw_params,
+						     &period, 0);
+	if (err < 0) {
+		DEBUG_WARNING("cannot set period size to %d (%s)\n",
+			      period, snd_strerror(err));
+	}
+
+	err = snd_pcm_hw_params_set_buffer_size_near(pcm, hw_params, &bufsize);
+	if (err < 0) {
+		DEBUG_WARNING("cannot set buffer size to %d (%s)\n",
+			      bufsize, snd_strerror(err));
 	}
 
 	err = snd_pcm_hw_params(pcm, hw_params);

@@ -63,7 +63,9 @@ void print_events(int fd)
 			continue;
 
 		printf("  Event type 0x%02x ", i);
-		switch ( i) {
+
+		switch (i) {
+
 		case EV_KEY :
 			printf(" (Keys or Buttons)\n");
 			break;
@@ -119,7 +121,9 @@ void print_keys(int fd)
 			continue;
 
 		printf("  Key  0x%02x ", i);
-		switch ( i) {
+
+		switch (i) {
+
 		case KEY_RESERVED : printf(" (Reserved)\n"); break;
 		case KEY_ESC : printf(" (Escape)\n"); break;
 		case KEY_1 : printf(" (1)\n"); break;
@@ -477,7 +481,9 @@ void print_leds(int fd)
 			continue;
 
 		printf("  LED type 0x%02x ", i);
+
 		switch (i) {
+
 		case LED_NUML :
 			printf(" (Num Lock)\n");
 			break;

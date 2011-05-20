@@ -24,6 +24,8 @@ struct ausrc_st {
 	pthread_t thread;
 	bool run;
 	snd_pcm_t *read;
+	int sample_size;
+	int frame_size;
 	struct mbuf *mbr;
 	ausrc_read_h *rh;
 	ausrc_error_h *errh;
@@ -31,14 +33,13 @@ struct ausrc_st {
 };
 
 
-static void ausrc_destructor(void *data)
+static void ausrc_destructor(void *arg)
 {
-	struct ausrc_st *st = data;
+	struct ausrc_st *st = arg;
 
 	/* Wait for termination of other thread */
 	if (st->run) {
 		st->run = false;
-		pthread_cancel(st->thread);
 		(void)pthread_join(st->thread, NULL);
 	}
 
@@ -56,7 +57,7 @@ static void *read_thread(void *arg)
 	int err;
 
 	while (st->run) {
-		err = snd_pcm_readi(st->read, st->mbr->buf, st->mbr->size/2);
+		err = snd_pcm_readi(st->read, st->mbr->buf, st->frame_size);
 		if (err == -EPIPE) {
 			snd_pcm_prepare(st->read);
 		}
@@ -67,7 +68,7 @@ static void *read_thread(void *arg)
 			continue;
 		}
 
-		st->rh(st->mbr->buf, 2*err, st->arg);
+		st->rh(st->mbr->buf, err * st->sample_size, st->arg);
 	}
 
 	return NULL;
@@ -86,8 +87,6 @@ int alsa_src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	if (!str_len(device))
 		device = alsa_dev;
 
-	prm->fmt = AUFMT_S16LE;
-
 	st = mem_zalloc(sizeof(*st), ausrc_destructor);
 	if (!st)
 		return ENOMEM;
@@ -95,20 +94,23 @@ int alsa_src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	st->as  = mem_ref(as);
 	st->rh  = rh;
 	st->arg = arg;
+	st->sample_size = prm->ch * (prm->fmt == AUFMT_S16LE ? 2 : 1);
+	st->frame_size = prm->frame_size;
 
 	err = snd_pcm_open(&st->read, device, SND_PCM_STREAM_CAPTURE, 0);
 	if (err < 0) {
-		DEBUG_WARNING("open: %s %s\n", alsa_dev, snd_strerror(err));
+		DEBUG_WARNING("read open: %s %s\n", device, snd_strerror(err));
 		goto out;
 	}
 
-	st->mbr = mbuf_alloc(2 * prm->frame_size);
+	st->mbr = mbuf_alloc(st->sample_size * st->frame_size);
 	if (!st->mbr) {
 		err = ENOMEM;
 		goto out;
 	}
 
-	err = alsa_reset(st->read, prm->srate, prm->ch);
+	err = alsa_reset(st->read, prm->srate, prm->ch, prm->fmt,
+			 prm->frame_size);
 	if (err)
 		goto out;
 

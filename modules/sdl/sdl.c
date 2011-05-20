@@ -10,14 +10,11 @@
 #include "sdl.h"
 
 
-/*
- * TODO: fullscreen on macosx is not working so well..
- */
-
 struct vidisp_st {
 	struct vidisp *vd;              /**< Inheritance (1st)     */
 	struct le le;                   /**< Linked-list element   */
 	SDL_Window *window;             /**< SDL Window            */
+	SDL_Renderer *renderer;         /**< SDL Renderer          */
 	SDL_Texture *texture;           /**< Texture for pixels    */
 	struct vidsz size;              /**< Current size          */
 	vidisp_input_h *inputh;         /**< Input handler         */
@@ -31,7 +28,6 @@ struct vidisp_st {
 static struct vidisp *vid;       /**< SDL Video-display      */
 static struct list stl;          /**< List of video displays */
 static struct tmr tmr_ev;        /**< Event timer            */
-static int rend_idx;             /**< Active rendering index */
 
 
 static void event_handler(void *arg);
@@ -73,15 +69,27 @@ static void dump_rendererinfo(void)
 	re_printf("SDL Rendering info: n=%d\n", n);
 
 	for (i=0; i<n; i++) {
+		uint32_t j;
+
 		SDL_GetRenderDriverInfo(i, &info);
-		re_printf("    %d: %s flags=%08x num_formats=%u\n",
+		re_printf("    %d: %s flags=%08x num_formats=%u",
 			  i, info.name, info.flags,
 			  info.num_texture_formats);
+
+		for (j=0; j<info.num_texture_formats; j++) {
+
+			uint32_t fmt = info.texture_formats[j];
+
+			re_printf(" %s", SDL_GetPixelFormatName(fmt));
+		}
+
+		re_printf("\n");
 	}
 }
 #endif
 
 
+#if 0
 /**
  * Find a renderer that supports YUV420P Pixel format
  *
@@ -110,6 +118,7 @@ static int find_yuv420p_renderer(void)
 
 	return -1;
 }
+#endif
 
 
 static void sdl_reset(struct vidisp_st *st)
@@ -117,6 +126,11 @@ static void sdl_reset(struct vidisp_st *st)
 	if (st->texture) {
 		SDL_DestroyTexture(st->texture);
 		st->texture = NULL;
+	}
+
+	if (st->renderer) {
+		SDL_DestroyRenderer(st->renderer);
+		st->renderer = NULL;
 	}
 
 	if (st->window) {
@@ -129,7 +143,9 @@ static void sdl_reset(struct vidisp_st *st)
 static void event_handler(void *arg)
 {
 	struct vidisp_st *st;
+	struct le *le;
 	SDL_Event event;
+	char ch;
 
 	(void)arg;
 
@@ -143,6 +159,8 @@ static void event_handler(void *arg)
 			st = find_state(event.key.windowID);
 			if (!st)
 				return;
+
+			ch = event.key.keysym.unicode & 0x7f;
 
 			switch (event.key.keysym.sym) {
 
@@ -163,11 +181,10 @@ static void event_handler(void *arg)
 				break;
 
 			default:
+
 				/* Relay key-press to UI subsystem */
-				if (isprint(event.key.keysym.sym)
-				    && st->inputh) {
-					st->inputh(event.key.keysym.sym,
-						   st->arg);
+				if (isprint(ch) && st->inputh) {
+					st->inputh(ch, st->arg);
 				}
 				break;
 			}
@@ -183,8 +200,12 @@ static void event_handler(void *arg)
 			break;
 
 		case SDL_QUIT:
-			if (st->inputh)
-				st->inputh('q', st->arg);
+			for (le = stl.head; le; le = le->next) {
+				struct vidisp_st *st = le->data;
+
+				if (st->inputh)
+					st->inputh('q', st->arg);
+			}
 			break;
 
 		default:
@@ -207,14 +228,15 @@ static void destructor(void *arg)
 }
 
 
-static int alloc(struct vidisp_st **stp, struct vidisp *vd,
-		 struct vidisp_prm *prm, const char *dev,
+static int alloc(struct vidisp_st **stp, struct vidisp_st *parent,
+		 struct vidisp *vd, struct vidisp_prm *prm, const char *dev,
 		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
 {
 	struct vidisp_st *st;
 	int err = 0;
 
 	/* Not used by SDL */
+	(void)parent;
 	(void)prm;
 	(void)dev;
 
@@ -292,13 +314,25 @@ static int display(struct vidisp_st *st, const char *title,
 		SDL_RaiseWindow(st->window);
 	}
 
-	if (!st->texture) {
-		if (SDL_CreateRenderer(st->window, rend_idx, 0) != 0) {
+	if (!st->renderer) {
+
+		Uint32 flags = 0;
+
+		flags |= SDL_RENDERER_ACCELERATED;
+		flags |= SDL_RENDERER_PRESENTVSYNC;
+
+		st->renderer = SDL_CreateRenderer(st->window, -1, flags);
+		if (!st->renderer) {
 			re_fprintf(stderr, "unable to create renderer: %s\n",
 				   SDL_GetError());
+			return ENOMEM;
 		}
+	}
 
-		st->texture = SDL_CreateTexture(SDL_PIXELFORMAT_YV12,
+	if (!st->texture) {
+
+		st->texture = SDL_CreateTexture(st->renderer,
+						SDL_PIXELFORMAT_YV12,
 						SDL_TEXTUREACCESS_STREAMING,
 						frame->size.w, frame->size.h);
 		if (!st->texture) {
@@ -308,7 +342,7 @@ static int display(struct vidisp_st *st, const char *title,
 		}
 	}
 
-	ret = SDL_LockTexture(st->texture, NULL, 0, &pixels, &pitch);
+	ret = SDL_LockTexture(st->texture, NULL, &pixels, &pitch);
 	if (ret != 0) {
 		re_fprintf(stderr, "unable to lock texture (ret=%d)\n", ret);
 		return ENODEV;
@@ -326,10 +360,10 @@ static int display(struct vidisp_st *st, const char *title,
 	SDL_UnlockTexture(st->texture);
 
 	/* Blit the sprite onto the screen */
-	SDL_RenderCopy(st->texture, NULL, NULL);
+	SDL_RenderCopy(st->renderer, st->texture, NULL, NULL);
 
 	/* Update the screen! */
-	SDL_RenderPresent();
+	SDL_RenderPresent(st->renderer);
 
 	return 0;
 }
@@ -348,21 +382,25 @@ static int module_init(void)
 {
 	int err;
 
-	if (SDL_VideoInit(NULL, 0) < 0) {
+	if (SDL_VideoInit(NULL) < 0) {
 		re_fprintf(stderr, "SDL: unable to init Video: %s\n",
 			   SDL_GetError());
 		return ENODEV;
 	}
 
-	/*dump_rendererinfo();*/
+#if 0
+	dump_rendererinfo();
+#endif
 
+#if 0
 	rend_idx = find_yuv420p_renderer();
 	if (rend_idx < 0) {
 		re_fprintf(stderr, "could not find YUV420P renderer\n");
 		return ENODEV;
 	}
+#endif
 
-	err = vidisp_register(&vid, "sdl", alloc, display, hide);
+	err = vidisp_register(&vid, "sdl", alloc, NULL, display, hide);
 	if (err)
 		return err;
 

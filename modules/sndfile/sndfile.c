@@ -13,11 +13,6 @@
 #include <re_dbg.h>
 
 
-/* TODO:
-  - If samplerate etc change, close current file and open new
- */
-
-
 struct aufilt_st {
 	struct aufilt *af;  /* base class */
 	SNDFILE *enc, *dec;
@@ -28,9 +23,9 @@ static struct aufilt *filt;
 static uint32_t count = 0;
 
 
-static void sndfile_destructor(void *data)
+static void sndfile_destructor(void *arg)
 {
-	struct aufilt_st *st = data;
+	struct aufilt_st *st = arg;
 
 	if (st->enc)
 		sf_close(st->enc);

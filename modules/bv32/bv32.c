@@ -34,9 +34,9 @@ struct aucodec_st {
 static struct aucodec *bv32;
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct aucodec_st *st = data;
+	struct aucodec_st *st = arg;
 
 	Reset_BV32_Coder(&st->cs);
 	Reset_BV32_Decoder(&st->ds);
@@ -113,7 +113,7 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 			return err;
 	}
 
-	if (!src) {
+	if (!mbuf_get_left(src)) {
 		BV32_PLC(&st->ds, (short *)mbuf_buf(dst));
 		dst->end += NSAMP*2;
 		return 0;

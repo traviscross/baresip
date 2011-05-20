@@ -44,7 +44,7 @@ struct aufilt {
 	aufilt_alloc_h *alloch;
 	aufilt_enc_h *ench;
 	aufilt_dec_h *dech;
-	aufilt_dbg_h *dbgh;
+	aufilt_update_h *updh;
 };
 
 /* One filter element */
@@ -81,17 +81,25 @@ static inline struct aufilt *aufilt_get(struct aufilt_st *st)
 }
 
 
-static void aufilt_elem_destructor(void *data)
+static void destructor(void *arg)
 {
-	struct aufilt_elem *f = data;
+	struct aufilt *af = arg;
+
+	list_unlink(&af->le);
+}
+
+
+static void aufilt_elem_destructor(void *arg)
+{
+	struct aufilt_elem *f = arg;
 	list_unlink(&f->le);
 	mem_deref(f->st);
 }
 
 
-static void aufilt_chain_destructor(void *data)
+static void aufilt_chain_destructor(void *arg)
 {
-	struct aufilt_chain *fc = data;
+	struct aufilt_chain *fc = arg;
 	list_flush(&fc->filtl);
 }
 
@@ -133,10 +141,10 @@ int aufilt_chain_alloc(struct aufilt_chain **fcp,
 	}
 
 	if (fc->filtl.head) {
-		(void)re_printf("audio-filter chain: enc=%uHz/%dch"
-				" dec=%uHz/%dch (%u filters)\n",
-				encprm->srate, encprm->ch,
-				decprm->srate, decprm->ch,
+		(void)re_printf("audio-filter chain: enc=%u-%uHz/%dch"
+				" dec=%u-%uHz/%dch (%u filters)\n",
+				encprm->srate, encprm->srate_out, encprm->ch,
+				decprm->srate, decprm->srate_out, decprm->ch,
 				list_count(&fc->filtl));
 	}
 
@@ -228,17 +236,29 @@ int aufilt_chain_decode(struct aufilt_chain *fc, struct mbuf *mb)
 }
 
 
-static void destructor(void *arg)
+int aufilt_chain_update(struct aufilt_chain *fc, bool speakerphone)
 {
-	struct aufilt *af = arg;
+	struct le *le;
+	int err = 0;
 
-	list_unlink(&af->le);
+	if (!fc)
+		return EINVAL;
+
+	for (le = fc->filtl.head; !err && le; le = le->next) {
+		struct aufilt_elem *f = le->data;
+		struct aufilt *af = aufilt_get(f->st);
+
+		if (af->updh)
+			err = af->updh(f->st, speakerphone);
+	}
+
+	return err;
 }
 
 
 int aufilt_register(struct aufilt **afp, const char *name,
 		    aufilt_alloc_h *alloch, aufilt_enc_h *ench,
-		    aufilt_dec_h *dech, aufilt_dbg_h *dbgh)
+		    aufilt_dec_h *dech, aufilt_update_h *updh)
 {
 	struct aufilt *af;
 
@@ -255,7 +275,7 @@ int aufilt_register(struct aufilt **afp, const char *name,
 	af->alloch = alloch;
 	af->ench   = ench;
 	af->dech   = dech;
-	af->dbgh   = dbgh;
+	af->updh   = updh;
 
 	(void)re_printf("aufilt: %s\n", name);
 
@@ -268,28 +288,6 @@ int aufilt_register(struct aufilt **afp, const char *name,
 struct list *aufilt_list(void)
 {
 	return &aufiltl;
-}
-
-
-int aufilt_chain_debug(struct re_printf *pf, const struct aufilt_chain *fc)
-{
-	struct le *le;
-	int err;
-
-	if (!fc)
-		return 0;
-
-	err = re_hprintf(pf, "Audio filter chain: (%u)\n",
-			 list_count(&fc->filtl));
-	for (le = fc->filtl.head; le && !err; le = le->next) {
-		struct aufilt_elem *ae = le->data;
-		struct aufilt_st *st = ae->st;
-
-		if (aufilt_get(st)->dbgh)
-			err = aufilt_get(st)->dbgh(pf, st);
-	}
-
-	return err;
 }
 
 

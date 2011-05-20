@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
+
 #include <re.h>
 #include <baresip.h>
 #include "core.h"
@@ -40,7 +41,7 @@ int mnat_register(struct mnat **mnatp, const char *id, const char *ftag,
 	mnat->mediah  = mediah;
 	mnat->updateh = updateh;
 
-	(void)re_printf("mnat: %s\n", id);
+	(void)re_printf("medianat: %s\n", id);
 
 	*mnatp = mnat;
 

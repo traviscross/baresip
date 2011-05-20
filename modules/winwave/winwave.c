@@ -303,84 +303,60 @@ static int write_stream_open(struct auplay_st *st)
 }
 
 
-static int read_stream_close(struct ausrc_st *st)
+static void read_stream_close(struct ausrc_st *st)
 {
-	MMRESULT   res;
 	int i;
 
 	/* Mark the input as stopped, so we wont be
 	 * working on the buffers in the callback
 	 */
 	st->stop = true;
-	res = waveInStop(st->wavein);
-	if (res != MMSYSERR_NOERROR) {
-		DEBUG_WARNING("stream_close: waveInStop: failed: %d\n", res);
-		return EINVAL;
-	}
 
-	/* Remove all the buffers from the input device */
-	res = waveInReset(st->wavein);
-	if (res != MMSYSERR_NOERROR) {
-		DEBUG_WARNING("stream_close: waveInReset: failed: %d\n", res);
-		return EINVAL;
-	}
-
-	/* Now its safe to close the input device */
-	res = waveInClose(st->wavein);
-	if (res != MMSYSERR_NOERROR) {
-		DEBUG_WARNING("stream_close: waveInClose: failed: %d\n", res);
-		return EINVAL;
-	}
+	waveInStop(st->wavein);
+	waveInReset(st->wavein);
+	waveInClose(st->wavein);
 
 	for (i = 0; i < READ_BUFFERS; i++) {
 		waveInUnprepareHeader(st->wavein, &st->bufs[i].wh,
 				      sizeof(WAVEHDR));
 		st->bufs[i].mb = mem_deref(st->bufs[i].mb);
 	}
-
-	return 0;
 }
 
 
-static int write_stream_close(struct auplay_st *st)
+static void write_stream_close(struct auplay_st *st)
 {
-	MMRESULT res;
 	int i;
 
 	/* Mark the device for closing, and wait for all the
 	 * buffers to be returned by the driver
 	 */
 	st->rdy = false;
-	while (st->inuse > 0) {
+	while (st->inuse > 0)
 		Sleep(50);
-	}
 
-	res = waveOutClose(st->waveout);
-	if (res != MMSYSERR_NOERROR) {
-		DEBUG_WARNING("waveOutClose: failed: %d\n", res);
-		return EINVAL;
-	}
+	waveOutClose(st->waveout);
 
 	for (i = 0; i < WRITE_BUFFERS; i++) {
 		waveOutUnprepareHeader(st->waveout, &st->bufs[i].wh,
 				       sizeof(WAVEHDR));
 		st->bufs[i].mb = mem_deref(st->bufs[i].mb);
 	}
-
-	return 0;
 }
 
 
-static void ausrc_destructor(void *data)
+static void ausrc_destructor(void *arg)
 {
-	struct ausrc_st *st = data;
+	struct ausrc_st *st = arg;
+
 	read_stream_close(st);
 }
 
 
-static void auplay_destructor(void *data)
+static void auplay_destructor(void *arg)
 {
-	struct auplay_st *st = data;
+	struct auplay_st *st = arg;
+
 	write_stream_close(st);
 }
 

@@ -20,9 +20,10 @@ struct aucodec_st {
 static struct aucodec *acv[4];
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct aucodec_st *as = data;
+	struct aucodec_st *as = arg;
+
 	mem_deref(as->ac);
 }
 
@@ -94,6 +95,8 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 	uint8_t *s;
 
 	nsamp = mbuf_get_left(src);
+	if (!nsamp)
+		return 0;
 
 	if (mbuf_get_space(dst) < 2*nsamp) {
 		int err = mbuf_resize(dst, dst->size + 2*nsamp);

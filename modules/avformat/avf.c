@@ -45,9 +45,9 @@ struct vidsrc_st {
 static struct vidsrc *mod_avf;
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct vidsrc_st *st = data;
+	struct vidsrc_st *st = arg;
 
 	if (st->run) {
 		st->run = false;
@@ -142,7 +142,6 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 		if (ret < 0)
 			return;
 
-		/* todo: keep aspect ratio? */
 		ret = sws_scale(st->sws,
 				SRCSLICE_CAST frame.data, frame.linesize,
 				0, st->sz.h, pict.data, pict.linesize);
@@ -239,7 +238,6 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	prms.height             = prm ? prm->size.h : 0;
 	prms.pix_fmt            = PIX_FMT_YUV420P;
 	prms.channel            = 0;
-	prms.standard           = "pal";
 
 	ret = av_open_input_file(&st->ic, dev, av_find_input_format(fmt),
 				 0, &prms);
@@ -320,7 +318,7 @@ static int module_init(void)
 	avdevice_register_all();
 	av_register_all();
 
-	return vidsrc_register(&mod_avf, "avformat", alloc);
+	return vidsrc_register(&mod_avf, "avformat", alloc, NULL);
 }
 
 

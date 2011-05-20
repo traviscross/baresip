@@ -30,10 +30,6 @@
  *
  *   mode=20  15.20 kbit/s  160samp  38bytes
  *   mode=30  13.33 kbit/s  240samp  50bytes
- *
- * TODO:
- *
- * - how to transfer mode/ptime to application?
  */
 
 enum {
@@ -45,9 +41,11 @@ struct aucodec_st {
 	struct aucodec *ac; /* inheritance */
 	iLBC_Enc_Inst_t enc;
 	iLBC_Dec_Inst_t dec;
-	int mode;
+	int mode_enc;
+	int mode_dec;
 	uint32_t enc_bytes;
 	uint32_t dec_nsamp;
+	size_t dec_bytes;
 };
 
 
@@ -55,33 +53,58 @@ static struct aucodec *ilbc;
 static char ilbc_fmtp[32];
 
 
-static void set_mode(struct aucodec_st *st, int mode)
+static void set_encoder_mode(struct aucodec_st *st, int mode)
 {
-	if (st->mode == mode)
+	if (st->mode_enc == mode)
 		return;
 
-	(void)re_printf("set iLBC mode %dms\n", mode);
+	(void)re_printf("set iLBC encoder mode %dms\n", mode);
 
-	st->mode = mode;
+	st->mode_enc = mode;
 
 	switch (mode) {
 
 	case 20:
 		st->enc_bytes = NO_OF_BYTES_20MS;
-		st->dec_nsamp = BLOCKL_20MS;
 		break;
 
 	case 30:
 		st->enc_bytes = NO_OF_BYTES_30MS;
-		st->dec_nsamp = BLOCKL_30MS;
 		break;
 
 	default:
-		DEBUG_WARNING("unknown mode %d\n", mode);
+		DEBUG_WARNING("unknown encoder mode %d\n", mode);
 		return;
 	}
 
 	st->enc_bytes = initEncode(&st->enc, mode);
+}
+
+
+static void set_decoder_mode(struct aucodec_st *st, int mode)
+{
+	if (st->mode_dec == mode)
+		return;
+
+	(void)re_printf("set iLBC decoder mode %dms\n", mode);
+
+	st->mode_dec = mode;
+
+	switch (mode) {
+
+	case 20:
+		st->dec_nsamp = BLOCKL_20MS;
+		break;
+
+	case 30:
+		st->dec_nsamp = BLOCKL_30MS;
+		break;
+
+	default:
+		DEBUG_WARNING("unknown decoder mode %d\n", mode);
+		return;
+	}
+
 	st->dec_nsamp = initDecode(&st->dec, mode, USE_ENHANCER);
 }
 
@@ -96,14 +119,34 @@ static void fmtp_decode(struct aucodec_st *st, const struct pl *pl)
 	if (re_regex(pl->p, pl->l, "mode=[0-9]+", &mode))
 		return;
 
-	set_mode(st, pl_u32(&mode));
+	set_encoder_mode(st, pl_u32(&mode));
+	set_decoder_mode(st, pl_u32(&mode));
 }
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct aucodec_st *st = data;
+	struct aucodec_st *st = arg;
+
 	mem_deref(st->ac);
+}
+
+
+static int check_ptime(const struct aucodec_prm *prm)
+{
+	if (!prm)
+		return 0;
+
+	switch (prm->ptime) {
+
+	case 20:
+	case 30:
+		return 0;
+
+	default:
+		DEBUG_WARNING("invalid ptime %u ms\n", prm->ptime);
+		return EINVAL;
+	}
 }
 
 
@@ -113,16 +156,25 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 {
 	struct aucodec_st *st;
 
-	(void)encp;
-	(void)decp;
+	if (check_ptime(encp) || check_ptime(decp))
+		return EINVAL;
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
 		return ENOMEM;
 
 	st->ac = mem_ref(ac);
-	set_mode(st, DEFAULT_MODE);
-	fmtp_decode(st, sdp_fmtp);
+
+	set_encoder_mode(st, DEFAULT_MODE);
+	set_decoder_mode(st, DEFAULT_MODE);
+
+	if (pl_isset(sdp_fmtp))
+		fmtp_decode(st, sdp_fmtp);
+
+	/* update parameters after SDP was decoded */
+	if (encp) {
+		encp->ptime = st->mode_enc;
+	}
 
 	*stp = st;
 
@@ -164,7 +216,7 @@ static int do_dec(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 	const uint32_t nsamp = st->dec_nsamp;
 	const uint32_t n = 2*nsamp;
 	float buf[st->dec_nsamp];
-	const int mode = src ? 1 : 0;
+	const int mode = mbuf_get_left(src) ? 1 : 0;
 	uint32_t i;
 	int err;
 
@@ -182,7 +234,8 @@ static int do_dec(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 		    &st->dec,       /* (i/o) the decoder state structure */
 		    mode);          /* (i) 0: bad packet, PLC, 1: normal */
 
-	mbuf_advance(src, st->enc_bytes);
+	if (src)
+		mbuf_advance(src, st->dec_bytes);
 
 	/* Convert from float to 16-bit samples */
 	for (i=0; i<nsamp; i++) {
@@ -198,21 +251,23 @@ static int do_dec(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
 	/* Try to detect mode */
-	if (st->enc_bytes != mbuf_get_left(src)) {
+	if (mbuf_get_left(src) && st->dec_bytes != mbuf_get_left(src)) {
 
-		switch (mbuf_get_left(src)) {
+		st->dec_bytes = mbuf_get_left(src);
+
+		switch (st->dec_bytes) {
 
 		case NO_OF_BYTES_20MS:
-			set_mode(st, 20);
+			set_decoder_mode(st, 20);
 			break;
 
 		case NO_OF_BYTES_30MS:
-			set_mode(st, 30);
+			set_decoder_mode(st, 30);
 			break;
 
 		default:
 			DEBUG_WARNING("decode: expect %u, got %u\n",
-				      st->enc_bytes, mbuf_get_left(src));
+				      st->dec_bytes, mbuf_get_left(src));
 			return EINVAL;
 		}
 	}

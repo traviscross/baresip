@@ -54,12 +54,12 @@ struct vidsrc_st {
 
 
 - (id)init:(struct vidsrc_st *)st
-       dev:(const char *)devname
+       dev:(const char *)name
 {
 	NSAutoreleasePool *pool;
 	QTCaptureDevice *dev;
 	BOOL success = NO;
-	NSError *error;
+	NSError *err;
 
 	pool = [[NSAutoreleasePool alloc] init];
 	if (!pool)
@@ -74,22 +74,22 @@ struct vidsrc_st {
 	if (!sess)
 		goto out;
 
-	if (str_len(devname)) {
-		NSString *s = [NSString stringWithUTF8String:devname];
+	if (str_len(name)) {
+		NSString *s = [NSString stringWithUTF8String:name];
 		dev = [QTCaptureDevice deviceWithUniqueID:s];
-		re_printf("qtcapture: using device: %s\n", devname);
+		re_printf("qtcapture: using device: %s\n", name);
 	}
 	else {
 		dev = [QTCaptureDevice
 		         defaultInputDeviceWithMediaType:QTMediaTypeVideo];
 	}
 
-	success = [dev open:&error];
+	success = [dev open:&err];
 	if (!success)
 		goto out;
 
 	input = [[QTCaptureDeviceInput alloc] initWithDevice:dev];
-	success = [sess addInput:input error:&error];
+	success = [sess addInput:input error:&err];
 	if (!success)
 		goto out;
 
@@ -106,7 +106,7 @@ struct vidsrc_st {
 #endif
 		       nil]];
 
-	success = [sess addOutput:output error:&error];
+	success = [sess addOutput:output error:&err];
 	if (!success)
 		goto out;
 
@@ -474,7 +474,7 @@ static void device_info(void)
 static int module_init(void)
 {
 	device_info();
-	return vidsrc_register(&vidsrc, "qtcapture", alloc);
+	return vidsrc_register(&vidsrc, "qtcapture", alloc, NULL);
 }
 
 

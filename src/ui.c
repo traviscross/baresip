@@ -68,7 +68,7 @@ enum view {
 
 static const struct ui_view ui_views[VIEW_NR] = {
 	{ui_idle,    help_idle},
-	{ui_edit,    help_idle}, /* todo: custom help menus */
+	{ui_edit,    help_idle},
 	{ui_chat,    help_idle},
 	{ui_contact, help_idle},
 	{ui_call,    help_call}
@@ -98,7 +98,7 @@ static int help_idle(struct re_printf *pf)
 	err  = re_hprintf(pf, "--- Help ---\n");
 	err |= re_hprintf(pf, " /     - Search contacts\n");
 	err |= re_hprintf(pf, " =     - Chat mode\n");
-	err |= re_hprintf(pf, " a     - Audio-loop toggle\n");
+	err |= re_hprintf(pf, " a  A  - Audio-loop toggle\n");
 	err |= re_hprintf(pf, " b ESC - Hangup\n");
 	err |= re_hprintf(pf, " C     - List contacts\n");
 	err |= re_hprintf(pf, " SPACE - Toggle UA\n");
@@ -120,7 +120,7 @@ static int help_idle(struct re_printf *pf)
 	err |= re_hprintf(pf, " t     - Timer debug\n");
 	err |= re_hprintf(pf, " u     - UA debug\n");
 #ifdef USE_VIDEO
-	err |= re_hprintf(pf, " v     - Video-loop toggle\n");
+	err |= re_hprintf(pf, " v  V  - Video-loop toggle\n");
 #endif
 	err |= re_hprintf(pf, " w     - Play sine wave\n");
 	err |= re_hprintf(pf, " y     - Memory status\n");
@@ -182,7 +182,7 @@ static int ui_edit(char key, struct re_printf *pf)
 		uig.dialbuf.pos = 0;
 		(void)mbuf_read_str(&uig.dialbuf, str, uig.dialbuf.end);
 		str[uig.dialbuf.end] = '\0';
-		err = ua_connect(ua_cur(), str);
+		err = ua_connect(ua_cur(), str, NULL, VIDMODE_ON);
 		if (err) {
 			DEBUG_WARNING("connect failed: %s\n", strerror(err));
 		}
@@ -292,7 +292,7 @@ static int ui_contact(char key, struct re_printf *pf)
 			(void)mbuf_read_str(&uig.dialbuf, str,
 					    uig.dialbuf.end);
 			str[uig.dialbuf.end] = '\0';
-			err = ua_connect(ua_cur(), str);
+			err = ua_connect(ua_cur(), str, NULL, VIDMODE_ON);
 			if (err) {
 				DEBUG_WARNING("connect failed: %s\n",
 					      strerror(err));
@@ -531,7 +531,8 @@ static int ui_idle(char key, struct re_printf *pf)
 		break;
 
 	case 'a':
-		audio_loop_test(false);
+	case 'A':
+		audio_loop_test('A' == key);
 		break;
 
 	case 'b':
@@ -667,7 +668,8 @@ static int ui_idle(char key, struct re_printf *pf)
 
 #ifdef USE_VIDEO
 	case 'v':
-		video_loop_test(false);
+	case 'V':
+		video_loop_test('V' == key);
 		break;
 #endif
 
@@ -694,9 +696,9 @@ static void ui_handler(char key, struct re_printf *pf, void *arg)
 }
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct ui *ui = data;
+	struct ui *ui = arg;
 
 	list_unlink(&ui->le);
 }

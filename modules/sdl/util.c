@@ -33,7 +33,6 @@ static int get_plane_bytewidth(int width, int plane)
 }
 
 
-/* todo: move to vutil.c */
 void picture_copy(uint8_t *data[4], uint16_t linesize[4],
 		  const struct vidframe *frame)
 {

@@ -17,7 +17,6 @@
 /* Configurable items */
 #define PTIME 20
 
-static const char *device = "/dev/dsp";
 static const char *codec = NULL; /*"pcmu";*/
 
 
@@ -51,9 +50,9 @@ static const struct {
 static struct audio_loop *gal = NULL;
 
 
-static void auloop_destructor(void *data)
+static void auloop_destructor(void *arg)
 {
-	struct audio_loop *al = data;
+	struct audio_loop *al = arg;
 
 	mem_deref(al->ausrc);
 	mem_deref(al->auplay);
@@ -168,7 +167,7 @@ static void start_codec(struct audio_loop *al)
 	err = aucodec_alloc(&al->codec, codec,
 			    configv[al->index].srate,
 			    configv[al->index].ch,
-			    NULL, NULL, NULL);
+			    &prm, &prm, NULL);
 	if (err) {
 		DEBUG_WARNING("codec_alloc: %s\n", strerror(err));
 	}
@@ -199,7 +198,7 @@ static int auloop_reset(struct audio_loop *al)
 	auplay_prm.srate      = al->srate;
 	auplay_prm.ch         = al->ch;
 	auplay_prm.frame_size = al->fs;
-	err = auplay_alloc(&al->auplay, NULL, &auplay_prm, device,
+	err = auplay_alloc(&al->auplay, NULL, &auplay_prm, config.audio.device,
 			   write_handler, al);
 	if (err) {
 		DEBUG_WARNING("auplay failed: %s\n", strerror(err));
@@ -210,7 +209,7 @@ static int auloop_reset(struct audio_loop *al)
 	ausrc_prm.srate      = al->srate;
 	ausrc_prm.ch         = al->ch;
 	ausrc_prm.frame_size = al->fs;
-	err = ausrc_alloc(&al->ausrc, NULL, &ausrc_prm, device,
+	err = ausrc_alloc(&al->ausrc, NULL, &ausrc_prm, config.audio.device,
 			  read_handler, error_handler, al);
 	if (err) {
 		DEBUG_WARNING("ausrc failed: %s\n", strerror(err));

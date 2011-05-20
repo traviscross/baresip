@@ -18,9 +18,10 @@ struct aucodec_st {
 static struct aucodec *l16v[NR_CODECS];
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct aucodec_st *st = data;
+	struct aucodec_st *st = arg;
+
 	mem_deref(st->ac);
 }
 

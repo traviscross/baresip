@@ -79,6 +79,8 @@ static void timeout(void *arg)
 static void event_handler(void *arg)
 {
 	SDL_Event event;
+	char ch;
+
 	(void)arg;
 
 	tmr_start(&sdl.tmr, 100, event_handler, NULL);
@@ -108,13 +110,13 @@ static void event_handler(void *arg)
 				break;
 
 			default:
+				ch = event.key.keysym.unicode & 0x7f;
+
 				/* Relay key-press to UI subsystem */
-				if (isprint(event.key.keysym.sym)
-				    && sdl.inputh) {
+				if (isprint(ch) && sdl.inputh) {
 					tmr_start(&sdl.tmr, KEY_RELEASE_VAL,
 						  timeout, NULL);
-					sdl.inputh(event.key.keysym.sym,
-						   sdl.arg);
+					sdl.inputh(ch, sdl.arg);
 				}
 				break;
 			}
@@ -147,6 +149,8 @@ static int sdl_open(void)
 		return ENODEV;
 	}
 
+	SDL_EnableUNICODE(1);
+
 	tmr_start(&sdl.tmr, 100, event_handler, NULL);
 	sdl.open = true;
 
@@ -166,22 +170,24 @@ static void sdl_close(void)
 }
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct vidisp_st *st = data;
+	struct vidisp_st *st = arg;
+
 	mem_deref(st->vd);
 	sdl_close();
 }
 
 
-static int alloc(struct vidisp_st **stp, struct vidisp *vd,
-		 struct vidisp_prm *prm, const char *dev,
+static int alloc(struct vidisp_st **stp, struct vidisp_st *parent,
+		 struct vidisp *vd, struct vidisp_prm *prm, const char *dev,
 		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
 {
 	struct vidisp_st *st;
 	int err;
 
 	/* Not used by SDL */
+	(void)parent;
 	(void)prm;
 	(void)dev;
 
@@ -293,7 +299,7 @@ static int display(struct vidisp_st *st, const char *title,
 
 static int module_init(void)
 {
-	return vidisp_register(&vid, "sdl", alloc, display, NULL);
+	return vidisp_register(&vid, "sdl", alloc, NULL, display, NULL);
 }
 
 

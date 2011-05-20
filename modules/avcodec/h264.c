@@ -71,7 +71,7 @@ int fu_hdr_decode(struct fu *fu, struct mbuf *mb)
 }
 
 
-/**
+/*
  * Find the NAL start sequence in a H.264 byte stream
  *
  * @note: copied from ffmpeg source
@@ -407,6 +407,16 @@ int h264_decode(struct vidcodec_st *st, struct mbuf *src)
 
 	/* handle NAL types */
 	if (1 <= h264_hdr.type && h264_hdr.type <= 23) {
+
+		if (!st->got_keyframe) {
+			switch (h264_hdr.type) {
+
+			case H264_NAL_PPS:
+			case H264_NAL_SPS:
+				st->got_keyframe = true;
+				break;
+			}
+		}
 
 		/* prepend H.264 NAL start sequence */
 		mbuf_write_mem(st->dec.mb, nal_seq, 3);

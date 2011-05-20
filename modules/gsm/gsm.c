@@ -27,9 +27,9 @@ struct aucodec_st {
 static struct aucodec *ac_gsm;
 
 
-static void gsm_destructor(void *data)
+static void gsm_destructor(void *arg)
 {
-	struct aucodec_st *st = data;
+	struct aucodec_st *st = arg;
 
 	gsm_destroy(st->enc);
 	gsm_destroy(st->dec);

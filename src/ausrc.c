@@ -1,8 +1,9 @@
 /**
- * @file ausrc.c  Audio Source
+ * @file ausrc.c Audio Source
  *
  * Copyright (C) 2010 Creytiv.com
  */
+
 #include <re.h>
 #include <baresip.h>
 #include "core.h"
@@ -11,9 +12,9 @@
 static struct list ausrcl = LIST_INIT;
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct ausrc *as = data;
+	struct ausrc *as = arg;
 
 	list_unlink(&as->le);
 }
@@ -38,6 +39,7 @@ int ausrc_register(struct ausrc **asp, const char *name, ausrc_alloc_h *alloch)
 	(void)re_printf("ausrc: %s\n", name);
 
 	*asp = as;
+
 	return 0;
 }
 
@@ -46,13 +48,13 @@ const struct ausrc *ausrc_find(const char *name)
 {
 	struct le *le;
 
-	for (le = ausrcl.head; le; le = le->next) {
+	for (le=ausrcl.head; le; le=le->next) {
+
 		struct ausrc *as = le->data;
 
 		if (name && 0 != str_casecmp(name, as->name))
 			continue;
 
-		/* Found */
 		return as;
 	}
 

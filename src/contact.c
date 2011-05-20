@@ -37,9 +37,9 @@ void contact_close(void)
 }
 
 
-static void contact_destructor(void *data)
+static void contact_destructor(void *arg)
 {
-	struct contact *c = data;
+	struct contact *c = arg;
 
 	list_unlink(&c->le);
 	mem_deref(c->addr);

@@ -35,9 +35,9 @@ static struct ui_st *_ui;
 static struct ui *stdio;
 
 
-static void ui_destructor(void *data)
+static void ui_destructor(void *arg)
 {
-	struct ui_st *st = data;
+	struct ui_st *st = arg;
 
 	fd_close(STDIN_FILENO);
 

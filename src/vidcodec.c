@@ -1,8 +1,9 @@
 /**
- * @file vidcodec.c  Video codecs
+ * @file vidcodec.c Video Codec
  *
  * Copyright (C) 2010 Creytiv.com
  */
+
 #include <re.h>
 #include <baresip.h>
 #include "core.h"
@@ -16,9 +17,9 @@ struct vidcodec_st {
 static struct list vidcodecl = LIST_INIT;
 
 
-static void destructor(void *data)
+static void destructor(void *arg)
 {
-	struct vidcodec *vc = data;
+	struct vidcodec *vc = arg;
 
 	list_unlink(&vc->le);
 }
@@ -49,6 +50,7 @@ int vidcodec_register(struct vidcodec **vp, const char *pt, const char *name,
 	(void)re_printf("vidcodec: %s\n", name);
 
 	*vp = vc;
+
 	return 0;
 }
 
@@ -77,13 +79,13 @@ const struct vidcodec *vidcodec_find(const char *name)
 {
 	struct le *le;
 
-	for (le = vidcodecl.head; le; le = le->next) {
+	for (le=vidcodecl.head; le; le=le->next) {
+
 		struct vidcodec *vc = le->data;
 
 		if (name && 0 != str_casecmp(name, vc->name))
 			continue;
 
-		/* Found */
 		return vc;
 	}
 
@@ -111,7 +113,7 @@ struct list *vidcodec_list(void)
 }
 
 
-struct vidcodec *vidcodec_get(struct vidcodec_st *st)
+struct vidcodec *vidcodec_get(const struct vidcodec_st *st)
 {
 	return st ? st->vc : NULL;
 }

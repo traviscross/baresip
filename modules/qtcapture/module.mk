@@ -6,6 +6,7 @@
 
 MOD		:= qtcapture
 $(MOD)_SRCS	+= qtcapture.m
-$(MOD)_LFLAGS	+= -framework QTKit -framework CoreVideo -lavcodec -lswscale
+$(MOD)_LFLAGS	+= -framework Cocoa -framework QTKit -framework CoreVideo \
+			-lavcodec -lswscale
 
 include mk/mod.mk

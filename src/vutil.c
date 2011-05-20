@@ -100,6 +100,17 @@ int vidframe_print(struct re_printf *pf, const struct vidframe *vf)
 }
 
 
+int vidrect_print(struct re_printf *pf, const struct vidrect *vr)
+{
+	if (!vr)
+		return 0;
+
+	return re_hprintf(pf, "(%d, %d) %d x %d [r=%d]",
+			  vr->origin.x, vr->origin.y,
+			  vr->size.w, vr->size.h, vr->r);
+}
+
+
 int vidframe_alloc_filled(struct vidframe **vfp, const struct vidsz *sz,
                           uint32_t r, uint32_t g, uint32_t b)
 {
@@ -142,4 +153,31 @@ void vidrect_init(struct vidrect *rect, int x, int y, int w, int h, int r)
 	rect->size.w = w;
 	rect->size.h = h;
 	rect->r = r;
+}
+
+
+struct vidframe *vidframe_clone(const struct vidframe *src)
+{
+	struct vidframe *vf;
+	int h2;
+
+	if (!src)
+		return NULL;
+
+	vf = mem_zalloc(sizeof(*vf) + yuv420p_size(&src->size), NULL);
+	if (!vf)
+		return NULL;
+
+	*vf = *src;
+
+	h2 = ((src->size.h + 1)>>1);
+	vf->data[0] = ((uint8_t *)vf) + sizeof(*vf);
+	vf->data[1] = vf->data[0] + vf->linesize[0] * src->size.h;
+	vf->data[2] = vf->data[1] + vf->linesize[1] * h2;
+
+	memcpy(vf->data[0], src->data[0], vf->linesize[0] * src->size.h);
+	memcpy(vf->data[1], src->data[1], vf->linesize[1] * h2);
+	memcpy(vf->data[2], src->data[2], vf->linesize[2] * h2);
+
+	return vf;
 }
