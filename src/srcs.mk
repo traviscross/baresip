@@ -3,7 +3,7 @@
 #
 # Copyright (C) 2010 Creytiv.com
 #
-SRCS	+= aubuf.c
+
 SRCS	+= aucodec.c
 SRCS	+= audio.c
 SRCS	+= aufile.c
@@ -11,7 +11,6 @@ SRCS	+= aufilt.c
 SRCS	+= auloop.c
 SRCS	+= auplay.c
 SRCS	+= ausrc.c
-SRCS	+= autone.c
 SRCS	+= calc.c
 SRCS	+= call.c
 SRCS	+= conf.c
@@ -33,7 +32,6 @@ SRCS	+= uuid.c
 SRCS	+= vidcodec.c
 SRCS	+= vidisp.c
 SRCS	+= vidsrc.c
-SRCS	+= vutil.c
 
 ifneq ($(USE_VIDEO),)
 SRCS	+= video.c

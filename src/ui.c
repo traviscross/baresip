@@ -153,7 +153,6 @@ static int help_call(struct re_printf *pf)
 	err |= re_hprintf(pf, " n     - Network debug\n");
 	err |= re_hprintf(pf, " P     - Polling method toggle\n");
 	err |= re_hprintf(pf, " q     - Quit\n");
-	err |= re_hprintf(pf, " r     - Reg status\n");
 	err |= re_hprintf(pf, " S     - Toggle status-mode\n");
 	err |= re_hprintf(pf, " t     - Timer debug\n");
 	err |= re_hprintf(pf, " u     - UA debug\n");
@@ -182,7 +181,7 @@ static int ui_edit(char key, struct re_printf *pf)
 		uig.dialbuf.pos = 0;
 		(void)mbuf_read_str(&uig.dialbuf, str, uig.dialbuf.end);
 		str[uig.dialbuf.end] = '\0';
-		err = ua_connect(ua_cur(), str, NULL, VIDMODE_ON);
+		err = ua_connect(ua_cur(), str, NULL, NULL, VIDMODE_ON);
 		if (err) {
 			DEBUG_WARNING("connect failed: %s\n", strerror(err));
 		}
@@ -292,7 +291,8 @@ static int ui_contact(char key, struct re_printf *pf)
 			(void)mbuf_read_str(&uig.dialbuf, str,
 					    uig.dialbuf.end);
 			str[uig.dialbuf.end] = '\0';
-			err = ua_connect(ua_cur(), str, NULL, VIDMODE_ON);
+			err = ua_connect(ua_cur(), str, NULL,
+					 NULL, VIDMODE_ON);
 			if (err) {
 				DEBUG_WARNING("connect failed: %s\n",
 					      strerror(err));

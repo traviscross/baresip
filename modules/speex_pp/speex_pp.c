@@ -125,6 +125,7 @@ static int enc(struct aufilt_st *st, struct mbuf *mb)
 #endif
 
 	/* XXX: Handle is_speech and VAD */
+	(void)is_speech;
 
 	return 0;
 }

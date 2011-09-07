@@ -5,16 +5,7 @@
  */
 #include <re.h>
 #include <baresip.h>
-#include <libavcodec/avcodec.h>
-#include <libswscale/swscale.h>
 #include <QTKit/QTKit.h>
-
-
-#if LIBSWSCALE_VERSION_MINOR >= 9
-#define SRCSLICE_CAST (const uint8_t **)
-#else
-#define SRCSLICE_CAST (uint8_t **)
-#endif
 
 
 static void frame_handler(struct vidsrc_st *st,
@@ -40,7 +31,6 @@ struct vidsrc_st {
 	struct vidsz app_sz;
 	struct vidsz sz;
 	struct mbuf *buf;
-	struct SwsContext *sws;  /* TODO: use apple routines instead */
 	vidsrc_frame_h *frameh;
 	void *arg;
 	bool started;
@@ -184,42 +174,21 @@ struct vidsrc_st {
 @end
 
 
-/** Calculate the size of an YUV420P frame */
-static inline size_t vidframe_size(const AVPicture *f, int h)
-{
-	return f->linesize[0] * h
-		+ f->linesize[1] * h/2
-		+ f->linesize[2] * h/2;
-}
-
-
-static enum PixelFormat get_pixfmt(OSType type)
+static enum vidfmt get_pixfmt(OSType type)
 {
 	switch (type) {
 
-	case kCVPixelFormatType_420YpCbCr8Planar: return PIX_FMT_YUV420P;
-	case kCVPixelFormatType_422YpCbCr8:       return PIX_FMT_UYVY422;
-	case 0x79757673: /* yuvs */               return PIX_FMT_YUYV422;
-	case kCVPixelFormatType_32ARGB:           return PIX_FMT_ARGB;
-	default:                                  return PIX_FMT_NONE;
+	case kCVPixelFormatType_420YpCbCr8Planar: return VID_FMT_YUV420P;
+	case kCVPixelFormatType_422YpCbCr8:       return VID_FMT_UYVY422;
+	case 0x79757673: /* yuvs */               return VID_FMT_YUYV422;
+	case kCVPixelFormatType_32ARGB:           return VID_FMT_ARGB;
+	default:                                  return -1;
 	}
 }
 
 
-static const char *pixfmt_name(enum PixelFormat pixfmt)
-{
-	switch (pixfmt) {
-
-	case PIX_FMT_YUV420P: return "YUV420P";
-	case PIX_FMT_UYVY422: return "UYVY422";
-	case PIX_FMT_YUYV422: return "YUYV422";
-	case PIX_FMT_ARGB:    return "ARGB";
-	default:              return "???";
-	}
-}
-
-
-static inline void avpict_init_planar(AVPicture *p, const CVImageBufferRef f)
+static inline void avpict_init_planar(struct vidframe *p,
+				      const CVImageBufferRef f)
 {
 	int i;
 
@@ -236,7 +205,8 @@ static inline void avpict_init_planar(AVPicture *p, const CVImageBufferRef f)
 }
 
 
-static inline void avpict_init_chunky(AVPicture *p, const CVImageBufferRef f)
+static inline void avpict_init_chunky(struct vidframe *p,
+				      const CVImageBufferRef f)
 {
 	p->data[0]     =      CVPixelBufferGetBaseAddress(f);
 	p->linesize[0] = (int)CVPixelBufferGetBytesPerRow(f);
@@ -246,37 +216,13 @@ static inline void avpict_init_chunky(AVPicture *p, const CVImageBufferRef f)
 }
 
 
-static void avpict_init_yuv420p(struct vidsrc_st *st, AVPicture *p,
-				int h, int lsz)
-{
-	p->linesize[0] = lsz;
-	p->linesize[1] = lsz / 2;
-	p->linesize[2] = lsz / 2;
-	p->linesize[3] = 0;
-
-	if (!st->buf) {
-		st->buf = mbuf_alloc(vidframe_size(p, h));
-		if (!st->buf)
-			return;
-	}
-
-	p->data[0] = st->buf->buf;
-	p->data[1] = p->data[0] + p->linesize[0] * h;
-	p->data[2] = p->data[1] + p->linesize[1] * h/2;
-	p->data[3] = NULL;
-}
-
-
 static void frame_handler(struct vidsrc_st *st,
 			  const CVImageBufferRef videoFrame)
 {
-	AVPicture pict_src, pict_dst;
-	struct vidframe vidframe;
+	struct vidframe src;
 	vidsrc_frame_h *frameh;
 	void *arg;
-	enum PixelFormat pixfmt;
-	bool scale;
-	int i, ret;
+	enum vidfmt vidfmt;
 
 	lock_write_get(st->lock);
 	frameh = st->frameh;
@@ -286,8 +232,8 @@ static void frame_handler(struct vidsrc_st *st,
 	if (!frameh)
 		return;
 
-	pixfmt = get_pixfmt(CVPixelBufferGetPixelFormatType(videoFrame));
-	if (pixfmt == PIX_FMT_NONE) {
+	vidfmt = get_pixfmt(CVPixelBufferGetPixelFormatType(videoFrame));
+	if (vidfmt == (enum vidfmt)-1) {
 		re_printf("unknown pixel format: 0x%08x\n",
 			  CVPixelBufferGetPixelFormatType(videoFrame));
 		return;
@@ -298,59 +244,19 @@ static void frame_handler(struct vidsrc_st *st,
 	st->sz.w = (int)CVPixelBufferGetWidth(videoFrame);
 	st->sz.h = (int)CVPixelBufferGetHeight(videoFrame);
 
-	scale = !vidsz_cmp(&st->sz, &st->app_sz) || pixfmt != PIX_FMT_YUV420P;
-
-	if (scale && !st->sws) {
-
-		re_printf("qtcapture: scaling from %s:%ux%u to yuv420:%ux%u\n",
-			  pixfmt_name(pixfmt), st->sz.w, st->sz.h,
-			  st->app_sz.w, st->app_sz.h);
-
-		/* note: SWS_FAST_BILINEAR crash with
-		   ffmpeg @0.5.1_1+darwin_10 */
-		st->sws = sws_getContext(st->sz.w, st->sz.h, pixfmt,
-					 st->app_sz.w, st->app_sz.h,
-					 PIX_FMT_YUV420P,
-					 SWS_BICUBIC, NULL, NULL, NULL);
-		if (!st->sws)
-			return;
-	}
-
 	CVPixelBufferLockBaseAddress(videoFrame, 0);
 
 	if (CVPixelBufferIsPlanar(videoFrame))
-		avpict_init_planar(&pict_src, videoFrame);
+		avpict_init_planar(&src, videoFrame);
 	else
-		avpict_init_chunky(&pict_src, videoFrame);
+		avpict_init_chunky(&src, videoFrame);
 
-	if (st->sws) {
-		avpict_init_yuv420p(st, &pict_dst, st->app_sz.h,
-				    pict_src.linesize[0] / 2);
-
-		ret = sws_scale(st->sws, SRCSLICE_CAST pict_src.data,
-				pict_src.linesize, 0, st->sz.h,
-				pict_dst.data, pict_dst.linesize);
-	}
-	else {
-		pict_dst = pict_src;
-	}
+	src.fmt = vidfmt;
+	src.size = st->sz;
 
 	CVPixelBufferUnlockBaseAddress(videoFrame, 0);
 
-	if (ret <= 0) {
-		re_fprintf(stderr, "qtcapture: sws_scale: returned %d\n", ret);
-		return;
-	}
-
-	for (i=0; i<4; i++) {
-		vidframe.data[i]     = pict_dst.data[i];
-		vidframe.linesize[i] = pict_dst.linesize[i];
-	}
-
-	vidframe.size = st->app_sz;
-	vidframe.valid = true;
-
-	frameh(&vidframe, arg);
+	frameh(&src, arg);
 }
 
 
@@ -367,9 +273,6 @@ static void destructor(void *arg)
 	lock_rel(st->lock);
 
 	[st->cap dealloc];
-
-	if (st->sws)
-		sws_freeContext(st->sws);
 
 	mem_deref(st->buf);
 	mem_deref(st->lock);

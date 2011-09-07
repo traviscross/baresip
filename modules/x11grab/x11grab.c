@@ -5,12 +5,12 @@
  */
 #define _BSD_SOURCE 1
 #include <unistd.h>
+#ifndef SOLARIS
 #define _XOPEN_SOURCE 1
+#endif
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <pthread.h>
-#include <libavcodec/avcodec.h>
-#include <libswscale/swscale.h>
 #include <re.h>
 #include <baresip.h>
 
@@ -26,14 +26,6 @@
  */
 
 
-/* extra const-correctness added in 0.9.0 */
-#if LIBSWSCALE_VERSION_INT >= ((0<<16) + (9<<8) + (0))
-#define SRCSLICE_CAST (const uint8_t **)
-#else
-#define SRCSLICE_CAST (uint8_t **)
-#endif
-
-
 struct vidsrc_st {
 	struct vidsrc *vs;  /* inheritance */
 	Display *disp;
@@ -42,8 +34,7 @@ struct vidsrc_st {
 	bool run;
 	int fps;
 	struct vidsz size;
-	struct SwsContext *sws;
-	enum PixelFormat pixfmt;
+	enum vidfmt pixfmt;
 	vidsrc_frame_h *frameh;
 	void *arg;
 };
@@ -80,13 +71,13 @@ static int x11grab_open(struct vidsrc_st *st, const struct vidsz *sz)
 	switch (st->image->bits_per_pixel) {
 
 	case 32:
-		st->pixfmt = PIX_FMT_RGB32;
+		st->pixfmt = VID_FMT_RGB32;
 		break;
 
 	case 16:
 		st->pixfmt = (st->image->green_mask == 0x7e0)
-			? PIX_FMT_RGB565
-			: PIX_FMT_RGB555;
+			? VID_FMT_RGB565
+			: VID_FMT_RGB555;
 		break;
 
 	default:
@@ -115,55 +106,13 @@ static inline uint8_t *x11grab_read(struct vidsrc_st *st)
 }
 
 
-static void call_frame_handler(struct vidsrc_st *st, const uint8_t *buf)
+static void call_frame_handler(struct vidsrc_st *st, uint8_t *buf)
 {
-	AVPicture pict_src, pict_dst;
 	struct vidframe frame;
-	struct mbuf *mb;
-	int i, ret;
 
-	if (!st->sws) {
-		st->sws = sws_getContext(st->size.w, st->size.h,
-					 st->pixfmt,
-					 st->size.w, st->size.h,
-					 PIX_FMT_YUV420P,
-					 SWS_BICUBIC, NULL, NULL, NULL);
-		if (!st->sws)
-			return;
-	}
-
-	mb = mbuf_alloc(yuv420p_size(&st->size));
-	if (!mb)
-		return;
-
-	avpicture_fill(&pict_src, (uint8_t *)buf, st->pixfmt,
-		       st->size.w, st->size.h);
-
-	avpicture_fill(&pict_dst, mb->buf, PIX_FMT_YUV420P,
-		       st->size.w, st->size.h);
-
-	ret = sws_scale(st->sws,
-			SRCSLICE_CAST pict_src.data, pict_src.linesize,
-			0, st->size.h,
-			pict_dst.data, pict_dst.linesize);
-
-	if (ret <= 0) {
-		DEBUG_WARNING("scale: sws_scale: returned %d\n", ret);
-		goto out;
-	}
-
-	for (i=0; i<4; i++) {
-		frame.data[i]     = pict_dst.data[i];
-		frame.linesize[i] = pict_dst.linesize[i];
-	}
-
-	frame.size = st->size;
-	frame.valid = true;
+	vidframe_init_buf(&frame, st->pixfmt, &st->size, buf);
 
 	st->frameh(&frame, st->arg);
-
- out:
-	mem_deref(mb);
 }
 
 
@@ -204,9 +153,6 @@ static void destructor(void *arg)
 
 	if (st->image)
 		XDestroyImage(st->image);
-
-	if (st->sws)
-		sws_freeContext(st->sws);
 
 	if (st->disp)
 		XCloseDisplay(st->disp);

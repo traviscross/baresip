@@ -42,7 +42,7 @@ struct ua {
 	struct tmr tmr_alert;        /**< Incoming call alert timer          */
 	struct tmr tmr_stat;         /**< Statistics refresh timer           */
 	struct mbuf dialbuf;         /**< Buffer for dialled number          */
-	struct mbuf mb_addr;         /**< Buffer for my SIP URI              */
+	char *addr;                  /**< Buffer for my SIP Address          */
 	struct sip_addr aor;         /**< My SIP Address-Of-Record           */
 	const struct mnat *mnat;     /**< Media NAT handling                 */
 	const struct menc *menc;     /**< Media encryption type              */
@@ -581,8 +581,8 @@ static void ua_destructor(void *arg)
 	tmr_cancel(&ua->tmr_alert);
 
 	mbuf_reset(&ua->dialbuf);
-	mbuf_reset(&ua->mb_addr);
 
+	mem_deref(ua->addr);
 	mem_deref(ua->call);
 	mem_deref(ua->reg);
 	mem_deref(ua->cuser);
@@ -647,10 +647,6 @@ static int stunsrv_decode(struct ua *ua)
 		err |= pl_strdup(&ua->stun_host, &ua->aor.uri.host);
 
 	ua->stun_port = uri.port;
-
-	(void)re_printf("STUN config: user=%s pass=%s host=%s port=%u\n",
-			ua->stun_user, ua->stun_pass,
-			ua->stun_host, ua->stun_port);
 
 	return err;
 }
@@ -842,18 +838,16 @@ static int video_codecs_decode(struct ua *ua)
 
 
 /** Construct my AOR */
-static int mk_aor(struct ua *ua, const struct pl *aor)
+static int mk_aor(struct ua *ua, const char *aor)
 {
 	struct pl pl;
 	int err;
 
-	err = mbuf_write_pl(&ua->mb_addr, aor);
+	err = str_dup(&ua->addr, aor);
 	if (err)
 		return err;
 
-	mbuf_trim(&ua->mb_addr);
-	ua->mb_addr.pos = 0;
-	pl_set_mbuf(&pl, &ua->mb_addr);
+	pl_set_str(&pl, ua->addr);
 
 	err = sip_addr_decode(&ua->aor, &pl);
 	if (err)
@@ -911,7 +905,8 @@ static int sip_params_decode(struct ua *ua)
 }
 
 
-int ua_alloc(struct ua **uap, const struct pl *aor)
+int ua_alloc(struct ua **uap, const char *aor,
+	     ua_event_h *eh, ua_message_h *msgh, void *arg)
 {
 	struct ua *ua;
 	int err;
@@ -934,7 +929,10 @@ int ua_alloc(struct ua **uap, const struct pl *aor)
 	tmr_init(&ua->tmr_alert);
 
 	mbuf_init(&ua->dialbuf);
-	mbuf_init(&ua->mb_addr);
+
+	ua->eh   = eh;
+	ua->msgh = msgh;
+	ua->arg  = arg;
 
 	err = sip_listen(&ua->lsnr, uag.sip, true, request_handler, ua);
 	if (err)
@@ -969,25 +967,6 @@ int ua_alloc(struct ua **uap, const struct pl *aor)
 }
 
 
-void ua_set_event_handler(struct ua *ua, ua_event_h *eh, void *arg)
-{
-	if (!ua)
-		return;
-
-	ua->eh  = eh;
-	ua->arg = arg;
-}
-
-
-void ua_set_message_handler(struct ua *ua, ua_message_h *msgh)
-{
-	if (!ua)
-		return;
-
-	ua->msgh = msgh;
-}
-
-
 static int ua_start(struct ua *ua)
 {
 	if (!ua->regint)
@@ -997,8 +976,8 @@ static int ua_start(struct ua *ua)
 }
 
 
-int ua_connect(struct ua *ua, const char *uri, const char *mnatid,
-	       enum vidmode vidmode)
+int ua_connect(struct ua *ua, const char *uri, const char *params,
+	       const char *mnatid, enum vidmode vidmode)
 {
 	const struct mnat *mnat;
 	struct pl pl;
@@ -1044,6 +1023,10 @@ int ua_connect(struct ua *ua, const char *uri, const char *mnatid,
 
 				break;
 			}
+		}
+
+		if (params) {
+			err |= mbuf_printf(&ua->dialbuf, ";%s", params);
 		}
 
 		/* Append any optional parameters */
@@ -1711,6 +1694,16 @@ struct sip *uag_sip(void)
 struct sipsess_sock *uag_sipsess_sock(void)
 {
 	return uag.sock;
+}
+
+
+struct tls *uag_tls(void)
+{
+#ifdef USE_TLS
+	return uag.tls;
+#else
+	return NULL;
+#endif
 }
 
 

@@ -4,8 +4,8 @@
 # Copyright (C) 2010 Creytiv.com
 #
 
-MOD		:= v4l
-$(MOD)_SRCS	+= v4l.c
-$(MOD)_LFLAGS	+=
+MOD		:= silk
+$(MOD)_SRCS	+= silk.c
+$(MOD)_LFLAGS	+= -lSKP_SILK_SDK
 
 include mk/mod.mk

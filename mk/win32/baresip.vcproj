@@ -19,7 +19,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\include;..\..\..\re\include;..\..\..\ffmpeg-win32-dev\include;..\..\..\"
+				AdditionalIncludeDirectories="..\..\include;..\..\..\re\include;..\..\..\rem\include;..\..\..\ffmpeg-win32-dev\include;..\..\..\"
 				PreprocessorDefinitions="WIN32,STATIC,HAVE_IO_H,HAVE_SELECT;USE_VIDEO;_CRT_SECURE_NO_DEPRECATE"
 				MinimalRebuild="TRUE"
 				BasicRuntimeChecks="3"
@@ -34,7 +34,7 @@
 				Name="VCCustomBuildTool"/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalOptions="winmm.lib wsock32.lib ..\..\..\re\Win32\Debug\re-win32.lib"
+				AdditionalOptions="winmm.lib wsock32.lib ..\..\..\re\Win32\Debug\re.lib ..\..\..\rem\Win32\Debug\rem.lib"
 				OutputFile="$(OutDir)/baresip-win32.exe"
 				LinkIncremental="2"
 				AdditionalLibraryDirectories=""
@@ -71,7 +71,7 @@
 			CharacterSet="2">
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalIncludeDirectories="..\..\include;&quot;..\..\..\re\include&quot;"
+				AdditionalIncludeDirectories="..\..\include;&quot;..\..\..\re\include&quot;..\..\..\rem\include"
 				PreprocessorDefinitions="WIN32,STATIC,HAVE_IO_H,HAVE_SELECT;USE_VIDEO;_CRT_SECURE_NO_DEPRECATE"
 				RuntimeLibrary="0"
 				UsePrecompiledHeader="2"
@@ -83,7 +83,7 @@
 				Name="VCCustomBuildTool"/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalOptions="winmm.lib wsock32.lib ..\..\..\re-0.0.8\Win32\Release\re-win32.lib"
+				AdditionalOptions="winmm.lib wsock32.lib ..\..\..\re\Win32\Release\re.lib ..\..\..\rem\Win32\Release\rem.lib"
 				OutputFile="$(OutDir)/baresip-win32.exe"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories=""
@@ -121,9 +121,6 @@
 			Name="Source Files"
 			Filter="cpp;c;cxx;def;odl;idl;hpj;bat;asm;asmx"
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}">
-			<File
-				RelativePath="..\..\src\aubuf.c">
-			</File>
 			<File
 				RelativePath="..\..\src\aucodec.c">
 			</File>
@@ -216,9 +213,6 @@
 			</File>
 			<File
 				RelativePath="..\..\src\vidsrc.c">
-			</File>
-			<File
-				RelativePath="..\..\src\vutil.c">
 			</File>
 			<Filter
 				Name="modules"

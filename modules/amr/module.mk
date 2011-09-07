@@ -4,8 +4,8 @@
 # Copyright (C) 2010 Creytiv.com
 #
 
-MOD		:= v4l
-$(MOD)_SRCS	+= v4l.c
-$(MOD)_LFLAGS	+=
+MOD		:= amr
+$(MOD)_SRCS	+= amr.c
+$(MOD)_LFLAGS	+= -lamrwb -lamrnb -lm
 
 include mk/mod.mk

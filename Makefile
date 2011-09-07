@@ -13,7 +13,7 @@
 USE_VIDEO := 1
 
 PROJECT	  := baresip
-VERSION   := 0.2.0
+VERSION   := 0.3.0
 
 LIBRE_MK  := $(shell [ -f ../re/mk/re.mk ] && \
 	echo "../re/mk/re.mk")
@@ -33,10 +33,17 @@ endif
 include $(LIBRE_MK)
 include mk/modules.mk
 
+LIBREM_PATH	:= $(shell [ -d ../rem ] && echo "../rem")
+
+
 CFLAGS    += -I. -Iinclude -I$(LIBRE_INC) -I$(SYSROOT)/include
+CFLAGS    += -I$(LIBREM_PATH)/include -I$(SYSROOT)/local/include/rem
 
 CXXFLAGS  += -I. -Iinclude -I$(LIBRE_INC)
 
+ifneq ($(LIBREM_PATH),)
+SPLINT_OPTIONS += -I$(LIBREM_PATH)/include
+endif
 
 ifeq ($(OS),win32)
 STATIC    := yes
@@ -89,6 +96,10 @@ OBJS      += $(patsubst %.S,$(BUILD)/src/%.o,$(filter %.S,$(SRCS)))
 
 APP_OBJS  := $(OBJS) $(patsubst %.c,$(BUILD)/src/%.o,$(APP_SRCS)) $(MOD_OBJS)
 
+ifneq ($(LIBREM_PATH),)
+LIBS	+= -L$(LIBREM_PATH)
+endif
+
 # Static build: include module linker-flags in binary
 ifneq ($(STATIC),)
 LIBS      += $(MOD_LFLAGS)
@@ -97,7 +108,7 @@ LIBS      += -L$(SYSROOT)/local/lib
 MOD_LFLAGS += -L$(SYSROOT)/local/lib
 endif
 
-LIBS      += -lm
+LIBS      += -lrem -lm
 
 
 -include $(APP_OBJS:.o=.d)
@@ -164,15 +175,23 @@ install: $(BIN) $(MOD_BINS)
 	@mkdir -p $(DESTDIR)$(SHARE_PATH)
 	$(INSTALL) -m 0644 share/* $(DESTDIR)$(SHARE_PATH)
 
-install-dev: $(SHARED)
-	@mkdir -p $(DESTDIR)$(INCDIR)
-	$(INSTALL) -m 0644 include/baresip.h $(DESTDIR)$(INCDIR)
-	@mkdir -p $(DESTDIR)$(LIBDIR)
-	$(INSTALL) -m 0755 $(SHARED) $(DESTDIR)$(LIBDIR)
+install-dev: install-shared install-static
 
-uninstall: $(BIN)
-	rm -f $(DESTDIR)/usr/bin/$<
-	rm -rf $(DESTDIR)$(MOD_PATH)
+install-shared: $(SHARED)
+	@mkdir -p $(DESTDIR)$(INCDIR)
+	$(INSTALL) -Cm 0644 include/baresip.h $(DESTDIR)$(INCDIR)
+	@mkdir -p $(DESTDIR)$(LIBDIR)
+	$(INSTALL) -m 0644 $(SHARED) $(DESTDIR)$(LIBDIR)
+
+install-static: $(STATICLIB)
+	@mkdir -p $(DESTDIR)$(INCDIR)
+	$(INSTALL) -Cm 0644 include/baresip.h $(DESTDIR)$(INCDIR)
+	@mkdir -p $(DESTDIR)$(LIBDIR)
+	$(INSTALL) -m 0644 $(STATICLIB) $(DESTDIR)$(LIBDIR)
+
+uninstall:
+	@rm -f $(DESTDIR)$(PREFIX)/bin/$(BIN)
+	@rm -rf $(DESTDIR)$(MOD_PATH)
 
 .PHONY: clean
 clean:

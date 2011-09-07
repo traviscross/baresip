@@ -20,21 +20,11 @@
 #include <re.h>
 #include <baresip.h>
 #include <libv4l2.h>
-#include <libavformat/avformat.h>
-#include <libswscale/swscale.h>
 
 
 #define DEBUG_MODULE "v4l2"
 #define DEBUG_LEVEL 5
 #include <re_dbg.h>
-
-
-/* extra const-correctness added in 0.9.0 */
-#if LIBSWSCALE_VERSION_INT >= ((0<<16) + (9<<8) + (0))
-#define SRCSLICE_CAST (const uint8_t **)
-#else
-#define SRCSLICE_CAST (uint8_t **)
-#endif
 
 
 enum io_method {
@@ -55,7 +45,6 @@ struct vidsrc_st {
 	bool run;
 	struct vidsz sz, app_sz;
 	struct mbuf *mb;
-	struct SwsContext *sws;
 	vidsrc_frame_h *frameh;
 	void *arg;
 	enum io_method io;
@@ -183,7 +172,6 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 	struct v4l2_format fmt;
 	unsigned int min;
 	const char *pix;
-	bool scale = false;
 	int err;
 
 	if (-1 == xioctl(st->fd, VIDIOC_QUERYCAP, &cap)) {
@@ -255,7 +243,6 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 	st->sz.h = fmt.fmt.pix.height;
 
 	if (!vidsz_cmp(&st->sz, &st->app_sz)) {
-		scale = true;
 		re_printf("v4l2: scaling %ux%u ---> %ux%u\n",
 			  st->sz.w, st->sz.h, st->app_sz.w, st->app_sz.h);
 	}
@@ -287,14 +274,6 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 		return ENODEV;
 	}
 
-	if (scale) {
-		st->sws = sws_getContext(st->sz.w, st->sz.h, PIX_FMT_YUV420P,
-					 st->app_sz.w, st->app_sz.h,
-					 PIX_FMT_YUV420P,
-					 SWS_BICUBIC, NULL, NULL, NULL);
-		if (!st->sws)
-			return ENOMEM;
-	}
 
 	printf("%s: found valid V4L2 device (%u x %u) pixfmt=%c%c%c%c\n",
 	       dev_name, fmt.fmt.pix.width, fmt.fmt.pix.height,
@@ -390,33 +369,9 @@ static void call_frame_handler(struct vidsrc_st *st, uint8_t *buf)
 {
 	struct vidframe frame;
 
-	if (st->sws) {
-		AVPicture src, dst;
+	vidframe_init_buf(&frame, VID_FMT_YUV420P, &st->sz, buf);
 
-		avpicture_fill(&src, (uint8_t *)buf, PIX_FMT_YUV420P,
-			       st->sz.w, st->sz.h);
-
-		if (avpicture_alloc(&dst, PIX_FMT_YUV420P,
-				    st->app_sz.w, st->app_sz.h) < 0)
-			return;
-
-		if (sws_scale(st->sws,
-			      SRCSLICE_CAST src.data, src.linesize,
-			      0, st->sz.h, dst.data, dst.linesize) <= 0)
-			goto out;
-
-		vidframe_init(&frame, &st->app_sz, dst.data, dst.linesize);
-
-		st->frameh(&frame, st->arg);
-
-	out:
-		avpicture_free(&dst);
-	}
-	else {
-		vidframe_yuv420p_init(&frame, buf, &st->sz);
-
-		st->frameh(&frame, st->arg);
-	}
+	st->frameh(&frame, st->arg);
 }
 
 
@@ -520,9 +475,6 @@ static void destructor(void *arg)
 
 	if (st->fd >= 0)
 		v4l2_close(st->fd);
-
-	if (st->sws)
-		sws_freeContext(st->sws);
 
 	mem_deref(st->mb);
 	mem_deref(st->vs);

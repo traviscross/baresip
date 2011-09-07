@@ -6,6 +6,6 @@
 
 MOD		:= x11grab
 $(MOD)_SRCS	+= x11grab.c
-$(MOD)_LFLAGS	+= -lX11 -lXext -lavformat -lswscale
+$(MOD)_LFLAGS	+= -lX11 -lXext
 
 include mk/mod.mk

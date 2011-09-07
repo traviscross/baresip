@@ -400,7 +400,7 @@ static int dec(struct vidcodec_st *st, struct vidframe *frame,
 		}
 		frame->size.w = img->d_w;
 		frame->size.h = img->d_h;
-		frame->valid = true;
+		frame->fmt    = VID_FMT_YUV420P;
 	}
 
  out:

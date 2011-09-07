@@ -6,6 +6,6 @@
 
 MOD		:= opengl
 $(MOD)_SRCS	+= opengl.m
-$(MOD)_LFLAGS	+= -framework QTKit -framework CoreVideo -lavcodec -lswscale
+$(MOD)_LFLAGS	+= -framework QTKit -framework CoreVideo
 
 include mk/mod.mk

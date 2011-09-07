@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <re.h>
 #include <baresip.h>
+#define FF_API_OLD_METADATA 0
 #include <libavformat/avformat.h>
 #include <libavdevice/avdevice.h>
 #include <libavcodec/avcodec.h>
@@ -18,10 +19,17 @@
 /* extra const-correctness added in 0.9.0 */
 /* note: macports has LIBSWSCALE_VERSION_MAJOR == 1 */
 /* #if LIBSWSCALE_VERSION_INT >= ((0<<16) + (9<<8) + (0)) */
-#if LIBSWSCALE_VERSION_MINOR >= 9
+#if LIBSWSCALE_VERSION_MAJOR >= 2 || LIBSWSCALE_VERSION_MINOR >= 9
 #define SRCSLICE_CAST (const uint8_t **)
 #else
 #define SRCSLICE_CAST (uint8_t **)
+#endif
+
+
+/* backward compat */
+#if defined (CODEC_TYPE_VIDEO)
+#undef  AVMEDIA_TYPE_VIDEO
+#define AVMEDIA_TYPE_VIDEO CODEC_TYPE_VIDEO
 #endif
 
 
@@ -67,31 +75,11 @@ static void destructor(void *arg)
 }
 
 
-static void vidframe_set(struct vidframe *vf, struct vidsz *sz,
-			 uint8_t *data[4], int linesize[4])
-{
-	int i;
-
-	if (!vf || !sz)
-		return;
-
-	for (i=0; i<4; i++) {
-		vf->data[i]     = data[i];
-		vf->linesize[i] = linesize[i];
-	}
-
-	vf->size  = *sz;
-	vf->valid = true;
-}
-
-
 static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 {
 	AVPicture pict;
 	struct vidframe vf;
 	struct vidsz sz;
-
-	vf.valid = false;
 
 	if (st->codec) {
 		AVFrame frame;
@@ -148,7 +136,8 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 		if (ret <= 0)
 			goto end;
 
-		vidframe_set(&vf, &st->app_sz, pict.data, pict.linesize);
+		vidframe_init(&vf, VID_FMT_YUV420P, &st->app_sz,
+			      (void *)pict.data, pict.linesize);
 
 		st->frameh(&vf, st->arg);
 
@@ -159,7 +148,8 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 		avpicture_fill(&pict, pkt->data, PIX_FMT_YUV420P,
 			       st->sz.w, st->sz.h);
 
-		vidframe_set(&vf, &st->app_sz, pict.data, pict.linesize);
+		vidframe_init(&vf, VID_FMT_YUV420P, &st->app_sz,
+			      (void *)pict.data, pict.linesize);
 
 		st->frameh(&vf, st->arg);
 	}
@@ -207,7 +197,6 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	bool found_stream = false;
 	uint32_t i;
 	int ret, err = 0;
-
 	(void)errorh;
 
 	if (!frameh)
@@ -229,6 +218,17 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 		st->fps = 25;
 	}
 
+	/*
+	 * avformat_open_input() was added in lavf 53.2.0 according to
+	 * ffmpeg/doc/APIchanges
+	 */
+
+#if LIBAVFORMAT_VERSION_INT >= ((52<<16) + (110<<8) + 0)
+	(void)prms;
+	(void)fmt;
+	ret = avformat_open_input(&st->ic, dev, NULL, NULL);
+#else
+
 	/* Params */
 	memset(&prms, 0, sizeof(prms));
 
@@ -241,6 +241,8 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 
 	ret = av_open_input_file(&st->ic, dev, av_find_input_format(fmt),
 				 0, &prms);
+#endif
+
 	if (ret < 0) {
 		err = ENOENT;
 		goto out;
@@ -260,7 +262,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 		const struct AVStream *strm = st->ic->streams[i];
 		AVCodecContext *ctx = strm->codec;
 
-		if (ctx->codec_type != CODEC_TYPE_VIDEO)
+		if (ctx->codec_type != AVMEDIA_TYPE_VIDEO)
 			continue;
 
 		re_printf("stream %u:  %u x %u  codec=%s  time_base=%d/%d\n",

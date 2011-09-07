@@ -77,7 +77,16 @@ static int init_encoder(struct vidcodec_st *st, const struct vidcodec_prm *prm)
 {
 	st->enc.size = prm->size;
 
+	st->enc.codec = avcodec_find_encoder(st->codec_id);
+	if (!st->enc.codec)
+		return ENOENT;
+
+#if LIBAVCODEC_VERSION_INT >= ((52<<16)+(92<<8)+0)
+	st->enc.ctx = avcodec_alloc_context3(st->enc.codec);
+#else
 	st->enc.ctx = avcodec_alloc_context();
+#endif
+
 	st->enc.pict = avcodec_alloc_frame();
 
 	if (!st->enc.ctx || !st->enc.pict)
@@ -100,12 +109,13 @@ static int init_encoder(struct vidcodec_st *st, const struct vidcodec_prm *prm)
 		st->enc.ctx->max_qdiff = 4;
 	}
 
-	st->enc.codec = avcodec_find_encoder(st->codec_id);
-	if (!st->enc.codec)
+#if LIBAVCODEC_VERSION_INT >= ((53<<16)+(8<<8)+0)
+	if (avcodec_open2(st->enc.ctx, st->enc.codec, NULL) < 0)
 		return ENOENT;
-
+#else
 	if (avcodec_open(st->enc.ctx, st->enc.codec) < 0)
 		return ENOENT;
+#endif
 
 	return 0;
 }
@@ -183,18 +193,28 @@ static int init_decoder(struct vidcodec_st *st, const struct vidcodec_prm *prm)
 {
 	st->dec.size = prm->size;
 
+	st->dec.codec = avcodec_find_decoder(st->codec_id);
+	if (!st->dec.codec)
+		return ENOENT;
+
+#if LIBAVCODEC_VERSION_INT >= ((52<<16)+(92<<8)+0)
+	st->dec.ctx = avcodec_alloc_context3(st->dec.codec);
+#else
 	st->dec.ctx = avcodec_alloc_context();
+#endif
+
 	st->dec.pict = avcodec_alloc_frame();
 
 	if (!st->dec.ctx || !st->dec.pict)
 		return ENOMEM;
 
-	st->dec.codec = avcodec_find_decoder(st->codec_id);
-	if (!st->dec.codec)
+#if LIBAVCODEC_VERSION_INT >= ((53<<16)+(8<<8)+0)
+	if (avcodec_open2(st->dec.ctx, st->dec.codec, NULL) < 0)
 		return ENOENT;
-
+#else
 	if (avcodec_open(st->dec.ctx, st->dec.codec) < 0)
 		return ENOENT;
+#endif
 
 	return 0;
 }
@@ -423,7 +443,7 @@ static int ffdecode(struct vidcodec_st *st, struct vidframe *frame,
 		}
 		frame->size.w = st->dec.ctx->width;
 		frame->size.h = st->dec.ctx->height;
-		frame->valid  = true;
+		frame->fmt    = VID_FMT_YUV420P;
 	}
 
  out:
@@ -513,24 +533,33 @@ static int module_init(void)
 	av_log_set_level(AV_LOG_WARNING);
 #endif
 
-	/* XXX: add two h264 codecs */
-	err |= vidcodec_register(&h264, 0,    "H264",
-				 h264_fmtp,
-				 alloc,
+	if (avcodec_find_decoder(CODEC_ID_H264)) {
+
+		/* XXX: add two h264 codecs */
+		err |= vidcodec_register(&h264, 0,    "H264",
+					 h264_fmtp,
+					 alloc,
 #ifdef USE_X264
-				 enc_x264,
+					 enc_x264,
 #else
-				 enc,
+					 enc,
 #endif
-				 dec_h264);
+					 dec_h264);
+	}
 
-	err |= vidcodec_register(&h263, "34", "H263",
-				 "F=1;CIF=1;CIF4=1",
-				 alloc, enc, dec_h263);
+	if (avcodec_find_decoder(CODEC_ID_H263)) {
 
-	err |= vidcodec_register(&mpg4, 0, "MP4V-ES",
-				 "profile-level-id=3",
-				 alloc, enc, dec_mpeg4);
+		err |= vidcodec_register(&h263, "34", "H263",
+					 "F=1;CIF=1;CIF4=1",
+					 alloc, enc, dec_h263);
+	}
+
+	if (avcodec_find_decoder(CODEC_ID_MPEG4)) {
+
+		err |= vidcodec_register(&mpg4, 0, "MP4V-ES",
+					 "profile-level-id=3",
+					 alloc, enc, dec_mpeg4);
+	}
 
 	return err;
 }

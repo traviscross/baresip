@@ -4,8 +4,8 @@
 # Copyright (C) 2010 Creytiv.com
 #
 
-MOD		:= v4l
-$(MOD)_SRCS	+= v4l.c
-$(MOD)_LFLAGS	+=
+MOD		:= opus
+$(MOD)_SRCS	+= opus.c
+$(MOD)_LFLAGS	+= -lopus -lm
 
 include mk/mod.mk

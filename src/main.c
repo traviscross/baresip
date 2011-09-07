@@ -69,6 +69,7 @@ static int ua_add(const struct pl *addr)
 {
 	struct sip_addr sip_addr;
 	struct ua *ua;
+	char buf[512];
 	int err;
 
 	if (0 == sip_addr_decode(&sip_addr, addr)) {
@@ -78,7 +79,9 @@ static int ua_add(const struct pl *addr)
 			return err;
 	}
 
-	err = ua_alloc(&ua, addr);
+	pl_strcpy(addr, buf, sizeof(buf));
+
+	err = ua_alloc(&ua, buf, NULL, NULL, NULL);
 	if (err)
 		return err;
 
@@ -377,7 +380,8 @@ int main(int argc, char *argv[])
 
 	/* Automatically call peer uri if set */
 	if (app.peeruri) {
-		err = ua_connect(ua_cur(), app.peeruri, NULL, VIDMODE_ON);
+		err = ua_connect(ua_cur(), app.peeruri, NULL,
+				 NULL, VIDMODE_ON);
 		if (err) {
 			DEBUG_WARNING("connect failed: %s\n", strerror(err));
 		}

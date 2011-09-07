@@ -27,74 +27,39 @@ struct vstat {
 
 /** Video loop */
 struct video_loop {
-	struct tmr tmr;
-	struct tmr tmr_bw;
-	struct mbuf *mb_loop;
-	struct vidframe frame;
-	struct lock *lock;
-	struct vidsz size;
-	struct vidsrc_st *vsrc;
 	struct vidcodec_st *codec;
 	struct vidisp_st *vidisp;
+	struct vidsrc_st *vsrc;
 	struct vstat stat;
+	struct tmr tmr_bw;
 };
-
-
-/*
- * XXX: direct display, no async buffering
- */
-
-
-/** Calculate the size of an YUV420P frame */
-static inline size_t vidframe_size(const struct vidframe *f)
-{
-	return f->linesize[0] * f->size.h
-		+ f->linesize[1] * f->size.h/2
-		+ f->linesize[2] * f->size.h/2;
-}
-
-
-static void display(struct video_loop *vl, const struct vidframe *frame)
-{
-	vl->stat.bytes += vidframe_size(frame);
-	(void)vidisp_display(vl->vidisp, "Video Loop", frame);
-}
-
-
-static void codec_path(struct video_loop *vl, const struct vidframe *frame)
-{
-	int err;
-
-	/* encode */
-	err = vidcodec_get(vl->codec)->ench(vl->codec, false, frame);
-	if (err) {
-		DEBUG_WARNING("codec_encode: %s\n", strerror(err));
-		return;
-	}
-}
 
 
 static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
 {
 	struct video_loop *vl = arg;
-	const uint8_t *p = frame->data[0]; /* note: assumes YUV420P */
+	struct vidframe *f2 = NULL;
 
 	++vl->stat.frames;
 
-	lock_write_get(vl->lock);
+	if (frame->fmt != VID_FMT_YUV420P) {
 
-	if (vl->mb_loop->end > 0) {
-		(void)re_printf("busy - skip frame\n");
+		if (vidframe_alloc(&f2, VID_FMT_YUV420P, &frame->size))
+			return;
+
+		vidconv(f2, frame, 0);
+
+		frame = f2;
 	}
+
+	if (vl->codec)
+		(void)vidcodec_get(vl->codec)->ench(vl->codec, false, frame);
 	else {
-		/* copy picture size */
-		vl->frame = *frame;
-
-		mbuf_rewind(vl->mb_loop);
-		(void)mbuf_write_mem(vl->mb_loop, p, vidframe_size(frame));
+		vl->stat.bytes += vidframe_size(frame);
+		(void)vidisp_display(vl->vidisp, "Video Loop", frame);
 	}
 
-	lock_rel(vl->lock);
+	mem_deref(f2);
 }
 
 
@@ -102,14 +67,10 @@ static void vidloop_destructor(void *arg)
 {
 	struct video_loop *vl = arg;
 
-	tmr_cancel(&vl->tmr);
 	tmr_cancel(&vl->tmr_bw);
-
-	mem_deref(vl->codec);
 	mem_deref(vl->vsrc);
 	mem_deref(vl->vidisp);
-	mem_deref(vl->mb_loop);
-	mem_deref(vl->lock);
+	mem_deref(vl->codec);
 }
 
 
@@ -129,7 +90,7 @@ static int vidcodec_send_handler(bool marker, struct mbuf *mb, void *arg)
 	vl->stat.bytes += mbuf_get_left(mb);
 
 	/* decode */
-	frame.valid = false;
+	frame.data[0] = NULL;
 	err = vidcodec_get(vl->codec)->dech(vl->codec, &frame, marker, mb);
 	if (err) {
 		DEBUG_WARNING("codec_decode: %s\n", strerror(err));
@@ -137,19 +98,19 @@ static int vidcodec_send_handler(bool marker, struct mbuf *mb, void *arg)
 	}
 
 	/* display - if valid picture frame */
-	if (frame.valid)
+	if (vidframe_isvalid(&frame))
 		(void)vidisp_display(vl->vidisp, "Video Loop", &frame);
 
 	return 0;
 }
 
 
-static int enable_codec(struct video_loop *vl)
+static int enable_codec(struct video_loop *vl, const struct vidsz *sz)
 {
 	struct vidcodec_prm prm;
 	int err;
 
-	prm.size    = vl->size;
+	prm.size    = *sz;
 	prm.fps     = config.video.fps;
 	prm.bitrate = config.video.bitrate;
 
@@ -170,37 +131,6 @@ static void print_status(struct video_loop *vl)
 {
 	(void)re_fprintf(stderr, "\rstatus: EFPS=%.1f      %u kbit/s       \r",
 			 vl->stat.efps, vl->stat.bitrate);
-}
-
-
-/* use re-timer to workaround SDL/Darwin multi-threading issues .. */
-static void timeout(void *arg)
-{
-	struct video_loop *vl = arg;
-	int h;
-
-	tmr_start(&vl->tmr, 10, timeout, vl);
-
-	lock_write_get(vl->lock);
-
-	h = vl->frame.size.h;
-
-	vl->frame.data[0] = vl->mb_loop->buf;
-	vl->frame.data[1] = vl->frame.data[0] + vl->frame.linesize[0] * h;
-	vl->frame.data[2] = vl->frame.data[1] + vl->frame.linesize[1] * h /2;
-
-	/* the buffer has only 1 slot */
-	if (vl->mb_loop->end > 0) {
-
-		if (vl->codec)
-			codec_path(vl, &vl->frame);
-		else
-			display(vl, &vl->frame);
-
-		mbuf_rewind(vl->mb_loop);
-	}
-
-	lock_rel(vl->lock);
 }
 
 
@@ -246,8 +176,6 @@ static int vsrc_reopen(struct video_loop *vl, const struct vidsz *sz)
 	(void)re_printf("%s: open video source: %u x %u\n",
 			vs->name, sz->w, sz->h);
 
-	vl->size = *sz;
-
 	prm.size   = *sz;
 	prm.orient = VIDORIENT_PORTRAIT;
 	prm.fps    = config.video.fps;
@@ -280,18 +208,7 @@ static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 	if (!vl)
 		return ENOMEM;
 
-	err = lock_alloc(&vl->lock);
-	if (err)
-		goto out;
-
-	tmr_init(&vl->tmr);
 	tmr_init(&vl->tmr_bw);
-
-	vl->mb_loop = mbuf_alloc(115200);
-	if (!vl->mb_loop) {
-		err = ENOMEM;
-		goto out;
-	}
 
 	err = vsrc_reopen(vl, size);
 	if (err)
@@ -304,7 +221,6 @@ static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 		goto out;
 	}
 
-	tmr_start(&vl->tmr, 20, timeout, vl);
 	tmr_start(&vl->tmr_bw, 1000, timeout_bw, vl);
 
  out:
@@ -333,7 +249,7 @@ void video_loop_test(bool stop)
 		if (vl->codec)
 			vl->codec = mem_deref(vl->codec);
 		else
-			(void)enable_codec(vl);
+			(void)enable_codec(vl, &config.video.size);
 
 		(void)re_printf("%sabled codec: %s\n",
 				vl->codec ? "En" : "Dis",
@@ -343,6 +259,7 @@ void video_loop_test(bool stop)
 		(void)re_printf("Enable video-loop on %s: %u x %u\n",
 				config.video.device,
 				config.video.size.w, config.video.size.h);
+
 		err = video_loop_alloc(&vl, &config.video.size);
 		if (err) {
 			DEBUG_WARNING("vidloop alloc: %s\n", strerror(err));

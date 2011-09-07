@@ -39,7 +39,7 @@ int bytesps(enum aufmt fmt)
 }
 
 
-#if __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_2_0
+#if TARGET_OS_IPHONE && __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_2_0
 static void interruptionListener(void *data, UInt32 inInterruptionState)
 {
 	(void)data;

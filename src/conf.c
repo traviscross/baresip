@@ -3,8 +3,15 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
+#include <fcntl.h>
+#ifdef HAVE_UNISTD_H
+#include <unistd.h>
+#endif
 #include <stdio.h>
 #include <string.h>
+#ifdef HAVE_IO_H
+#include <io.h>
+#endif
 #include <re.h>
 #include <baresip.h>
 
@@ -12,6 +19,13 @@
 #define DEBUG_MODULE "conf"
 #define DEBUG_LEVEL 5
 #include <re_dbg.h>
+
+
+#ifdef WIN32
+#define open _open
+#define read _read
+#define close _close
+#endif
 
 
 #undef MOD_PRE
@@ -44,7 +58,7 @@ struct conf config = {
 	/** Audio */
 	{
 		"",
-		{8000, 32000},
+		{8000, 48000},
 		{1, 2},
 		0,
 		{0, 0},
@@ -57,6 +71,7 @@ struct conf config = {
 		{352, 288},
 		384000,
 		25,
+		"",
 		""
 	},
 
@@ -81,50 +96,54 @@ struct conf config = {
 };
 
 
-static int conf_parse(const char *file, confline_h *ch, uint32_t *n)
+static int conf_parse(const char *filename, confline_h *ch, uint32_t *num)
 {
-	char line[256];
-	uint32_t lineno = 0;
-	FILE *f = NULL;
-	int err = 0;
-
-	DEBUG_INFO("parsing %s\n", file);
-
-	f = fopen(file, "r");
-	if (!f) {
-		DEBUG_WARNING("parsing %s: %s\n", file, strerror(errno));
+	struct pl pl, val;
+	struct mbuf *mb;
+	int err = 0, fd = open(filename, O_RDONLY);
+	if (fd < 0)
 		return errno;
+
+	mb = mbuf_alloc(1024);
+	if (!mb) {
+		err = ENOMEM;
+		goto out;
 	}
 
-	while (fscanf(f, "%255[^\n]\n", line) > 0) {
-		struct sip_addr addr;
-		struct pl pl;
+	for (;;) {
+		uint8_t buf[1024];
 
-		++lineno;
-
-		if ('#' == line[0])
-			continue;
-
-		pl_set_str(&pl, line);
-
-		err = sip_addr_decode(&addr, &pl);
-		if (err) {
-			DEBUG_WARNING("%s:%u: parse error (%s)\n", file,
-					lineno, strerror(err));
-			continue;
+		const ssize_t n = read(fd, (void *)buf, sizeof(buf));
+		if (n < 0) {
+			err = errno;
+			break;
 		}
+		else if (n == 0)
+			break;
 
-		++*n;
-
-		if (ch) {
-			err = ch(&pl);
-			if (err)
-				break;
-		}
+		err |= mbuf_write_mem(mb, buf, n);
 	}
 
-	if (f)
-		(void)fclose(f);
+	pl.p = (const char *)mb->buf;
+	pl.l = mb->end;
+
+	while (pl.p < ((const char *)mb->buf + mb->end) && !err) {
+		const char *lb = pl_strchr(&pl, '\n');
+
+		val.p = pl.p;
+		val.l = lb ? (uint32_t)(lb - pl.p) : pl.l;
+		pl_advance(&pl, val.l + 1);
+
+		if (!val.l || val.p[0] == '#')
+			continue;
+
+		if (num) ++*num;
+		err = ch(&val);
+	}
+
+ out:
+	mem_deref(mb);
+	(void)close(fd);
 
 	return err;
 }
@@ -268,6 +287,7 @@ static int conf_write_config_template(const char *file)
 			 config.video.size.h);
 	(void)re_fprintf(f, "video_bitrate\t\t%u\n", config.video.bitrate);
 	(void)re_fprintf(f, "video_fps\t\t%u\n", config.video.fps);
+	(void)re_fprintf(f, "#video_selfview\t\twindow # {window,pip}\n");
 #endif
 
 	(void)re_fprintf(f, "\n# Jitter Buffer\n");
@@ -611,6 +631,8 @@ static int config_parse(struct conf *conf)
 	(void)conf_get_u32(conf, "video_fps", &config.video.fps);
 	(void)conf_get_str(conf, "video_exclude", config.video.exclude,
 			   sizeof(config.video.exclude));
+	(void)conf_get_str(conf, "video_selfview", config.video.selfview,
+			   sizeof(config.video.selfview));
 
 	/* Jitter buffer */
 	(void)conf_get_range(conf, "jitter_buffer_delay", &config.jbuf.delay);
@@ -753,8 +775,11 @@ int configure(void)
 	int err;
 
 	err = conf_path_get(path, sizeof(path));
-	if (err)
+	if (err) {
+		DEBUG_WARNING("could not get config path: %s\n",
+			      strerror(err));
 		return err;
+	}
 
 	if (re_snprintf(file, sizeof(file), "%s/%s", path, &file_config) < 0)
 		return ENOMEM;

@@ -213,6 +213,9 @@ char *ua_outbound(const struct ua *ua);
 const char *ua_param(const struct ua *ua, const char *key);
 struct list *ua_aucodecl(struct ua *ua);
 struct list *ua_vidcodecl(struct ua *ua);
+struct tls  *uag_tls(void);
+int  ua_auth(struct ua *ua, char **username, char **password,
+	     const char *realm);
 
 int sip_req_send(struct ua *ua, const char *method, const char *uri,
 		 sip_resp_h *resph, void *arg, const char *fmt, ...);

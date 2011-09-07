@@ -17,22 +17,12 @@
 #include <linux/videodev.h>
 #include <pthread.h>
 #include <re.h>
-#include <libavformat/avformat.h>
-#include <libswscale/swscale.h>
 #include <baresip.h>
 
 
 #define DEBUG_MODULE "v4l"
 #define DEBUG_LEVEL 5
 #include <re_dbg.h>
-
-
-/* extra const-correctness added in 0.9.0 */
-#if LIBSWSCALE_VERSION_INT >= ((0<<16) + (9<<8) + (0))
-#define SRCSLICE_CAST (const uint8_t **)
-#else
-#define SRCSLICE_CAST (uint8_t **)
-#endif
 
 
 struct vidsrc_st {
@@ -43,7 +33,6 @@ struct vidsrc_st {
 	bool run;
 	struct vidsz size;
 	struct mbuf *mb;
-	struct SwsContext *sws;
 	vidsrc_frame_h *frameh;
 	void *arg;
 };
@@ -114,39 +103,13 @@ static int v4l_get_win(int fd, int width, int height)
 }
 
 
-static void call_frame_handler(struct vidsrc_st *st, const uint8_t *buf)
+static void call_frame_handler(struct vidsrc_st *st, uint8_t *buf)
 {
-	AVPicture pict_src, pict_dst;
 	struct vidframe frame;
-	struct mbuf *mb;
-	int ret;
 
-	mb = mbuf_alloc(yuv420p_size(&st->size));
-	if (!mb)
-		return;
-
-	avpicture_fill(&pict_src, (uint8_t *)buf, PIX_FMT_RGB24,
-		       st->size.w, st->size.h);
-
-	avpicture_fill(&pict_dst, mb->buf, PIX_FMT_YUV420P,
-		       st->size.w, st->size.h);
-
-	ret = sws_scale(st->sws,
-			SRCSLICE_CAST pict_src.data, pict_src.linesize,
-			0, st->size.h,
-			pict_dst.data, pict_dst.linesize);
-
-	if (ret <= 0) {
-		DEBUG_WARNING("scale: sws_scale: returned %d\n", ret);
-		goto out;
-	}
-
-	vidframe_init(&frame, &st->size, pict_dst.data, pict_dst.linesize);
+	vidframe_init_buf(&frame, VID_FMT_RGB32, &st->size, buf);
 
 	st->frameh(&frame, st->arg);
-
- out:
-	mem_deref(mb);
 }
 
 
@@ -198,9 +161,6 @@ static void destructor(void *arg)
 	if (st->fd >= 0)
 		close(st->fd);
 
-	if (st->sws)
-		sws_freeContext(st->sws);
-
 	mem_deref(st->mb);
 	mem_deref(st->vs);
 }
@@ -235,14 +195,6 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	st->size   = prm->size;
 	st->frameh = frameh;
 	st->arg    = arg;
-
-	st->sws = sws_getContext(st->size.w, st->size.h, PIX_FMT_RGB24,
-				 st->size.w, st->size.h, PIX_FMT_YUV420P,
-				 SWS_BICUBIC, NULL, NULL, NULL);
-	if (!st->sws) {
-		err = ENOMEM;
-		goto out;
-	}
 
 	DEBUG_NOTICE("open: %s %ux%u\n", dev, prm->size.w, prm->size.h);
 

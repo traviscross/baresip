@@ -3,7 +3,10 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
+
+#ifndef SOLARIS
 #define _XOPEN_SOURCE 1
+#endif
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <sys/ipc.h>
@@ -11,21 +14,11 @@
 #include <X11/extensions/XShm.h>
 #include <re.h>
 #include <baresip.h>
-#include <libavcodec/avcodec.h>
-#include <libswscale/swscale.h>
-
-
-#if LIBSWSCALE_VERSION_MINOR >= 9
-#define SRCSLICE_CAST (const uint8_t **)
-#else
-#define SRCSLICE_CAST (uint8_t **)
-#endif
 
 
 struct vidisp_st {
 	struct vidisp *vd;              /**< Inheritance (1st)     */
 	struct vidsz size;              /**< Current size          */
-	struct SwsContext *sws;
 
 	Display *disp;
 	Window win;
@@ -78,9 +71,6 @@ static void destructor(void *arg)
 	if (st->shm.shmid >= 0)
 		shmctl(st->shm.shmid, IPC_RMID, NULL);
 
-	if (st->sws)
-		sws_freeContext(st->sws);
-
 	if (st->disp) {
 		if (st->internal && st->win)
 			XDestroyWindow(st->disp, st->win);
@@ -116,11 +106,6 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 	int err = 0;
 
 	bufsz = sz->w * sz->h * 4;
-
-	if (st->sws) {
-		sws_freeContext(st->sws);
-		st->sws = NULL;
-	}
 
 	if (st->image) {
 		XDestroyImage(st->image);
@@ -243,9 +228,8 @@ static int alloc(struct vidisp_st **stp, struct vidisp_st *parent,
 static int display(struct vidisp_st *st, const char *title,
 		   const struct vidframe *frame)
 {
-	AVPicture pict_src, pict_dst;
-	int i, err = 0;
-	int ret;
+	struct vidframe frame_rgb;
+	int err = 0;
 
 	if (!vidsz_cmp(&st->size, &frame->size)) {
 		char capt[256];
@@ -276,30 +260,11 @@ static int display(struct vidisp_st *st, const char *title,
 	}
 
 	/* Convert from YUV420P to RGB32 */
-	if (!st->sws) {
-		st->sws = sws_getContext(frame->size.w, frame->size.h,
-					 PIX_FMT_YUV420P,
-					 frame->size.w, frame->size.h,
-					 PIX_FMT_RGB32,
-					 SWS_BICUBIC, NULL,
-					 NULL, NULL);
-		if (!st->sws)
-			return ENOMEM;
-	}
 
-	for (i=0; i<4; i++) {
-		pict_src.data[i]     = frame->data[i];
-		pict_src.linesize[i] = frame->linesize[i];
-	}
+	vidframe_init_buf(&frame_rgb, VID_FMT_RGB32, &frame->size,
+			  (uint8_t *)st->shm.shmaddr);
 
-	avpicture_fill(&pict_dst, (uint8_t *)st->shm.shmaddr, PIX_FMT_RGB32,
-		       frame->size.w, frame->size.h);
-
-	ret = sws_scale(st->sws, SRCSLICE_CAST pict_src.data,
-			pict_src.linesize, 0, frame->size.h,
-			pict_dst.data, pict_dst.linesize);
-	if (ret <= 0)
-		return EINVAL;
+	vidconv(&frame_rgb, frame, 0);
 
 	/* draw */
 	if (st->xshmat)

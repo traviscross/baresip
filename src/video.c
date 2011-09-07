@@ -30,6 +30,12 @@ enum {
 	MAX_MUTED_FRAMES = 3,
 };
 
+enum selfview {
+	SELFVIEW_NONE = 0,
+	SELFVIEW_WINDOW,
+	SELFVIEW_PIP
+};
+
 
 /**
  * Implements a generic video stream. The application can allocate multiple
@@ -65,6 +71,7 @@ struct video {
 	size_t max_rtp_size;    /**< Maximum size of outgoing RTP packets */
 	char *peer;             /**< Peer URI                             */
 	bool shuttered;         /**< Video source is shuttered            */
+	enum selfview selfview; /**< Selfview method                      */
 };
 
 
@@ -74,10 +81,10 @@ struct vtx {
 	struct vidcodec_st *enc;           /**< Current video encoder     */
 	struct vidsrc_prm vsrc_prm;        /**< Video source parameters   */
 	struct vidsrc_st *vsrc;            /**< Video source              */
-	struct vidisp_st *selfview;        /**< Video selfview            */
-	struct vidisp_st *pip;             /**< Picture-in-picture        */
-	struct lock *lock;                 /**< Lock PIP resource         */
+	struct vidisp_st *selfview;        /**< Selfview display          */
+	struct lock *lock;                 /**< Lock selfview resources   */
 	struct vidframe *mute_frame;       /**< Frame with muted video    */
+	struct vidframe *frame;            /**< Source frame              */
 	int muted_frames;                  /**< # of muted frames sent    */
 	uint8_t pt_tx;                     /**< Outgoing RTP payload type */
 	uint32_t ts_tx;                    /**< Outgoing RTP timestamp    */
@@ -109,11 +116,11 @@ static void vtx_destructor(void *arg)
 	mem_deref(vtx->vsrc);  /* Note: Must be destroyed first */
 
 	lock_write_get(vtx->lock);
-	vtx->pip = mem_deref(vtx->pip);
-	lock_rel(vtx->lock);
-	mem_deref(vtx->lock);
-
 	mem_deref(vtx->selfview);
+	mem_deref(vtx->frame);
+	lock_rel(vtx->lock);
+
+	mem_deref(vtx->lock);
 	mem_deref(vtx->mute_frame);
 	mem_deref(vtx->enc);
 }
@@ -171,6 +178,41 @@ static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
 	if (!vtx->enc)
 		return;
 
+	lock_write_get(vtx->lock);
+
+	/* Convert image */
+	if (frame->fmt != VID_FMT_YUV420P ||
+	    !vidsz_cmp(&frame->size, &vtx->vsrc_prm.size) ||
+	    vtx->video->selfview == SELFVIEW_PIP) {
+
+		if (!vtx->frame) {
+
+			err = vidframe_alloc(&vtx->frame, VID_FMT_YUV420P,
+					     &vtx->vsrc_prm.size);
+		}
+
+		vidconv(vtx->frame, frame, 0);
+		frame = vtx->frame;
+	}
+
+	/* External selfview Window */
+	if (vtx->video->selfview == SELFVIEW_WINDOW) {
+
+		if (!vtx->selfview) {
+			struct vidisp *vd = (struct vidisp *)vidisp_find(NULL);
+
+			if (vd) {
+				vd->alloch(&vtx->selfview, NULL, vd,
+					   NULL, NULL, NULL, NULL, NULL);
+			}
+		}
+
+		(void)vidisp_display(vtx->selfview, "Selfview", vtx->frame);
+	}
+
+	lock_rel(vtx->lock);
+
+
 	/* Encode the whole picture frame */
 	err = vidcodec_get(vtx->enc)->ench(vtx->enc, vtx->picup, frame);
 	if (err) {
@@ -197,13 +239,6 @@ static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
 	/* Is the video muted? If so insert video mute image */
 	if (vtx->muted)
 		frame = vtx->mute_frame;
-
-	lock_write_get(vtx->lock);
-	if (vtx->selfview)
-		(void)vidisp_display(vtx->selfview, "", frame);
-	if (vtx->pip)
-		(void)vidisp_display(vtx->pip, "", frame);
-	lock_rel(vtx->lock);
 
 	if (vtx->muted && vtx->muted_frames >= MAX_MUTED_FRAMES)
 		return;
@@ -280,6 +315,7 @@ static int video_stream_decode(struct vrx *vrx, const struct rtp_header *hdr,
 			       struct mbuf *mb)
 {
 	struct video *v = vrx->video;
+	struct vtx *vtx = v->vtx;
 	struct vidframe frame;
 	int err = 0;
 
@@ -289,7 +325,7 @@ static int video_stream_decode(struct vrx *vrx, const struct rtp_header *hdr,
 		return 0;
 	}
 
-	frame.valid = false;
+	frame.data[0] = NULL;
 	err = vidcodec_get(vrx->dec)->dech(vrx->dec, &frame, hdr->m, mb);
 	if (err) {
 		DEBUG_WARNING("decode error (%s)\n", strerror(err));
@@ -303,8 +339,26 @@ static int video_stream_decode(struct vrx *vrx, const struct rtp_header *hdr,
 	}
 
 	/* Got a full picture-frame? */
-	if (!frame.valid)
+	if (!vidframe_isvalid(&frame))
 		return 0;
+
+	lock_write_get(vtx->lock);
+
+	/* Selfview using PIP -- Picture-In-Picture */
+	if (v->selfview == SELFVIEW_PIP && vtx->frame) {
+
+		struct vidrect rect;
+
+		rect.w = frame.size.w / 5;
+		rect.h = frame.size.h / 5;
+		rect.x = frame.size.w - rect.w - 10;
+		rect.y = frame.size.h - rect.h - 10;
+
+		/* todo: problems when writing into FFmpeg buffer */
+		vidconv(&frame, vtx->frame, &rect);
+	}
+
+	lock_rel(vtx->lock);
 
 	err = vidisp_display(vrx->vidisp, v->peer, &frame);
 
@@ -381,6 +435,13 @@ int video_alloc(struct video **vp, struct call *call,
 	MAGIC_INIT(v);
 
 	tmr_init(&v->tmr);
+
+	if (!str_casecmp(config.video.selfview, "window"))
+		v->selfview = SELFVIEW_WINDOW;
+	else if (!str_casecmp(config.video.selfview, "pip"))
+		v->selfview = SELFVIEW_PIP;
+	else
+		v->selfview = SELFVIEW_NONE;
 
 	err = stream_alloc(&v->strm, call, sdp_sess, "video", label,
 			   mnat, mnat_sess, menc,
@@ -504,11 +565,13 @@ static int set_encoder_format(struct vtx *vtx, const char *src,
 	}
 
 	vtx->mute_frame = mem_deref(vtx->mute_frame);
-	err = vidframe_alloc_filled(&vtx->mute_frame, size, 0xff, 0xff, 0xff);
+	err = vidframe_alloc(&vtx->mute_frame, VID_FMT_YUV420P, size);
 	if (err) {
 		DEBUG_NOTICE("no mute frame: %s\n", strerror(err));
 		return err;
 	}
+
+	vidframe_fill(vtx->mute_frame, 0xff, 0xff, 0xff);
 
 	return err;
 }
@@ -601,34 +664,6 @@ void video_mute(struct video *v, bool muted)
 }
 
 
-int video_selfview(struct video *v, void *view)
-{
-	struct vidisp_prm vprm;
-
-	if (!v)
-		return EINVAL;
-
-	v->vtx->selfview = mem_deref(v->vtx->selfview);
-	if (!v->vtx->vsrc)
-		return 0;
-
-	if (view) {
-		memset(&vprm, 0, sizeof(vprm));
-		/* Video Display */
-		vprm.view = view;
-		if (!v->vtx->selfview) {
-			struct vidisp *vd = (struct vidisp *)vidisp_find(NULL);
-			if (!vd)
-				return ENOENT;
-			return vd->alloch(&v->vtx->selfview, NULL, vd, &vprm,
-					  NULL, NULL, NULL, NULL);
-		}
-	}
-
-	return 0;
-}
-
-
 static int vidisp_update(struct vrx *vrx)
 {
 	struct vidisp *vd = vidisp_get(vrx->vidisp);
@@ -652,13 +687,11 @@ int video_pip(struct video *v, const struct vidrect *rect)
 	if (!v || !v->vrx->vidisp)
 		return EINVAL;
 
-	DEBUG_NOTICE("pip: %H\n", vidrect_print, rect);
-
 	vtx = v->vtx;
 
 	lock_write_get(vtx->lock);
 
-	vtx->pip = mem_deref(vtx->pip);
+	vtx->selfview = mem_deref(vtx->selfview);
 
 	/* If rect is NULL we just want to remove the P-I-P,
 	 * also if there is no video source, no sense in
@@ -668,13 +701,13 @@ int video_pip(struct video *v, const struct vidrect *rect)
 		goto out;
 
 	vd = vidisp_get(v->vrx->vidisp);
-	err = vd->alloch(&vtx->pip, v->vrx->vidisp, vd, NULL,
+	err = vd->alloch(&vtx->selfview, v->vrx->vidisp, vd, NULL,
 			 NULL, NULL, NULL, NULL);
 	if (err)
 		goto out;
 
 	if (vd->updateh)
-		err = vd->updateh(vtx->pip, false, 0, rect);
+		err = vd->updateh(vtx->selfview, false, 0, rect);
 
  out:
 	lock_rel(vtx->lock);

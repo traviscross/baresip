@@ -6,31 +6,19 @@
 #include <Cocoa/Cocoa.h>
 #include <re.h>
 #include <baresip.h>
-#include <libavcodec/avcodec.h>
-#include <libswscale/swscale.h>
-
-
-#if LIBSWSCALE_VERSION_MINOR >= 9
-#define SRCSLICE_CAST (const uint8_t **)
-#else
-#define SRCSLICE_CAST (uint8_t **)
-#endif
 
 
 struct vidisp_st {
 	struct vidisp *vd;              /**< Inheritance (1st)     */
 	struct vidsz size;              /**< Current size          */
-	struct SwsContext *sws;
 	NSOpenGLContext *ctx;
 	NSWindow *win;
-	void *buf;
 	GLhandleARB PHandle;
 	char *prog;
 };
 
 
 static struct vidisp *vid;       /**< OPENGL Video-display      */
-static bool use_shader = true;
 
 
 static const char *FProgram=
@@ -74,11 +62,7 @@ static void destructor(void *arg)
 		glDeleteObjectARB(st->PHandle);
 	}
 
-	mem_deref(st->buf);
 	mem_deref(st->prog);
-
-	if (st->sws)
-		sws_freeContext(st->sws);
 
 	[pool release];
 
@@ -116,8 +100,6 @@ static int create_window(struct vidisp_st *st)
 
 static int opengl_reset(struct vidisp_st *st, const struct vidsz *sz)
 {
-	st->buf = mem_deref(st->buf);
-
 	if (st->PHandle) {
 		glUseProgramObjectARB(0);
 		glDeleteObjectARB(st->PHandle);
@@ -404,11 +386,9 @@ static inline void draw_rgb(const uint8_t *pic, int w, int h)
 static int display(struct vidisp_st *st, const char *title,
 		   const struct vidframe *frame)
 {
-	AVPicture pict_src, pict_dst;
 	NSAutoreleasePool *pool;
 	bool upd = false;
-	int i, err = 0;
-	int ret;
+	int err = 0;
 
 	pool = [[NSAutoreleasePool alloc] init];
 	if (!pool)
@@ -454,21 +434,26 @@ static int display(struct vidisp_st *st, const char *title,
 
 	[st->ctx makeCurrentContext];
 
-	if (use_shader && !st->PHandle) {
-		re_printf("opengl: using Vertex shader with YUV420P\n");
-		err = setup_shader(st, frame->size.w, frame->size.h);
-		if (err)
-			goto out;
-	}
+	if (frame->fmt == VID_FMT_YUV420P) {
 
-	if (st->PHandle) {
+		if (!st->PHandle) {
+
+			re_printf("opengl: using Vertex shader"
+				  " with YUV420P\n");
+
+			err = setup_shader(st, frame->size.w, frame->size.h);
+			if (err)
+				goto out;
+		}
+
 		draw_yuv(st->PHandle, frame->size.h,
 			 frame->data[0], frame->linesize[0],
 			 frame->data[1], frame->linesize[1],
 			 frame->data[2], frame->linesize[2]);
 		draw_blit(frame->size.w, frame->size.h);
 	}
-	else {
+	else if (frame->fmt == VID_FMT_RGB32) {
+
 		glClearColor(0, 0, 0, 0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -480,40 +465,12 @@ static int display(struct vidisp_st *st, const char *title,
 		glMatrixMode(GL_MODELVIEW);
 		glLoadIdentity();
 
-		/* Convert from YUV420P to RGB32 */
-		if (!st->sws) {
-			st->sws = sws_getContext(frame->size.w, frame->size.h,
-						 PIX_FMT_YUV420P,
-						 frame->size.w, frame->size.h,
-						 PIX_FMT_RGB32,
-						 SWS_BICUBIC, NULL,
-						 NULL, NULL);
-			if (!st->sws) {
-				err = ENOMEM;
-				goto out;
-			}
-		}
-
-		if (!st->buf) {
-			size_t bufsz = st->size.w * st->size.h * 4;
-			st->buf = mem_alloc(bufsz, NULL);
-			if (!st->buf)
-				return ENOMEM;
-		}
-
-		for (i=0; i<4; i++) {
-			pict_src.data[i]     = frame->data[i];
-			pict_src.linesize[i] = frame->linesize[i];
-		}
-
-		avpicture_fill(&pict_dst, st->buf, PIX_FMT_RGB32,
-			       frame->size.w, frame->size.h);
-
-		ret = sws_scale(st->sws, SRCSLICE_CAST pict_src.data,
-				pict_src.linesize, 0, frame->size.h,
-				pict_dst.data, pict_dst.linesize);
-
-		draw_rgb(st->buf, frame->size.w, frame->size.h);
+		draw_rgb(frame->data[0], frame->size.w, frame->size.h);
+	}
+	else {
+		re_printf("opengl: unknown pixel format %s\n",
+			  vidfmt_name(frame->fmt));
+		err = EINVAL;
 	}
 
 	[st->ctx flushBuffer];

@@ -19,6 +19,7 @@
 #   USE_GST           Gstreamer audio module
 #   USE_ILBC          iLBC audio codec
 #   USE_L16           L16 audio codec
+#   USE_OPUS          Opus audio codec
 #   USE_OSS           OSS audio driver
 #   USE_PLC           Packet Loss Concealment
 #   USE_PORTAUDIO     Portaudio audio driver
@@ -76,6 +77,9 @@ USE_GST := $(shell [ -f $(SYSROOT)/include/gstreamer-0.10/gst/gst.h ] || \
 	[ -f $(SYSROOT_ALT)/include/gstreamer-0.10/gst/gst.h ] && echo "yes")
 USE_ILBC := $(shell [ -f $(SYSROOT)/include/iLBC_define.h ] || \
 	[ -f $(SYSROOT)/local/include/iLBC_define.h ] && echo "yes")
+USE_OPUS := $(shell [ -f $(SYSROOT)/include/opus/opus.h ] || \
+	[ -f $(SYSROOT_ALT)/include/opus/opus.h ] || \
+	[ -f $(SYSROOT)/local/include/opus/opus.h ] && echo "yes")
 USE_OSS := $(shell [ -f $(SYSROOT)/include/soundcard.h ] || \
 	[ -f $(SYSROOT)/include/sys/soundcard.h ] && echo "yes")
 USE_PLC := $(shell [ -f $(SYSROOT)/include/spandsp/plc.h ] || \
@@ -115,14 +119,12 @@ USE_SRTP := $(shell [ -f $(SYSROOT)/include/srtp/srtp.h ] || \
 	[ -f $(SYSROOT_ALT)/include/srtp/srtp.h ] || \
 	[ -f $(SYSROOT)/local/include/srtp/srtp.h ] && echo "yes")
 USE_UUID  := $(shell [ -f $(SYSROOT)/include/uuid/uuid.h ] && echo "yes")
-ifneq ($(USE_FFMPEG),)
 USE_V4L  := $(shell [ -f $(SYSROOT)/include/linux/videodev.h ] \
 	&& echo "yes")
 USE_V4L2  := $(shell [ -f $(SYSROOT)/include/libv4l2.h ] \
 	&& echo "yes")
 USE_X11 := $(shell [ -f $(SYSROOT)/include/X11/Xlib.h ] || \
 	[ -f $(SYSROOT_ALT)/include/X11/Xlib.h ] && echo "yes")
-endif
 USE_VPX  := $(shell [ -f $(SYSROOT)/include/vpx/vp8.h ] \
 	|| [ -f $(SYSROOT)/local/include/vpx/vp8.h ] \
 	|| [ -f $(SYSROOT_ALT)/include/vpx/vp8.h ] \
@@ -135,8 +137,17 @@ USE_COREAUDIO := yes
 USE_OPENGL    := yes
 
 ifneq ($(USE_FFMPEG),)
+ifneq ($(shell echo | $(CC) -E -dM - | grep '__LP64__'), )
+LP64      := 1
+endif
+
+ifndef LP64
 USE_QUICKTIME := yes
 endif
+
+endif
+
+USE_QTCAPTURE := yes
 
 endif
 ifeq ($(OS),linux)
@@ -168,13 +179,9 @@ ifneq ($(USE_COREAUDIO),)
 MODULES   += coreaudio
 endif
 ifneq ($(USE_QUICKTIME),)
-
-ifneq ($(shell echo | $(CC) -E -dM - | grep '__LP64__'), )
-LP64      := 1
-endif
-ifndef LP64
 MODULES   += quicktime
 endif
+ifneq ($(USE_QTCAPTURE),)
 MODULES   += qtcapture
 CFLAGS    += -DQTCAPTURE_RUNLOOP
 endif
@@ -216,6 +223,9 @@ MODULES   += opengl
 endif
 ifneq ($(USE_OPENGLES),)
 MODULES   += opengles
+endif
+ifneq ($(USE_OPUS),)
+MODULES   += opus
 endif
 ifneq ($(USE_OSS),)
 MODULES   += oss

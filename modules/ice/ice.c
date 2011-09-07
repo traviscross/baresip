@@ -67,7 +67,7 @@ static void gather_handler(int err, uint16_t scode, const char *reason,
 
 static bool is_cellular(const struct sa *laddr)
 {
-#ifdef __APPLE__
+#if TARGET_OS_IPHONE
 	SCNetworkReachabilityRef r;
 	SCNetworkReachabilityFlags flags = 0;
 	bool cell = false;
@@ -79,10 +79,8 @@ static bool is_cellular(const struct sa *laddr)
 
 	if (SCNetworkReachabilityGetFlags(r, &flags)) {
 
-#if TARGET_OS_IPHONE
 		if (flags & kSCNetworkReachabilityFlagsIsWWAN)
 			cell = true;
-#endif
 	}
 
 	CFRelease(r);

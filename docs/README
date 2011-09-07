@@ -20,8 +20,8 @@ Design goals:
 Modular Plugin Architecture:
 
 * User interface: stdio cons evdev
-* Audio codecs:   celt g711 g722 gsm ilbc l16 speex
-* Audio drivers:  alsa coreaudio gst portaudio oss winwav mda
+* Audio codecs:   amr celt g711 g722 gsm ilbc l16 opus silk speex
+* Audio drivers:  alsa coreaudio gst portaudio opensles oss winwav mda
 * Audio filters:  speex_pp speex_aec speex_resamp sndfile
 * Video codecs:   avcodec vpx
 * Video sources:  avformat quicktime qtcapture v4l v4l2 x11grab
@@ -47,15 +47,18 @@ IETF RFC/I-Ds:
 * RFC 4587  RTP Payload Format for H.261 Video Streams
 * RFC 4629  RTP Payload Format for ITU-T Rec. H.263 Video
 * RFC 4796  The SDP Content Attribute
+* RFC 4867  RTP Payload Format for the AMR and AMR-WB Audio Codecs
 * RFC 4961  Symmetric RTP / RTP Control Protocol (RTCP)
 * RFC 5168  XML Schema for Media Control
 * RFC 5574  RTP Payload Format for the Speex Codec
 * RFC 5577  RTP Payload Format for ITU-T Recommendation G.722.1
 * RFC 5761  Multiplexing RTP Data and Control Packets on a Single Port
+* RFC 6263  App. Mechanism for Keeping Alive NAT Associated with RTP / RTCP
 
-* draft-ietf-avt-app-rtp-keepalive-09  NAT keep-alive to RTP flows
 * draft-valin-celt-rtp-profile-02
 * draft-westin-payload-vp8-02
+* draft-ietf-codec-opus-08
+* draft-spittka-payload-rtp-opus-00
 
 
 Architecture:
@@ -85,3 +88,35 @@ Architecture:
 
    A User-Agent (UA) has 0-N SIP Calls
    A SIP Call has 0-M Media Streams
+
+
+Supported platforms:
+
+* Linux
+* FreeBSD
+* OpenBSD
+* NetBSD
+* Symbian OS
+* Solaris
+* Windows
+* Apple Mac OS X and iOS
+* Android
+
+
+Supported compilers:
+
+* gcc (v2.9x to v4.x)
+* gcce
+* ms vc2003 compiler
+* codewarrior
+
+
+External dependencies:
+
+libre
+librem
+
+
+Feedback:
+
+- Please send feedback to <libre@creytiv.com>

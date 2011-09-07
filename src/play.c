@@ -186,9 +186,9 @@ int play_tone(struct play **playp, struct mbuf *tone,
 
 int play_file(struct play **playp, const char *filename, int repeat)
 {
-	int err;
 	struct auplay_prm wprm;
 	struct mbuf *mb;
+	int err;
 
 	if (playp && *playp)
 		return EALREADY;

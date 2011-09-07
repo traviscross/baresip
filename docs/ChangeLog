@@ -1,3 +1,43 @@
+2011-09-07 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.3.0
+
+	* baresip: use librem for media processing
+		   added support for video selfview
+		   aubuf, autone, vutil: moved to librem
+		   ua: improved API
+		   conf: use internal parser instead of fscanf()
+		   vidloop: cleanup, use librem for processing
+
+	* config: add video_selfview={pip,window} parameter	
+
+	* amr: new module for AMR and AMR-WB audio codecs (RFC 4867)
+
+	* avcodec, avformat: update to latest version of FFmpeg
+
+	* coreaudio: fix building on MacOSX 10.5 (thanks David Jedda)
+
+	* ice: fix building on MacOSX 10.5 (thanks David Jedda)
+
+	* opengl: remove deps to libswscale
+
+	* opensles: new module OpenSLES audio driver
+
+	* opus: new module for OPUS audio codec
+
+	* qtcapture: remove deps to libswscale
+
+	* rst: new module for mp3 audio streaming
+
+	* silk: new module for SILK audio codec
+
+	* v4l, v4l2: remove deps to libswscale
+
+	* x11: remove deps to libswscale, use librem vidconv instead
+
+	* x11grab: remove deps to libswscale
+
+
 2011-05-20 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.2.0

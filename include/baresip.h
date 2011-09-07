@@ -9,6 +9,9 @@ extern "C" {
 #endif
 
 
+#include <rem.h>
+
+
 /* forward declarations */
 struct sa;
 struct sip_msg;
@@ -18,78 +21,6 @@ struct sdp_session;
 
 /** Defines the exit handler */
 typedef void (exit_h)(int ret);
-
-
-/* Generic Video types */
-enum vidorient {
-	VIDORIENT_UNKNOWN,
-	VIDORIENT_PORTRAIT,
-	VIDORIENT_PORTRAIT_UPSIDEDOWN,
-	VIDORIENT_LANDSCAPE_LEFT,
-	VIDORIENT_LANDSCAPE_RIGHT,
-	VIDORIENT_FACEUP,
-	VIDORIENT_FACEDOWN
-};
-
-struct vidsz {
-	int w, h;
-};
-
-struct vidframe {
-	uint8_t *data[4];
-	uint16_t linesize[4];
-	struct vidsz size;
-	bool     valid;
-};
-
-struct vidpt {
-	int x;
-	int y;
-};
-
-struct vidrect {
-	struct vidpt origin;
-	struct vidsz size;
-	int r;
-};
-
-
-static inline bool vidsz_cmp(const struct vidsz *a, const struct vidsz *b)
-{
-	if (!a || !b)
-		return false;
-
-	if (a == b)
-		return true;
-
-	return a->w == b->w && a->h == b->h;
-}
-
-
-/* vutil.c */
-void vidframe_init(struct vidframe *vf, const struct vidsz *sz,
-		   uint8_t *data[4], int linesize[4]);
-void vidframe_yuv420p_init(struct vidframe *vf, uint8_t *ptr,
-			   const struct vidsz *sz);
-void vidframe_rgb32_init(struct vidframe *vf, const struct vidsz *sz,
-			 uint8_t *buf);
-struct vidframe *vidframe_alloc(const struct vidsz *sz);
-struct vidframe *vidframe_clone(const struct vidframe *src);
-int vidframe_alloc_filled(struct vidframe **vfp, const struct vidsz *sz,
-                          uint32_t r, uint32_t g, uint32_t b);
-int  vidframe_print(struct re_printf *pf, const struct vidframe *vf);
-void vidrect_init(struct vidrect *rect, int x, int y, int w, int h, int r);
-int  vidrect_print(struct re_printf *pf, const struct vidrect *vr);
-static inline bool vidrect_cmp(const struct vidrect *a,
-			       const struct vidrect *b)
-{
-	if (!a || !b)
-		return false;
-
-	return (a->origin.x == b->origin.x && a->origin.y == b->origin.y)
-		&& (a->size.w == b->size.w && a->size.h == b->size.h)
-		&& (a->r == b->r);
-}
 
 
 /* calc - Interface to calculation routines */
@@ -169,6 +100,7 @@ struct conf {
 		uint32_t bitrate;      /**< Encoder bitrate in [bit/s] */
 		uint32_t fps;
 		char exclude[64];      /**< CSV-list of codecs to exclude */
+		char selfview[16];     /**< Selfview: 'pip' or 'window'   */
 	} video;
 
 	/** Jitter Buffer */
@@ -294,18 +226,6 @@ int aufilt_register(struct aufilt **afp, const char *name,
 struct list *aufilt_list(void);
 
 
-/* Audio Buffer */
-struct aubuf;
-
-int  aubuf_alloc(struct aubuf **abp, size_t min_sz, size_t max_sz);
-int  aubuf_append(struct aubuf *ab, struct mbuf *mb);
-int  aubuf_write(struct aubuf *ab, const uint8_t *p, size_t sz);
-void aubuf_read(struct aubuf *ab, uint8_t *p, size_t sz);
-int  aubuf_get(struct aubuf *ab, uint32_t ptime, uint8_t *p, size_t sz);
-int  aubuf_debug(struct re_printf *pf, const struct aubuf *ab);
-size_t aubuf_cur_size(const struct aubuf *ab);
-
-
 /* menc - media encryption */
 struct menc;
 struct menc_st;
@@ -400,11 +320,10 @@ typedef void (ua_message_h)(const struct pl *peer, const struct pl *ctype,
 typedef void (options_resp_h)(int err, const struct sip_msg *msg, void *arg);
 
 /* Multiple instances */
-int  ua_alloc(struct ua **uap, const struct pl *aor);
-void ua_set_event_handler(struct ua *ua, ua_event_h *eh, void *arg);
-void ua_set_message_handler(struct ua *ua, ua_message_h *msgh);
-int  ua_connect(struct ua *ua, const char *uri, const char *mnatid,
-		enum vidmode vidmode);
+int  ua_alloc(struct ua **uap, const char *aor,
+	      ua_event_h *eh, ua_message_h *msgh, void *arg);
+int  ua_connect(struct ua *ua, const char *uri, const char *params,
+		const char *mnatid, enum vidmode vidmode);
 void ua_hangup(struct ua *ua);
 void ua_answer(struct ua *ua);
 void ua_play_digit(struct ua *ua, int key);
@@ -412,8 +331,6 @@ int  ua_im_send(struct ua *ua, struct mbuf *peer, struct mbuf *msg);
 void ua_toggle_statmode(struct ua *ua);
 void ua_set_statmode(struct ua *ua, enum statmode mode);
 int  ua_debug(struct re_printf *pf, const struct ua *ua);
-int  ua_auth(struct ua *ua, char **username, char **password,
-	     const char *realm);
 int  ua_options_send(struct ua *ua, const char *uri,
 		     options_resp_h *resph, void *arg);
 char *ua_aor(struct ua *ua);
@@ -601,7 +518,6 @@ void audio_enable_txthread(struct audio *a, bool enabled);
 struct video;
 void video_mute(struct video *v, bool muted);
 void *video_view(const struct video *v);
-int video_selfview(struct video *v, void *view);
 int video_pip(struct video *v, const struct vidrect *rect);
 int video_set_fullscreen(struct video *v, bool fs);
 int video_set_orient(struct video *v, enum vidorient orient);
@@ -638,12 +554,6 @@ int mnat_register(struct mnat **mnatp, const char *id, const char *ftag,
 
 /* Real-time */
 int realtime_enable(bool enable, int fps);
-
-
-/* Audio Tones */
-int autone_sine(struct mbuf *mb, uint32_t srate,
-		uint32_t f1, int l1, uint32_t f2, int l2);
-int autone_dtmf(struct mbuf *mb, uint32_t srate, int digit);
 
 
 /* Modules */
