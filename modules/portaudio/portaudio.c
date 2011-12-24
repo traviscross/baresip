@@ -175,12 +175,14 @@ static void auplay_destructor(void *arg)
 
 
 static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
+		     struct media_ctx **ctx,
 		     struct ausrc_prm *prm, const char *device,
 		     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
 	int err;
 
+	(void)ctx;
 	(void)device;
 	(void)errh;
 
@@ -266,6 +268,7 @@ static int pa_init(void)
 		info = Pa_GetDeviceInfo(i);
 
 		DEBUG_INFO(" device %d: %s\n", i, info->name);
+		(void)info;
 	}
 
 	if (paNoDevice != Pa_GetDefaultInputDevice())

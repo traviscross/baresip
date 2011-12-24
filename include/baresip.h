@@ -35,7 +35,6 @@ typedef void (exit_h)(int ret);
 uint32_t calc_nsamp(uint32_t srate, int channels, uint16_t ptime);
 uint32_t calc_ptime(uint32_t srate, int channels, uint32_t nsamp);
 int16_t  calc_avg_s16(struct mbuf *mb);
-uint32_t yuv420p_size(const struct vidsz *sz);
 
 
 /* call */
@@ -48,20 +47,21 @@ void call_audioencoder_cycle(struct call *call);
 void call_videoencoder_cycle(struct call *call);
 uint32_t call_duration(const struct call *call);
 const char *call_peername(const struct call *call);
-const char *call_peerrpid(const struct call *call);
-struct audio *call_audio(struct call *call);
-struct video *call_video(struct call *call);
+struct audio *call_audio(const struct call *call);
+struct video *call_video(const struct call *call);
 struct list *call_streaml(const struct call *call);
 bool call_has_audio(const struct call *call);
 bool call_has_video(const struct call *call);
-int call_video_set_shuttered(struct call *call, bool shuttered);
 
 
-/* conf */
+/*
+ * conf
+ */
 
+/** A range of numbers */
 struct range {
-	uint32_t min;
-	uint32_t max;
+	uint32_t min;  /**< Minimum number */
+	uint32_t max;  /**< Maximum number */
 };
 
 static inline bool in_range(const struct range *rng, uint32_t val)
@@ -70,11 +70,12 @@ static inline bool in_range(const struct range *rng, uint32_t val)
 }
 
 
+/** Core configuration */
 struct conf {
 	/** Input */
 	struct {
-		char device[64];
-		uint32_t port;
+		char device[64];       /**< Input device name */
+		uint32_t port;         /**< Input port number */
 	} input;
 
 	/** SIP User-Agent */
@@ -89,38 +90,29 @@ struct conf {
 		struct range srate;    /**< Audio sampling rate in [Hz]    */
 		struct range channels; /**< Nr. of audio channels (1=mono) */
 		uint32_t aec_len;      /**< AEC Tail length in [ms]        */
-		struct range srate_play;
-		struct range srate_src;
+		struct range srate_play;/**< Sampling rates for player     */
+		struct range srate_src; /**< Sampling rates for source     */
 	} audio;
 
 	/** Video */
 	struct {
-		char device[64];
-		struct vidsz size;
-		uint32_t bitrate;      /**< Encoder bitrate in [bit/s] */
-		uint32_t fps;
+		char device[64];       /**< Video device name             */
+		struct vidsz size;     /**< Video resolution              */
+		uint32_t bitrate;      /**< Encoder bitrate in [bit/s]    */
+		uint32_t fps;          /**< Video framerate               */
 		char exclude[64];      /**< CSV-list of codecs to exclude */
 		char selfview[16];     /**< Selfview: 'pip' or 'window'   */
 	} video;
-
-	/** Jitter Buffer */
-	struct {
-		struct range delay;    /**< Delay, number of frames      */
-	} jbuf;
 
 	/** Audio/Video Transport */
 	struct {
 		uint8_t rtp_tos;       /**< Type-of-Service for outgoing RTP */
 		struct range rtp_ports;/**< RTP port range                   */
-		struct range rtp_bandwidth;/**< RTP Bandwidth range [bit/s]  */
+		struct range rtp_bw;   /**< RTP Bandwidth range [bit/s]      */
 		bool rtcp_enable;      /**< RTCP is enabled                  */
 		bool rtcp_mux;         /**< RTP/RTCP multiplexing            */
+		struct range jbuf_del; /**< Delay, number of frames          */
 	} avt;
-
-	/** NAT Behavior Discovery */
-	struct {
-		uint32_t interval;     /**< Interval in [s], 0 to disable */
-	} natbd;
 };
 
 struct mod;
@@ -143,48 +135,73 @@ void conf_set_domain(const char *domain);
 int  conf_load_module(struct mod **mp, const char *name);
 
 
-/* contact */
+/*
+ * contact
+ */
+
 void contact_init(void);
 void contact_close(void);
 int  contact_add(const struct pl *addr);
 
 
-/* Audio Source */
+/*
+ * Media Context
+ */
 
+/** Media Context */
+struct media_ctx {
+	const char *id;  /**< Media Context identifier */
+};
+
+
+/*
+ * Audio Source
+ */
+
+/** Audio formats */
 enum aufmt {AUFMT_S16LE, AUFMT_PCMA, AUFMT_PCMU};
+
 struct ausrc;
 struct ausrc_st;
+
+/** Audio Source parameters */
 struct ausrc_prm {
-	enum aufmt fmt;
-	uint32_t   srate;
-	uint8_t    ch;
-	uint32_t   frame_size;
+	enum aufmt fmt;         /**< Audio format          */
+	uint32_t   srate;       /**< Sampling rate in [Hz] */
+	uint8_t    ch;          /**< Number of channels    */
+	uint32_t   frame_size;  /**< Frame size in samples */
 };
 
 typedef void (ausrc_read_h)(const uint8_t *buf, size_t sz, void *arg);
 typedef void (ausrc_error_h)(int err, const char *str, void *arg);
 
 typedef int  (ausrc_alloc_h)(struct ausrc_st **stp, struct ausrc *ausrc,
+			     struct media_ctx **ctx,
 			     struct ausrc_prm *prm, const char *device,
 			     ausrc_read_h *rh, ausrc_error_h *errh, void *arg);
 
 int ausrc_register(struct ausrc **asp, const char *name,
 		   ausrc_alloc_h *alloch);
 const struct ausrc *ausrc_find(const char *name);
-int ausrc_alloc(struct ausrc_st **stp, const char *name,
+int ausrc_alloc(struct ausrc_st **stp, struct media_ctx **ctx,
+		const char *name,
 		struct ausrc_prm *prm, const char *device,
 		ausrc_read_h *rh, ausrc_error_h *errh, void *arg);
 
 
-/* Audio Player */
+/*
+ * Audio Player
+ */
 
 struct auplay;
 struct auplay_st;
+
+/** Audio Player parameters */
 struct auplay_prm {
-	enum aufmt fmt;
-	uint32_t   srate;
-	uint8_t    ch;
-	uint32_t   frame_size;
+	enum aufmt fmt;         /**< Audio format          */
+	uint32_t   srate;       /**< Sampling rate in [Hz] */
+	uint8_t    ch;          /**< Number of channels    */
+	uint32_t   frame_size;  /**< Frame size in samples */
 };
 
 typedef bool (auplay_write_h)(uint8_t *buf, size_t sz, void *arg);
@@ -201,10 +218,14 @@ int auplay_alloc(struct auplay_st **stp, const char *name,
 		 auplay_write_h *wh, void *arg);
 
 
-/* Audio Filter */
+/*
+ * Audio Filter
+ */
 
 struct aufilt;
 struct aufilt_st;
+
+/** Audio Filter Parameters */
 struct aufilt_prm {
 	uint32_t srate;       /**< Sampling rate in [Hz]        */
 	uint32_t srate_out;   /**< Output sampling rate in [Hz] */
@@ -218,7 +239,7 @@ typedef int (aufilt_alloc_h)(struct aufilt_st **stp, struct aufilt *af,
 			     const struct aufilt_prm *decprm);
 typedef int (aufilt_enc_h)(struct aufilt_st *st, struct mbuf *mb);
 typedef int (aufilt_dec_h)(struct aufilt_st *st, struct mbuf *mb);
-typedef int (aufilt_update_h)(struct aufilt_st *st, bool speakerphone);
+typedef int (aufilt_update_h)(struct aufilt_st *st);
 
 int aufilt_register(struct aufilt **afp, const char *name,
 		    aufilt_alloc_h *alloch, aufilt_enc_h *ench,
@@ -226,7 +247,10 @@ int aufilt_register(struct aufilt **afp, const char *name,
 struct list *aufilt_list(void);
 
 
-/* menc - media encryption */
+/*
+ * menc - Media encryption
+ */
+
 struct menc;
 struct menc_st;
 
@@ -240,15 +264,9 @@ int menc_register(struct menc **mencp, const char *id, menc_alloc_h *alloch,
 		  menc_update_h *updateh);
 
 
-/* natbd */
-struct dnsc;
-int  natbd_init(const struct sa *laddr, const struct pl *host, uint16_t port,
-		struct dnsc *dnsc);
-void natbd_close(void);
-int  natbd_status(struct re_printf *pf, void *unused);
-
-
-/* net */
+/*
+ * net - Networking
+ */
 
 typedef void (net_change_h)(void *arg);
 
@@ -262,21 +280,22 @@ const struct sa *net_laddr(void);
 struct dnsc *net_dnsc(void);
 
 
-/* os */
-int mkpath(const char *path);
-int get_login_name(const char **login);
-int get_homedir(char *path, uint32_t sz);
+/*
+ * play - audio file player
+ */
 
-
-/* play */
 struct play;
-int play_file(struct play **playp, const char *filename, int repeat);
-int play_tone(struct play **playp, struct mbuf *tone,
-	      int srate, int ch, int repeat);
+
+int  play_file(struct play **playp, const char *filename, int repeat);
+int  play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
+	       uint8_t ch, int repeat);
 void play_close(void);
 
 
-/* ua */
+/*
+ * ua - User Agent
+ */
+
 struct ua;
 
 /** Events from User-Agent */
@@ -306,6 +325,14 @@ enum statmode {
 	STATMODE_N
 };
 
+/** Audio transmit mode */
+enum audio_mode {
+	AUDIO_MODE_POLL = 0,         /**< Polling mode                  */
+	AUDIO_MODE_THREAD,           /**< Use dedicated thread          */
+	AUDIO_MODE_THREAD_REALTIME,  /**< Use dedicated realtime-thread */
+	AUDIO_MODE_TMR               /**< Use timer                     */
+};
+
 /** Video mode */
 enum vidmode {
 	VIDMODE_OFF = 0,    /**< Video disabled                */
@@ -326,29 +353,27 @@ int  ua_connect(struct ua *ua, const char *uri, const char *params,
 		const char *mnatid, enum vidmode vidmode);
 void ua_hangup(struct ua *ua);
 void ua_answer(struct ua *ua);
-void ua_play_digit(struct ua *ua, int key);
 int  ua_im_send(struct ua *ua, struct mbuf *peer, struct mbuf *msg);
 void ua_toggle_statmode(struct ua *ua);
 void ua_set_statmode(struct ua *ua, enum statmode mode);
-int  ua_debug(struct re_printf *pf, const struct ua *ua);
 int  ua_options_send(struct ua *ua, const char *uri,
 		     options_resp_h *resph, void *arg);
-char *ua_aor(struct ua *ua);
-struct call *ua_call(struct ua *ua);
-int ua_sipfd(const struct ua *ua);
+int  ua_register(struct ua *ua);
+int  ua_sipfd(const struct ua *ua);
+const char *ua_aor(const struct ua *ua);
+struct call *ua_call(const struct ua *ua);
 
 
 /* One instance */
 int  ua_init(const char *software, bool udp, bool tcp, bool tls,
 	     exit_h *exith);
 void ua_set_uuid(const char *uuid);
+void ua_set_aumode(enum audio_mode aumode);
 void ua_close(void);
 void ua_stack_suspend(void);
 int  ua_stack_resume(const char *software, bool udp, bool tcp, bool tls);
 int  ua_start_all(void);
 void ua_stop_all(bool forced);
-void ua_next(void);
-int  ua_register(struct ua *ua);
 int  ua_reset_transp(bool reg, bool reinvite);
 struct ua *ua_cur(void);
 int  ua_print_sip_status(struct re_printf *pf, void *unused);
@@ -359,12 +384,17 @@ struct sipsess_sock *uag_sipsess_sock(void);
 const char *ua_event_str(enum ua_event ev);
 
 
-/* ui - user interface */
+/*
+ * ui - User Interface
+ */
+
 struct ui;
 struct ui_st;
+
+/** User Interface parameters */
 struct ui_prm {
-	char *device;
-	uint16_t port;
+	char *device;   /**< Device name */
+	uint16_t port;  /**< Port number */
 };
 typedef void (ui_input_h)(char key, struct re_printf *pf, void *arg);
 
@@ -388,9 +418,14 @@ void audio_loop_test(bool stop);
 void video_loop_test(bool stop);
 
 
-/* Video Source */
+/*
+ * Video Source
+ */
+
 struct vidsrc;
 struct vidsrc_st;
+
+/** Video Source parameters */
 struct vidsrc_prm {
 	struct vidsz size;      /**< Wanted picture size        */
 	enum vidorient orient;  /**< Wanted picture orientation */
@@ -401,7 +436,7 @@ typedef void (vidsrc_frame_h)(const struct vidframe *frame, void *arg);
 typedef void (vidsrc_error_h)(int err, void *arg);
 
 typedef int  (vidsrc_alloc_h)(struct vidsrc_st **vsp, struct vidsrc *vs,
-			      struct vidsrc_prm *prm,
+			      struct media_ctx **ctx, struct vidsrc_prm *prm,
 			      const char *fmt, const char *dev,
 			      vidsrc_frame_h *frameh,
 			      vidsrc_error_h *errorh, void *arg);
@@ -415,9 +450,14 @@ const struct vidsrc *vidsrc_find(const char *name);
 struct list *vidsrc_list(void);
 
 
-/* Video Display */
+/*
+ * Video Display
+ */
+
 struct vidisp;
 struct vidisp_st;
+
+/** Video Display parameters */
 struct vidisp_prm {
 	void *view;  /**< Optional view (set by application or module) */
 };
@@ -446,9 +486,10 @@ int vidisp_register(struct vidisp **vp, const char *name,
 struct aucodec;
 struct aucodec_st;    /* must "inherit" from struct aucodec */
 
+/** Audio Codec Parameters */
 struct aucodec_prm {
-	uint32_t srate;
-	uint32_t ptime;
+	uint32_t srate;  /**< Sampling rate in [Hz] */
+	uint32_t ptime;  /**< Packet time in [ms]   */
 };
 
 typedef int (aucodec_alloc_h)(struct aucodec_st **asp, struct aucodec *ac,
@@ -476,13 +517,17 @@ int aucodec_encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src);
 int aucodec_decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src);
 
 
-/* Video Codec */
+/*
+ * Video Codec
+ */
+
 struct vidcodec;
 struct vidcodec_st;    /* must "inherit" from struct vidcodec */
 
+/** Video Codec parameters */
 struct vidcodec_prm {
-	struct vidsz size;
-	int fps;
+	struct vidsz size;  /**< Video resolution           */
+	int fps;            /**< Video framerate            */
 	int bitrate;        /**< Encoder bitrate in [bit/s] */
 };
 
@@ -508,20 +553,28 @@ struct list *vidcodec_list(void);
 void vidcodec_set_fmtp(struct vidcodec *vc, const char *fmtp);
 
 
-/* Audio */
+/*
+ * Audio stream
+ */
+
+struct audio;
+
 void audio_mute(struct audio *a, bool muted);
-void audio_update(struct audio *a, bool speakerphone);
-void audio_enable_txthread(struct audio *a, bool enabled);
 
 
-/* Video */
+/*
+ * Video stream
+ */
+
 struct video;
-void video_mute(struct video *v, bool muted);
+
+void  video_mute(struct video *v, bool muted);
 void *video_view(const struct video *v);
-int video_pip(struct video *v, const struct vidrect *rect);
-int video_set_fullscreen(struct video *v, bool fs);
-int video_set_orient(struct video *v, enum vidorient orient);
-void video_vidsrc_set_device(struct video *v, const char *dev);
+int   video_pip(struct video *v, const struct vidrect *rect);
+int   video_set_fullscreen(struct video *v, bool fs);
+int   video_set_orient(struct video *v, enum vidorient orient);
+void  video_vidsrc_set_device(struct video *v, const char *dev);
+int   video_set_source(struct video *v, const char *name, const char *dev);
 
 
 /*

@@ -59,13 +59,16 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 
 	(void)decprm;
 
+	if (!encprm || encprm->ch != 1)
+		return EINVAL;
+
 	st = mem_zalloc(sizeof(*st), speexpp_destructor);
 	if (!st)
 		return ENOMEM;
 
 	st->af = mem_ref(af);
 
-	st->psize = 2 * encprm->ch * encprm->frame_size;
+	st->psize = 2 * encprm->frame_size;
 
 	st->state = speex_preprocess_state_init(encprm->frame_size,
 						encprm->srate);

@@ -16,6 +16,7 @@
 #include <re_dbg.h>
 
 
+/** Video Statistics */
 struct vstat {
 	uint64_t tsamp;
 	uint32_t frames;
@@ -182,7 +183,7 @@ static int vsrc_reopen(struct video_loop *vl, const struct vidsz *sz)
 
 	vl->vsrc = mem_deref(vl->vsrc);
 
-	err = vs->alloch(&vl->vsrc, vs, &prm, NULL,
+	err = vs->alloch(&vl->vsrc, vs, NULL, &prm, NULL,
 			  config.video.device, vidsrc_frame_handler,
 			  NULL, vl);
 	if (err) {
@@ -233,6 +234,11 @@ static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 }
 
 
+/**
+ * Start the video loop (for testing)
+ *
+ * @param stop True to force stopping, otherwise false
+ */
 void video_loop_test(bool stop)
 {
 	static struct video_loop *vl = NULL;

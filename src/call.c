@@ -62,7 +62,6 @@ struct call {
 	char *local_uri;          /**< Local SIP uri                        */
 	char *peer_uri;           /**< Peer SIP Address                     */
 	char *peer_name;          /**< Peer display name                    */
-	char *peer_rpid;          /**< Peer Remote-Party-ID                 */
 	char *cuser;              /**< SIP Contact username                 */
 	struct tmr tmr_inv;       /**< Timer for incoming calls             */
 	time_t time_start;        /**< Time when call started               */
@@ -172,7 +171,7 @@ static void call_stream_start(struct call *call, bool active)
 			err  = audio_encoder_set(call->audio, sc->data,
 						 sc->pt, sc->params);
 			err |= audio_decoder_set(call->audio, sc->data,
-						 sc->pt);
+						 sc->pt, sc->params);
 			if (!err) {
 				err = audio_start(call->audio);
 			}
@@ -373,7 +372,6 @@ static void call_destructor(void *arg)
 	mem_deref(call->sess);
 	mem_deref(call->peer_uri);
 	mem_deref(call->peer_name);
-	mem_deref(call->peer_rpid);
 	mem_deref(call->local_uri);
 	mem_deref(call->local_name);
 	mem_deref(call->cuser);
@@ -436,16 +434,39 @@ static void video_exclude(const struct stream *strm, const char *excl)
 #endif
 
 
-int call_alloc(struct call **callp, struct ua *ua, uint32_t ptime,
+/**
+ * Allocate a new Call state object
+ *
+ * @param callp       Pointer to allocated Call state object
+ * @param ua          User-Agent
+ * @param prm         Call parameters
+ * @param mnat        Media NAT traversal (optional)
+ * @param stun_user   STUN username
+ * @param stun_pass   STUN password
+ * @param stun_host   STUN server hostname
+ * @param stun_port   STUN server port number
+ * @param menc        Media encryption (optional)
+ * @param local_name  Local SIP name
+ * @param local_uri   Local SIP uri
+ * @param cuser       Local contact user
+ * @param msg         SIP message for incoming calls
+ * @param eh          Call event handler
+ * @param arg         Handler argument
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+int call_alloc(struct call **callp, struct ua *ua, const struct call_prm *prm,
 	       const struct mnat *mnat,
 	       const char *stun_user, const char *stun_pass,
 	       const char *stun_host, uint16_t stun_port,
-	       const struct menc *menc, call_event_h *eh, void *arg,
-	       const char *local_name, const char *local_uri,
-	       const char *cuser, enum vidmode vidmode,
-	       const struct sip_msg *msg)
+	       const struct menc *menc, const char *local_name,
+	       const char *local_uri, const char *cuser,
+	       const struct sip_msg *msg, call_event_h *eh, void *arg)
 {
 	struct call *call;
+	const uint32_t ptime = prm ? prm->ptime : 0;
+	enum audio_mode aumode = prm ? prm->aumode : AUDIO_MODE_POLL;
+	enum vidmode vidmode = prm ? prm->vidmode : VIDMODE_OFF;
 	bool use_video = true, got_offer = false;
 	int label = 0;
 	int err = 0;
@@ -504,7 +525,8 @@ int call_alloc(struct call **callp, struct ua *ua, uint32_t ptime,
 
 	/* Audio stream */
 	err = audio_alloc(&call->audio, call, call->sdp, ++label,
-			  mnat, call->mnats, menc, ptime ? ptime : PTIME,
+			  mnat, call->mnats, menc,
+			  ptime ? ptime : PTIME, aumode,
 			  audio_event_handler, audio_error_handler, call);
 	if (err)
 		goto out;
@@ -548,10 +570,10 @@ int call_alloc(struct call **callp, struct ua *ua, uint32_t ptime,
 	sdp_session_set_lbandwidth(call->sdp, SDP_BANDWIDTH_CT, 4096);
 #endif
 
-	if (config.avt.rtp_bandwidth.max >= AUDIO_BANDWIDTH) {
+	if (config.avt.rtp_bw.max >= AUDIO_BANDWIDTH) {
 		uint32_t bwa = AUDIO_BANDWIDTH;
 #ifdef USE_VIDEO
-		uint32_t bwv = config.avt.rtp_bandwidth.max - AUDIO_BANDWIDTH;
+		uint32_t bwv = config.avt.rtp_bw.max - AUDIO_BANDWIDTH;
 #endif
 
 		stream_set_bw(audio_strm(call->audio), bwa);
@@ -561,7 +583,7 @@ int call_alloc(struct call **callp, struct ua *ua, uint32_t ptime,
 	}
 	else {
 		DEBUG_WARNING("bandwidth too low (%u bit/s)\n",
-			      config.avt.rtp_bandwidth.max);
+			      config.avt.rtp_bw.max);
 	}
 
  out:
@@ -604,6 +626,13 @@ int call_connect(struct call *call, const struct pl *paddr)
 }
 
 
+/**
+ * Update the current call by sending Re-INVITE or UPDATE
+ *
+ * @param call Call object
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int call_modify(struct call *call)
 {
 	struct mbuf *desc;
@@ -714,6 +743,13 @@ int call_answer(struct call *call, uint16_t scode)
 }
 
 
+/**
+ * Check if the current call has an active audio stream
+ *
+ * @param call  Call object
+ *
+ * @return True if active stream, otherwise false
+ */
 bool call_has_audio(const struct call *call)
 {
 	if (!call)
@@ -723,6 +759,13 @@ bool call_has_audio(const struct call *call)
 }
 
 
+/**
+ * Check if the current call has an active video stream
+ *
+ * @param call  Call object
+ *
+ * @return True if active stream, otherwise false
+ */
 bool call_has_video(const struct call *call)
 {
 	if (!call)
@@ -736,6 +779,14 @@ bool call_has_video(const struct call *call)
 }
 
 
+/**
+ * Put the current call on hold/resume
+ *
+ * @param call  Call object
+ * @param hold  True to hold, false to resume
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int call_hold(struct call *call, bool hold)
 {
 	struct le *le;
@@ -773,15 +824,16 @@ const char *call_peeruri(const struct call *call)
 }
 
 
+/**
+ * Get the name of the peer
+ *
+ * @param call  Call object
+ *
+ * @return Peer name
+ */
 const char *call_peername(const struct call *call)
 {
 	return call ? call->peer_name : NULL;
-}
-
-
-const char *call_peerrpid(const struct call *call)
-{
-	return call ? call->peer_rpid : NULL;
 }
 
 
@@ -809,6 +861,11 @@ static const struct sdp_format *sdp_media_format_cycle(struct sdp_media *m)
 }
 
 
+/**
+ * Use the next audio encoder in the local list of negotiated codecs
+ *
+ * @param call  Call object
+ */
 void call_audioencoder_cycle(struct call *call)
 {
 	const struct sdp_format *rc = NULL;
@@ -827,6 +884,11 @@ void call_audioencoder_cycle(struct call *call)
 
 
 #ifdef USE_VIDEO
+/**
+ * Use the next video encoder in the local list of negotiated codecs
+ *
+ * @param call  Call object
+ */
 void call_videoencoder_cycle(struct call *call)
 {
 	const struct sdp_format *rc = NULL;
@@ -931,6 +993,14 @@ void call_enable_vumeter(struct call *call, bool en)
 }
 
 
+/**
+ * Send a DTMF digit to the peer
+ *
+ * @param call  Call object
+ * @param key   DTMF digit to send
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int call_send_digit(struct call *call, char key)
 {
 	if (!call)
@@ -1157,7 +1227,6 @@ static void sipsess_close_handler(int err, const struct sip_msg *msg,
 int call_accept(struct call *call, struct sipsess_sock *sess_sock,
 		const struct sip_msg *msg, const char *cuser)
 {
-	const struct sip_hdr *h;
 	bool got_offer;
 	int err;
 
@@ -1172,13 +1241,6 @@ int call_accept(struct call *call, struct sipsess_sock *sess_sock,
 
 	if (pl_isset(&msg->from.dname)) {
 		err = pl_strdup(&call->peer_name, &msg->from.dname);
-		if (err)
-			return err;
-	}
-
-	h = sip_msg_xhdr(msg, "Remote-Party-ID");
-	if (h) {
-		err = pl_strdup(&call->peer_rpid, &h->val);
 		if (err)
 			return err;
 	}
@@ -1309,6 +1371,13 @@ static int send_invite(struct call *call)
 }
 
 
+/**
+ * Get the current call duration in seconds
+ *
+ * @param call  Call object
+ *
+ * @return Duration in seconds
+ */
 uint32_t call_duration(const struct call *call)
 {
 	if (!call || !call->time_start)
@@ -1318,18 +1387,39 @@ uint32_t call_duration(const struct call *call)
 }
 
 
-struct audio *call_audio(struct call *call)
+/**
+ * Get the audio object for the current call
+ *
+ * @param call  Call object
+ *
+ * @return Audio object
+ */
+struct audio *call_audio(const struct call *call)
 {
 	return call ? call->audio : NULL;
 }
 
 
-struct video *call_video(struct call *call)
+/**
+ * Get the video object for the current call
+ *
+ * @param call  Call object
+ *
+ * @return Video object
+ */
+struct video *call_video(const struct call *call)
 {
 	return call ? call->video : NULL;
 }
 
 
+/**
+ * Get the list of media streams for the current call
+ *
+ * @param call  Call object
+ *
+ * @return List of media streams
+ */
 struct list *call_streaml(const struct call *call)
 {
 	return call ? (struct list *)&call->streaml : NULL;
@@ -1344,18 +1434,4 @@ int call_reset_transp(struct call *call)
 	sdp_session_set_laddr(call->sdp, net_laddr());
 
 	return call_modify(call);
-}
-
-
-int call_video_set_shuttered(struct call *call, bool shuttered)
-{
-	if (!call)
-		return EINVAL;
-
-#ifdef USE_VIDEO
-	return video_set_shuttered(call->video, shuttered);
-#else
-	(void)shuttered;
-	return ENOSYS;
-#endif
 }

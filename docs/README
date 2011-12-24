@@ -1,7 +1,7 @@
 README
 ------
 
-baresip - Bare-bone SIP useragent
+Baresip is a portable and modular SIP User-Agent with audio and video support
 Copyright (c) 2010 - 2011 Creytiv.com
 
 Distributed under BSD license
@@ -19,15 +19,53 @@ Design goals:
 
 Modular Plugin Architecture:
 
-* User interface: stdio cons evdev
-* Audio codecs:   amr celt g711 g722 gsm ilbc l16 opus silk speex
-* Audio drivers:  alsa coreaudio gst portaudio opensles oss winwav mda
-* Audio filters:  speex_pp speex_aec speex_resamp sndfile
-* Video codecs:   avcodec vpx
-* Video sources:  avformat quicktime qtcapture v4l v4l2 x11grab
-* Video display:  sdl opengl x11
-* Media NAT:      stun turn ice
-* Media encoding: srtp
+alsa          ALSA audio driver
+amr           Adaptive Multi-Rate (AMR) audio codec
+audiounit     AudioUnit audio driver for MacOSX/iOS
+avcapture     Video source using iOS AVFoundation video capture
+avcodec       Video codec using FFmpeg
+avformat      Video source using FFmpeg libavformat
+bv32          BroadVoice32 audio codec
+celt          CELT audio codec
+cons          UDP console
+coreaudio     Apple Coreaudio driver
+evdev         Linux input driver
+g711          G.711 audio codec
+g722          G.722 audio codec
+g7221         G.722.1 audio codec
+gsm           GSM audio codec
+gst           Gstreamer audio source
+ice           ICE protocol for NAT Traversal
+ilbc          iLBC audio codec
+l16           L16 audio codec
+mda           Symbian Mediaserver audio driver
+opengl        OpenGL video output
+opensles      OpenSLES audio driver
+opus          OPUS Interactive audio codec
+oss           Open Sound System (OSS) audio driver
+plc           Packet Loss Concealment (PLC) using spandsp
+portaudio     Portaudio driver
+qtcapture     Apple QTCapture video source driver
+quicktime     Apple Quicktime video source driver
+rst           Radio streamer using mpg123
+sdl           Simple DirectMedia Layer (SDL) video output driver
+silk          SILK audio codec
+sndfile       Audio dumper using libsndfile
+speex         Speex audio codec
+speex_aec     Acoustic Echo Cancellation (AEC) using libspeexdsp
+speex_pp      Audio pre-processor using libspeexdsp
+speex_resamp  Audio resampler using libspeexdsp
+srtp          Secure RTP encryption
+stdio         Standard input/output UI driver
+stun          Session Traversal Utilities for NAT (STUN) module
+turn          Obtaining Relay Addresses from STUN (TURN) module
+uuid          UUID generator
+v4l           Video4Linux video source
+v4l2          Video4Linux2 video source
+vpx           VP8/VPX video codec
+winwave       Audio driver for Windows
+x11           X11 video output driver
+x11grab       X11 grabber video source
 
 
 IETF RFC/I-Ds:
@@ -52,12 +90,13 @@ IETF RFC/I-Ds:
 * RFC 5168  XML Schema for Media Control
 * RFC 5574  RTP Payload Format for the Speex Codec
 * RFC 5577  RTP Payload Format for ITU-T Recommendation G.722.1
+* RFC 5626  Managing Client-Initiated Connections in SIP
 * RFC 5761  Multiplexing RTP Data and Control Packets on a Single Port
 * RFC 6263  App. Mechanism for Keeping Alive NAT Associated with RTP / RTCP
 
 * draft-valin-celt-rtp-profile-02
 * draft-westin-payload-vp8-02
-* draft-ietf-codec-opus-08
+* draft-ietf-codec-opus-10
 * draft-spittka-payload-rtp-opus-00
 
 

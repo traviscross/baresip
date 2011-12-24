@@ -37,7 +37,6 @@ struct ua {
 	MAGIC_DECL                   /**< Magic number for struct ua         */
 	struct le le;                /**< Linked list element                */
 	struct sipreg *reg;          /**< SIP Register client                */
-	struct sip_lsnr *lsnr;       /**< SIP Request listener               */
 	struct call *call;           /**< SIP Call object                    */
 	struct tmr tmr_alert;        /**< Incoming call alert timer          */
 	struct tmr tmr_stat;         /**< Statistics refresh timer           */
@@ -81,6 +80,7 @@ struct ua {
 static struct {
 	struct list ual;
 	struct sip *sip;
+	struct sip_lsnr *lsnr;
 	struct sipsess_sock *sock;
 	struct ua *cur;
 	exit_h *exith;
@@ -91,8 +91,10 @@ static struct {
 #ifdef USE_TLS
 	struct tls *tls;
 #endif
+	enum audio_mode aumode;
 } uag = {
 	LIST_INIT,
+	NULL,
 	NULL,
 	NULL,
 	NULL,
@@ -104,6 +106,7 @@ static struct {
 #ifdef USE_TLS
 	NULL,
 #endif
+	AUDIO_MODE_POLL,
 };
 
 
@@ -117,6 +120,22 @@ static void sip_exit_handler(void *arg)
 
 	if (uag.exith)
 		uag.exith(0);
+}
+
+
+/* Find the correct UA from the contact user */
+static struct ua *ua_find(const struct pl *cuser)
+{
+	struct le *le;
+
+	for (le = uag.ual.head; le; le = le->next) {
+		struct ua *ua = le->data;
+
+		if (0 == pl_strcasecmp(cuser, ua->cuser))
+			return ua;
+	}
+
+	return NULL;
 }
 
 
@@ -190,6 +209,13 @@ static int encode_uri_user(struct re_printf *pf, const struct uri *uri)
 }
 
 
+/**
+ * Start registration of a User-Agent
+ *
+ * @param ua User-Agent
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int ua_register(struct ua *ua)
 {
 	struct uri uri;
@@ -492,6 +518,7 @@ static int ua_call_alloc(struct ua *ua, struct call **callp,
 			 const struct mnat *mnat, const struct menc *menc,
 			 enum vidmode vidmode, const struct sip_msg *msg)
 {
+	struct call_prm prm;
 	char dname[128] = "";
 
 	if (*callp) {
@@ -499,13 +526,17 @@ static int ua_call_alloc(struct ua *ua, struct call **callp,
 		return EALREADY;
 	}
 
+	prm.ptime   = ua->ptime;
+	prm.aumode  = uag.aumode;
+	prm.vidmode = vidmode;
+
 	(void)pl_strcpy(&ua->aor.dname, dname, sizeof(dname));
 
-	return call_alloc(callp, ua, ua->ptime, mnat,
+	return call_alloc(callp, ua, &prm, mnat,
 			  ua->stun_user, ua->stun_pass,
 			  ua->stun_host, ua->stun_port,
-			  menc, call_event_handler, ua,
-			  dname, ua->local_uri, ua->cuser, vidmode, msg);
+			  menc, dname, ua->local_uri, ua->cuser, msg,
+			  call_event_handler, ua);
 }
 
 
@@ -587,7 +618,6 @@ static void ua_destructor(void *arg)
 	mem_deref(ua->reg);
 	mem_deref(ua->cuser);
 	mem_deref(ua->outbound);
-	mem_deref(ua->lsnr);
 	mem_deref(ua->stun_user);
 	mem_deref(ua->stun_pass);
 	mem_deref(ua->stun_host);
@@ -603,7 +633,9 @@ static void ua_destructor(void *arg)
  * Decode STUN Server parameter. We use the SIP parameters as default,
  * and override with an STUN parameters present.
  *
+ * \verbatim
  *   ;stunserver=stun:username:password@host:port
+ * \endverbatim
  */
 static int stunsrv_decode(struct ua *ua)
 {
@@ -857,28 +889,36 @@ static int mk_aor(struct ua *ua, const char *aor)
 			"%H", encode_uri_user, &ua->aor.uri) < 0)
 		return ENOMEM;
 
-	return pl_strdup(&ua->cuser, &ua->aor.uri.user);
+	return re_sdprintf(&ua->cuser, "%p", ua);
 }
 
 
 static bool request_handler(const struct sip_msg *msg, void *arg)
 {
-	struct ua *ua = arg;
+	struct ua *ua;
+	bool opt;
 
-	if (!pl_strcmp(&msg->met, "OPTIONS")) {
+	(void)arg;
+
+	if (!pl_strcmp(&msg->met, "OPTIONS"))
+		opt = true;
+	else if (!pl_strcmp(&msg->met, "MESSAGE"))
+		opt = false;
+	else
+		return false;
+
+	ua = ua_find(&msg->uri.user);
+	if (!ua) {
+		(void)sip_treply(NULL, uag_sip(), msg, 404, "Not Found");
+		return true;
+	}
+
+	if (opt)
 		handle_options(ua, msg);
-		return true;
-	}
-	else if (!pl_strcmp(&msg->met, "MESSAGE")) {
+	else
 		handle_message(ua, msg);
-		return true;
-	}
-	else if (!pl_strcmp(&msg->met, "PING")) {
-		(void)sip_reply(uag.sip, msg, 200, "Pong");
-		return true;
-	}
 
-	return false;
+	return true;
 }
 
 
@@ -905,6 +945,17 @@ static int sip_params_decode(struct ua *ua)
 }
 
 
+/**
+ * Allocate a SIP User-Agent
+ *
+ * @param uap   Pointer to allocated User-Agent object
+ * @param aor   SIP Address-of-Record (AOR)
+ * @param eh    Event handler
+ * @param msgh  SIP Message handler
+ * @param arg   Handler argument
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int ua_alloc(struct ua **uap, const char *aor,
 	     ua_event_h *eh, ua_message_h *msgh, void *arg)
 {
@@ -933,10 +984,6 @@ int ua_alloc(struct ua **uap, const char *aor,
 	ua->eh   = eh;
 	ua->msgh = msgh;
 	ua->arg  = arg;
-
-	err = sip_listen(&ua->lsnr, uag.sip, true, request_handler, ua);
-	if (err)
-		goto out;
 
 	err = mk_aor(ua, aor);
 	if (err)
@@ -976,6 +1023,16 @@ static int ua_start(struct ua *ua)
 }
 
 
+/**
+ * Connect an outgoing call to a given SIP uri
+ *
+ * @param ua      User-Agent
+ * @param uri     SIP uri to connect to
+ * @param params  Optional URI parameters
+ * @param mnatid  Optional MNAT id to override default settings
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int ua_connect(struct ua *ua, const char *uri, const char *params,
 	       const char *mnatid, enum vidmode vidmode)
 {
@@ -991,7 +1048,8 @@ int ua_connect(struct ua *ua, const char *uri, const char *params,
 	if (len > 0) {
 		mbuf_reset(&ua->dialbuf);
 
-		err |= mbuf_printf(&ua->dialbuf, "<");
+		if (params)
+			err |= mbuf_printf(&ua->dialbuf, "<");
 
 		/* Append sip: scheme if missing */
 		if (0 != re_regex(uri, len, "sip:"))
@@ -1032,7 +1090,8 @@ int ua_connect(struct ua *ua, const char *uri, const char *params,
 		/* Append any optional parameters */
 		err |= mbuf_write_pl(&ua->dialbuf, &ua->aor.uri.params);
 
-		err |= mbuf_printf(&ua->dialbuf, ">");
+		if (params)
+			err |= mbuf_printf(&ua->dialbuf, ">");
 	}
 
 	if (err)
@@ -1045,8 +1104,7 @@ int ua_connect(struct ua *ua, const char *uri, const char *params,
 	else
 		mnat = ua->mnat;
 
-	err = ua_call_alloc(ua, &ua->call, mnat, ua->menc, vidmode,
-			    NULL);
+	err = ua_call_alloc(ua, &ua->call, mnat, ua->menc, vidmode, NULL);
 	if (err)
 		return err;
 
@@ -1057,6 +1115,11 @@ int ua_connect(struct ua *ua, const char *uri, const char *params,
 }
 
 
+/**
+ * Hangup the current call
+ *
+ * @param ua User-Agent
+ */
 void ua_hangup(struct ua *ua)
 {
 	int err;
@@ -1078,6 +1141,11 @@ void ua_hangup(struct ua *ua)
 }
 
 
+/**
+ * Answer an incoming call
+ *
+ * @param ua User-Agent
+ */
 void ua_answer(struct ua *ua)
 {
 	if (!ua || !ua->call)
@@ -1085,13 +1153,6 @@ void ua_answer(struct ua *ua)
 
 	(void)call_answer(ua->call, 200);
 	call_stat(ua);
-}
-
-
-void ua_play_digit(struct ua *ua, int key)
-{
-	(void)ua;
-	(void)key;
 }
 
 
@@ -1244,6 +1305,12 @@ void ua_toggle_statmode(struct ua *ua)
 }
 
 
+/**
+ * Set the current UA status mode
+ *
+ * @param ua   User-Agent object
+ * @param mode Status mode
+ */
 void ua_set_statmode(struct ua *ua, enum statmode mode)
 {
 	if (!ua)
@@ -1256,19 +1323,40 @@ void ua_set_statmode(struct ua *ua, enum statmode mode)
 }
 
 
-char *ua_aor(struct ua *ua)
+/**
+ * Get the AOR of a User-Agent
+ *
+ * @param ua User-Agent object
+ *
+ * @return AOR
+ */
+const char *ua_aor(const struct ua *ua)
 {
 	return ua ? ua->local_uri : NULL;
 }
 
 
+/**
+ * Get the outbound SIP proxy of a User-Agent
+ *
+ * @param ua User-Agent object
+ *
+ * @return Outbound SIP proxy uri
+ */
 char *ua_outbound(const struct ua *ua)
 {
 	return ua ? ua->outbound : NULL;
 }
 
 
-struct call *ua_call(struct ua *ua)
+/**
+ * Get the current call object of a User-Agent
+ *
+ * @param ua User-Agent object
+ *
+ * @return Current call, NULL if no active calls
+ */
+struct call *ua_call(const struct ua *ua)
 {
 	return ua ? ua->call : NULL;
 }
@@ -1331,7 +1419,8 @@ static int ua_add_transp(void)
 	if (uag.use_tls) {
 		/* Build our SSL context*/
 		if (!uag.tls) {
-			err = tls_alloc(&uag.tls, NULL, NULL);
+			err = tls_alloc(&uag.tls, TLS_METHOD_SSLV23,
+					NULL, NULL);
 			if (err) {
 				DEBUG_WARNING("tls_alloc() failed: %s\n",
 					      strerror(err));
@@ -1379,43 +1468,19 @@ static int ua_setup_transp(const char *software, bool udp, bool tcp, bool tls)
 }
 
 
-/* Find the correct UA from the contact user */
-static struct ua *ua_find(const struct pl *cuser)
-{
-	struct le *le;
-
-	for (le = uag.ual.head; le; le = le->next) {
-		struct ua *ua = le->data;
-
-		if (0 == pl_strcasecmp(cuser, ua->cuser))
-			return ua;
-	}
-
-	return NULL;
-}
-
-
 /* Handle incoming calls */
 static void sipsess_conn_handler(const struct sip_msg *msg, void *arg)
 {
 	struct ua *ua;
-	struct uri ruri;
 	char str[256];
 	int err;
 
 	(void)arg;
 
-	if (uri_decode(&ruri, &msg->ruri)) {
-		DEBUG_WARNING("ruri error (%r)\n", &msg->ruri);
-		(void)sip_treply(NULL, uag_sip(), msg,
-				400, "Bad Request (ruri)");
-		return;
-	}
-
-	ua = ua_find(&ruri.user);
+	ua = ua_find(&msg->uri.user);
 	if (!ua) {
 		DEBUG_WARNING("%r: UA not found: %r\n",
-			      &msg->from.auri, &ruri.user);
+			      &msg->from.auri, &msg->uri.user);
 		(void)sip_treply(NULL, uag_sip(), msg, 404, "Not Found");
 		return;
 	}
@@ -1467,6 +1532,10 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls, exit_h *exith)
 	if (err)
 		goto out;
 
+	err = sip_listen(&uag.lsnr, uag.sip, true, request_handler, NULL);
+	if (err)
+		goto out;
+
 	err = sipsess_listen(&uag.sock, uag.sip, config.sip.trans_bsize,
 			     sipsess_conn_handler, NULL);
 
@@ -1481,6 +1550,11 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls, exit_h *exith)
 }
 
 
+/**
+ * Set the device UUID for all User-Agents
+ *
+ * @param uuid Device UUID
+ */
 void ua_set_uuid(const char *uuid)
 {
 	uag.uuid[0] = '\0';
@@ -1490,9 +1564,24 @@ void ua_set_uuid(const char *uuid)
 }
 
 
+/**
+ * Set the Audio-transmit mode for all User-Agents
+ *
+ * @param aumode Audio transmit mode
+ */
+void ua_set_aumode(enum audio_mode aumode)
+{
+	uag.aumode = aumode;
+}
+
+
+/**
+ * Close all active User-Agents
+ */
 void ua_close(void)
 {
 	uag.sock = mem_deref(uag.sock);
+	uag.lsnr = mem_deref(uag.lsnr);
 	uag.sip = mem_deref(uag.sip);
 
 #ifdef USE_TLS
@@ -1503,6 +1592,9 @@ void ua_close(void)
 }
 
 
+/**
+ * Suspend the SIP stack
+ */
 void ua_stack_suspend(void)
 {
 	struct le *le;
@@ -1511,13 +1603,22 @@ void ua_stack_suspend(void)
 		struct ua *ua = le->data;
 
 		ua->reg = mem_deref(ua->reg);
-		ua->lsnr = mem_deref(ua->lsnr);
 	}
 
 	sip_close(uag.sip, false);
 }
 
 
+/**
+ * Resume the SIP stack
+ *
+ * @param software SIP User-Agent string
+ * @param udp      Enable UDP transport
+ * @param tcp      Enable TCP transport
+ * @param tls      Enable TLS transport
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int ua_stack_resume(const char *software, bool udp, bool tcp, bool tls)
 {
 	struct le *le;
@@ -1561,6 +1662,11 @@ int ua_stack_resume(const char *software, bool udp, bool tcp, bool tls)
 }
 
 
+/**
+ * Start all User-Agents
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int ua_start_all(void)
 {
 	struct le *le;
@@ -1573,6 +1679,11 @@ int ua_start_all(void)
 }
 
 
+/**
+ * Start all User-Agents
+ *
+ * @param forced True to force, otherwise false
+ */
 void ua_stop_all(bool forced)
 {
 	(void)re_fprintf(stderr, "Un-registering %u useragents.. %s\n",
@@ -1588,6 +1699,14 @@ void ua_stop_all(bool forced)
 }
 
 
+/**
+ * Reset the SIP transports for all User-Agents
+ *
+ * @param reg      True to reset registration
+ * @param reinvite True to update active calls
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int ua_reset_transp(bool reg, bool reinvite)
 {
 	struct le *le;
@@ -1635,12 +1754,25 @@ void ua_next(void)
 }
 
 
+/**
+ * Return the current User-Agent in focus
+ *
+ * @return Current User-Agent
+ */
 struct ua *ua_cur(void)
 {
 	return uag.cur ? uag.cur : list_ledata(uag.ual.head);
 }
 
 
+/**
+ * Print the SIP Status for all User-Agents
+ *
+ * @param pf     Print handler for debug output
+ * @param unused Unused parameter
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int ua_print_sip_status(struct re_printf *pf, void *unused)
 {
 	(void)unused;
@@ -1648,6 +1780,14 @@ int ua_print_sip_status(struct re_printf *pf, void *unused)
 }
 
 
+/**
+ * Print the SIP Registration for all User-Agents
+ *
+ * @param pf     Print handler for debug output
+ * @param unused Unused parameter
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int ua_print_reg_status(struct re_printf *pf, void *unused)
 {
 	struct le *le;
@@ -1671,6 +1811,14 @@ int ua_print_reg_status(struct re_printf *pf, void *unused)
 }
 
 
+/**
+ * Print the SIP Call status for all User-Agents
+ *
+ * @param pf     Print handler for debug output
+ * @param unused Unused parameter
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int ua_print_call_status(struct re_printf *pf, void *unused)
 {
 	int err;
@@ -1685,12 +1833,22 @@ int ua_print_call_status(struct re_printf *pf, void *unused)
 }
 
 
+/**
+ * Get the global SIP Stack
+ *
+ * @return SIP Stack
+ */
 struct sip *uag_sip(void)
 {
 	return uag.sip;
 }
 
 
+/**
+ * Get the global SIP Session socket
+ *
+ * @return SIP Session socket
+ */
 struct sipsess_sock *uag_sipsess_sock(void)
 {
 	return uag.sock;
@@ -1707,6 +1865,13 @@ struct tls *uag_tls(void)
 }
 
 
+/**
+ * Get the name of the User-Agent event
+ *
+ * @param ev User-Agent event
+ *
+ * @return Name of the event
+ */
 const char *ua_event_str(enum ua_event ev)
 {
 	switch (ev) {
@@ -1739,6 +1904,13 @@ struct list *ua_vidcodecl(struct ua *ua)
 }
 
 
+/**
+ * Get the current SIP socket file descriptor for a User-Agent
+ *
+ * @param ua User-Agent
+ *
+ * @return File descriptor, or -1 if not available
+ */
 int ua_sipfd(const struct ua *ua)
 {
 	return ua ? ua->sipfd : -1;

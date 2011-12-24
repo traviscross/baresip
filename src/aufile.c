@@ -23,12 +23,13 @@ enum {
 	WAVE_FMT_GSM610   = 0x0031,
 };
 
+/** WAV-file chunk */
 struct wav_chunk {
 	uint8_t id[4]; /* "RIFF" */
 	uint32_t size;
 };
 
-/* Total 30 bytes */
+/** WAV-file header (Total 30 bytes) */
 struct wav_header {
 	/* 12 bytes */
 	struct wav_chunk header;
@@ -132,9 +133,17 @@ int aufile_load(struct mbuf *mbf, const char *filename,
 	f = fopen(file, "r");
 	if (!f) {
 		/* Then try /usr/share */
+
+#if defined (PREFIX)
+		if (re_snprintf(file, sizeof(file), PREFIX "/share/baresip/%s",
+				filename) < 0)
+			return ENOMEM;
+#else
 		if (re_snprintf(file, sizeof(file), "/usr/share/baresip/%s",
 				filename) < 0)
 			return ENOMEM;
+#endif
+
 		f = fopen(file, "r");
 		if (!f) {
 			err = errno;

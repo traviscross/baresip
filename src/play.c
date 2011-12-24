@@ -17,6 +17,7 @@
 
 enum {SILENCE_DUR = 2000};
 
+/** Audio file player */
 struct play {
 	struct le le;
 	struct play **playp;
@@ -167,8 +168,19 @@ static int play_alloc(struct play **playp, struct mbuf *what,
 }
 
 
-int play_tone(struct play **playp, struct mbuf *tone,
-	      int srate, int ch, int repeat)
+/**
+ * Play a tone from a PCM buffer
+ *
+ * @param playp    Pointer to allocated player object
+ * @param tone     PCM buffer to play
+ * @param srate    Sampling rate
+ * @param ch       Number of channels
+ * @param repeat   Number of times to repeat
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+int play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
+	      uint8_t ch, int repeat)
 {
 	struct auplay_prm wprm;
 
@@ -184,6 +196,15 @@ int play_tone(struct play **playp, struct mbuf *tone,
 }
 
 
+/**
+ * Play an audio file in WAV format
+ *
+ * @param playp    Pointer to allocated player object
+ * @param filename Name of WAV file to play
+ * @param repeat   Number of times to repeat
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int play_file(struct play **playp, const char *filename, int repeat)
 {
 	struct auplay_prm wprm;
@@ -213,6 +234,9 @@ int play_file(struct play **playp, const char *filename, int repeat)
 }
 
 
+/**
+ * Close all active audio players
+ */
 void play_close(void)
 {
 	list_flush(&playl);

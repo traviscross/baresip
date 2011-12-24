@@ -6,6 +6,6 @@
 
 MOD		:= opengl
 $(MOD)_SRCS	+= opengl.m
-$(MOD)_LFLAGS	+= -framework QTKit -framework CoreVideo
+$(MOD)_LFLAGS	+= -framework OpenGL -framework Cocoa -lobjc
 
 include mk/mod.mk

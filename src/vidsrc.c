@@ -9,8 +9,9 @@
 #include "core.h"
 
 
+/** Video Source state */
 struct vidsrc_st {
-	struct vidsrc *vs;
+	struct vidsrc *vs;  /**< Video Source */
 };
 
 
@@ -25,6 +26,16 @@ static void destructor(void *arg)
 }
 
 
+/**
+ * Register a Video Source
+ *
+ * @param vsp     Pointer to allocated Video Source
+ * @param name    Name of Video Source
+ * @param alloch  Allocation handler
+ * @param updateh Update handler
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int vidsrc_register(struct vidsrc **vsp, const char *name,
 		    vidsrc_alloc_h *alloch, vidsrc_update_h *updateh)
 {
@@ -51,6 +62,13 @@ int vidsrc_register(struct vidsrc **vsp, const char *name,
 }
 
 
+/**
+ * Find a Video Source by name
+ *
+ * @param name Name of the Video Source to find
+ *
+ * @return Matching Video Source if found, otherwise NULL
+ */
 const struct vidsrc *vidsrc_find(const char *name)
 {
 	struct le *le;
@@ -69,6 +87,11 @@ const struct vidsrc *vidsrc_find(const char *name)
 }
 
 
+/**
+ * Get the list of Video Sources
+ *
+ * @return List of Video Sources
+ */
 struct list *vidsrc_list(void)
 {
 	return &vidsrcl;

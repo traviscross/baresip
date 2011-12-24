@@ -21,18 +21,21 @@ enum {
 };
 
 
+/** Audio Source */
 struct ausrc {
 	struct le        le;
 	const char      *name;
 	ausrc_alloc_h   *alloch;
 };
 
+/** Audio Player */
 struct auplay {
 	struct le        le;
 	const char      *name;
 	auplay_alloc_h  *alloch;
 };
 
+/** Audio Codec */
 struct aucodec {
 	struct le        le;
 	const char      *pt;
@@ -45,6 +48,7 @@ struct aucodec {
 	aucodec_dec_h   *dech;
 };
 
+/** Video Source */
 struct vidsrc {
 	struct le         le;
 	const char       *name;
@@ -52,6 +56,7 @@ struct vidsrc {
 	vidsrc_update_h  *updateh;
 };
 
+/** Video Display */
 struct vidisp {
 	struct le        le;
 	const char      *name;
@@ -61,6 +66,7 @@ struct vidisp {
 	vidisp_hide_h   *hideh;
 };
 
+/** Video Codec */
 struct vidcodec {
 	struct le         le;
 	const char       *pt;
@@ -102,7 +108,7 @@ struct vidisp *vidisp_get(struct vidisp_st *st);
 struct vidsrc *vidsrc_get(struct vidsrc_st *st);
 
 
-/* Media NAT traversal */
+/** Media NAT traversal */
 struct mnat {
 	struct le le;
 	const char *id;
@@ -115,7 +121,7 @@ struct mnat {
 const struct mnat *mnat_find(const char *id);
 
 
-/* Media Encryption */
+/** Media Encryption */
 struct menc {
 	struct le le;
 	const char *id;
@@ -138,13 +144,14 @@ typedef void (audio_err_h)(int err, const char *str, void *arg);
 int  audio_alloc(struct audio **ap, struct call *call,
 		 struct sdp_session *sdp_sess, int label,
 		 const struct mnat *mnat, struct mnat_sess *mnat_sess,
-		 const struct menc *menc, uint32_t ptime,
+		 const struct menc *menc, uint32_t ptime, enum audio_mode mode,
 		 audio_event_h *eventh, audio_err_h *errh, void *arg);
 int  audio_start(struct audio *a);
 void audio_stop(struct audio *a);
 int  audio_encoder_set(struct audio *a, struct aucodec *ac,
 		       uint8_t pt_tx, const char *params);
-int  audio_decoder_set(struct audio *a, struct aucodec *ac, uint8_t pt_rx);
+int  audio_decoder_set(struct audio *a, struct aucodec *ac,
+		       uint8_t pt_rx, const char *params);
 void audio_enable_vumeter(struct audio *a, bool en);
 struct stream *audio_strm(const struct audio *a);
 int  audio_print_vu(struct re_printf *pf, const struct audio *a);
@@ -171,16 +178,22 @@ enum call_event {
 	CALL_EVENT_CLOSED
 };
 
+/** Call parameters */
+struct call_prm {
+	uint32_t ptime;
+	enum audio_mode aumode;
+	enum vidmode vidmode;
+};
+
 typedef void (call_event_h)(enum call_event ev, const char *prm, void *arg);
 
-int call_alloc(struct call **callp, struct ua *ua, uint32_t ptime,
+int call_alloc(struct call **callp, struct ua *ua, const struct call_prm *prm,
 	       const struct mnat *mnat,
 	       const char *stun_user, const char *stun_pass,
 	       const char *stun_host, uint16_t stun_port,
-	       const struct menc *menc, call_event_h *eh, void *arg,
-	       const char *local_name, const char *local_uri,
-	       const char *cuser, enum vidmode vidmode,
-	       const struct sip_msg *msg);
+	       const struct menc *menc, const char *local_name,
+	       const char *local_uri, const char *cuser,
+	       const struct sip_msg *msg, call_event_h *eh, void *arg);
 int  call_connect(struct call *call, const struct pl *paddr);
 int  call_accept(struct call *call, struct sipsess_sock *sess_sock,
 		 const struct sip_msg *msg, const char *cuser);
@@ -209,14 +222,19 @@ int  net_reset(void);
 /* User-Agent */
 struct ua;
 
-char *ua_outbound(const struct ua *ua);
-const char *ua_param(const struct ua *ua, const char *key);
+char        *ua_outbound(const struct ua *ua);
+const char  *ua_param(const struct ua *ua, const char *key);
 struct list *ua_aucodecl(struct ua *ua);
 struct list *ua_vidcodecl(struct ua *ua);
-struct tls  *uag_tls(void);
-int  ua_auth(struct ua *ua, char **username, char **password,
-	     const char *realm);
+int          ua_auth(struct ua *ua, char **username, char **password,
+		     const char *realm);
+int          ua_debug(struct re_printf *pf, const struct ua *ua);
 
+void        ua_next(void);
+struct tls *uag_tls(void);
+
+
+/* SIP Request */
 int sip_req_send(struct ua *ua, const char *method, const char *uri,
 		 sip_resp_h *resph, void *arg, const char *fmt, ...);
 
@@ -229,7 +247,7 @@ int aufilt_chain_alloc(struct aufilt_chain **fcp,
 		       const struct aufilt_prm *decprm);
 int aufilt_chain_encode(struct aufilt_chain *fc, struct mbuf *mb);
 int aufilt_chain_decode(struct aufilt_chain *fc, struct mbuf *mb);
-int aufilt_chain_update(struct aufilt_chain *fc, bool speakerphone);
+int aufilt_chain_update(struct aufilt_chain *fc);
 int aufilt_debug(struct re_printf *pf, void *unused);
 
 
@@ -302,7 +320,14 @@ int  video_print(struct re_printf *pf, const struct video *v);
 int  video_set_shuttered(struct video *v, bool shuttered);
 
 
+/* RTP keepalive */
 struct rtpkeep;
 int  rtpkeep_alloc(struct rtpkeep **rkp, const char *method, int proto,
 		   struct rtp_sock *rtp, struct sdp_media *sdp);
 void rtpkeep_refresh(struct rtpkeep *rk, uint32_t ts);
+
+
+/* os */
+int mkpath(const char *path);
+int get_login_name(const char **login);
+int get_homedir(char *path, uint32_t sz);

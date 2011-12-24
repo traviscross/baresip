@@ -16,6 +16,7 @@
 #include <re_dbg.h>
 
 
+/** User Interface */
 struct ui {
 	struct le le;
 	const char *name;
@@ -51,6 +52,7 @@ static int ui_call(char key, struct re_printf *pf);
 static int help_idle(struct re_printf *pf);
 static int help_call(struct re_printf *pf);
 
+/** User Interface view */
 struct ui_view {
 	ui_state_h *stateh;
 	ui_help_h *helph;
@@ -124,7 +126,6 @@ static int help_idle(struct re_printf *pf)
 #endif
 	err |= re_hprintf(pf, " w     - Play sine wave\n");
 	err |= re_hprintf(pf, " y     - Memory status\n");
-	err |= re_hprintf(pf, " z     - NAT status\n");
 	err |= re_hprintf(pf, "\n");
 
 	return err;
@@ -151,7 +152,6 @@ static int help_call(struct re_printf *pf)
 	err |= re_hprintf(pf, " m     - Call mute/un-mute\n");
 	err |= re_hprintf(pf, " M     - Main loop debug\n");
 	err |= re_hprintf(pf, " n     - Network debug\n");
-	err |= re_hprintf(pf, " P     - Polling method toggle\n");
 	err |= re_hprintf(pf, " q     - Quit\n");
 	err |= re_hprintf(pf, " S     - Toggle status-mode\n");
 	err |= re_hprintf(pf, " t     - Timer debug\n");
@@ -601,8 +601,6 @@ static int ui_idle(char key, struct re_printf *pf)
 	case 'y':
 		return mem_status(pf, NULL);
 
-	case 'z':
-		return natbd_status(pf, NULL);
 
 	case ' ':
 		ua_next();

@@ -9,9 +9,9 @@
 #include "core.h"
 
 
-/* Base type */
+/** Audio Codec state */
 struct aucodec_st {
-	struct aucodec *ac;
+	struct aucodec *ac;  /**< Audio Codec */
 };
 
 static struct list aucodecl = LIST_INIT;
@@ -25,6 +25,21 @@ static void destructor(void *arg)
 }
 
 
+/**
+ * Register an Audio Codec
+ *
+ * @param ap     Pointer to allocated Audio Codec object
+ * @param pt     Payload Type
+ * @param name   Audio Codec name
+ * @param srate  Sampling rate
+ * @param ch     Number of channels
+ * @param fmtp   Optional format parameters
+ * @param alloch Allocation handler
+ * @param ench   Encode handler
+ * @param dech   Decode handler
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int aucodec_register(struct aucodec **ap, const char *pt, const char *name,
 		     uint32_t srate, uint8_t ch, const char *fmtp,
 		     aucodec_alloc_h *alloch, aucodec_enc_h *ench,
@@ -102,12 +117,28 @@ const struct aucodec *aucodec_find(const char *name, uint32_t srate, int ch)
 }
 
 
+/**
+ * Get the list of Audio Codecs
+ */
 struct list *aucodec_list(void)
 {
 	return &aucodecl;
 }
 
 
+/**
+ * Allocate an Audio Codec state
+ *
+ * @param sp        Pointer to allocated state
+ * @param name      Audio Codec name
+ * @param srate     Audio Codec sampling rate
+ * @param channels  Audio Codec channels
+ * @param encp      Optional encoding parameters
+ * @param decp      Optional decoding parameters
+ * @param sdp_fmtp  Optional SDP format parameters
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int aucodec_alloc(struct aucodec_st **sp, const char *name, uint32_t srate,
 		  int channels, struct aucodec_prm *encp,
 		  struct aucodec_prm *decp, const struct pl *sdp_fmtp)
@@ -122,42 +153,75 @@ int aucodec_alloc(struct aucodec_st **sp, const char *name, uint32_t srate,
 }
 
 
+/**
+ * Audio Codec encoder
+ *
+ * @param st  Audio Codec state
+ * @param dst Destination buffer
+ * @param src Source buffer of PCM audio
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int aucodec_encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
 	return st->ac->ench ? st->ac->ench(st, dst, src) : 0;
 }
 
 
+/**
+ * Audio Codec decoder
+ *
+ * @param st  Audio Codec state
+ * @param dst Destination buffer for PCM audio
+ * @param src Source buffer
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int aucodec_decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
 	return st->ac->dech ? st->ac->dech(st, dst, src) : 0;
 }
 
 
+/**
+ * Get the Payload Type of an Audio Codec
+ */
 const char *aucodec_pt(const struct aucodec *ac)
 {
 	return ac ? ac->pt : NULL;
 }
 
 
+/**
+ * Get the name of an Audio Codec
+ */
 const char *aucodec_name(const struct aucodec *ac)
 {
 	return ac ? ac->name : NULL;
 }
 
 
+/**
+ * Get the Sampling Rate of an Audio Codec
+ */
 uint32_t aucodec_srate(const struct aucodec *ac)
 {
 	return ac ? ac->srate : 0;
 }
 
 
+/**
+ * Get the number of channels for an Audio Codec
+ */
 uint8_t aucodec_ch(const struct aucodec *ac)
 {
 	return ac ? ac->ch : 0;
 }
 
 
+/**
+ * Get the Audio Codec from an Audio Codec state
+ */
 struct aucodec *aucodec_get(const struct aucodec_st *st)
 {
 	return st ? st->ac : NULL;

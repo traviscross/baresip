@@ -14,6 +14,8 @@
 
 
 /*
+ * \page AudioFilter Audio Filter
+
  - operate on linear PCM samples
  - both encode and decode directions
  - list of preproc's for each dir
@@ -33,11 +35,12 @@ RTP ---> [Audio Decoder] ---> [PROC Decode] ---> [Audio output]
  */
 
 
-/* Base type */
+/** Audio Filter state */
 struct aufilt_st {
 	struct aufilt *af;
 };
 
+/** Audio Filter */
 struct aufilt {
 	struct le le;
 	const char *name;
@@ -47,13 +50,13 @@ struct aufilt {
 	aufilt_update_h *updh;
 };
 
-/* One filter element */
+/** Audio Filter element */
 struct aufilt_elem {
 	struct le le;
 	struct aufilt_st *st;
 };
 
-/* A chain of filters */
+/** A chain of Audio Filters */
 struct aufilt_chain {
 	struct list filtl;  /* struct aufilt_elem */
 };
@@ -104,7 +107,9 @@ static void aufilt_chain_destructor(void *arg)
 }
 
 
-/* Allocate a filter-chain */
+/**
+ * Allocate a filter-chain
+ */
 int aufilt_chain_alloc(struct aufilt_chain **fcp,
 		       const struct aufilt_prm *encprm,
 		       const struct aufilt_prm *decprm)
@@ -140,7 +145,7 @@ int aufilt_chain_alloc(struct aufilt_chain **fcp,
 		}
 	}
 
-	if (fc->filtl.head) {
+	if (!list_isempty(&fc->filtl)) {
 		(void)re_printf("audio-filter chain: enc=%u-%uHz/%dch"
 				" dec=%u-%uHz/%dch (%u filters)\n",
 				encprm->srate, encprm->srate_out, encprm->ch,
@@ -179,8 +184,8 @@ int aufilt_chain_encode(struct aufilt_chain *fc, struct mbuf *mb)
 		return EINVAL;
 
 	for (le = fc->filtl.head; !err && le; le = le->next) {
-		struct aufilt_elem *f = le->data;
-		struct aufilt *af = aufilt_get(f->st);
+		const struct aufilt_elem *f = le->data;
+		const struct aufilt *af = aufilt_get(f->st);
 
 		if (af->ench)
 			err = af->ench(f->st, mb);
@@ -218,8 +223,8 @@ int aufilt_chain_decode(struct aufilt_chain *fc, struct mbuf *mb)
 		return EINVAL;
 
 	for (le = fc->filtl.head; !err && le; le = le->next) {
-		struct aufilt_elem *f = le->data;
-		struct aufilt *af = aufilt_get(f->st);
+		const struct aufilt_elem *f = le->data;
+		const struct aufilt *af = aufilt_get(f->st);
 
 		if (af->dech)
 			err = af->dech(f->st, mb);
@@ -236,7 +241,14 @@ int aufilt_chain_decode(struct aufilt_chain *fc, struct mbuf *mb)
 }
 
 
-int aufilt_chain_update(struct aufilt_chain *fc, bool speakerphone)
+/**
+ * Update audio-filter chain
+ *
+ * @param fc Filter-chain
+ *
+ * @return 0 for success, otherwise error code
+ */
+int aufilt_chain_update(struct aufilt_chain *fc)
 {
 	struct le *le;
 	int err = 0;
@@ -245,17 +257,29 @@ int aufilt_chain_update(struct aufilt_chain *fc, bool speakerphone)
 		return EINVAL;
 
 	for (le = fc->filtl.head; !err && le; le = le->next) {
-		struct aufilt_elem *f = le->data;
-		struct aufilt *af = aufilt_get(f->st);
+		const struct aufilt_elem *f = le->data;
+		const struct aufilt *af = aufilt_get(f->st);
 
 		if (af->updh)
-			err = af->updh(f->st, speakerphone);
+			err = af->updh(f->st);
 	}
 
 	return err;
 }
 
 
+/**
+ * Register a new Audio Filter
+ *
+ * @param afp     Pointer to allocated Audio Filter
+ * @param name    Name of the Audio Filter
+ * @param alloch  Allocation handler
+ * @param ench    Encode handler
+ * @param dech    Decode handler
+ * @param updh    Update handler
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int aufilt_register(struct aufilt **afp, const char *name,
 		    aufilt_alloc_h *alloch, aufilt_enc_h *ench,
 		    aufilt_dec_h *dech, aufilt_update_h *updh)
@@ -285,6 +309,11 @@ int aufilt_register(struct aufilt **afp, const char *name,
 }
 
 
+/**
+ * Get the list of registered Audio filters
+ *
+ * @return List of Audio filters
+ */
 struct list *aufilt_list(void)
 {
 	return &aufiltl;

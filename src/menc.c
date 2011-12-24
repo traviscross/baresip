@@ -8,9 +8,9 @@
 #include "core.h"
 
 
-/* Base type */
+/** Media Encryption state */
 struct menc_st {
-	struct menc *me;
+	struct menc *me;  /**< Media encryption */
 };
 
 static struct list mencl = LIST_INIT;
@@ -24,6 +24,16 @@ static void destructor(void *arg)
 }
 
 
+/**
+ * Register a new Media encryption module
+ *
+ * @param mencp    Pointer to allocated Media encryption module
+ * @param id       Media encryption ID
+ * @param alloch   Allocation handler
+ * @param updateh  Update handler
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int menc_register(struct menc **mencp, const char *id, menc_alloc_h *alloch,
 		  menc_update_h *updateh)
 {
@@ -50,12 +60,26 @@ int menc_register(struct menc **mencp, const char *id, menc_alloc_h *alloch,
 }
 
 
+/**
+ * Get the Media Encryption module from a Media Encryption state
+ *
+ * @param st Media Encryption state
+ *
+ * @return Media Encryption module
+ */
 struct menc *menc_get(const struct menc_st *st)
 {
 	return st ? st->me : NULL;
 }
 
 
+/**
+ * Find a Media Encryption module by name
+ *
+ * @param id Name of the Media Encryption module to find
+ *
+ * @return Matching Media Encryption module if found, otherwise NULL
+ */
 const struct menc *menc_find(const char *id)
 {
 	struct le *le;

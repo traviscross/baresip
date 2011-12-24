@@ -29,6 +29,7 @@ enum {
 	Tr_TCP = 7200
 };
 
+/** RTP Keepalive */
 struct rtpkeep {
 	struct rtp_sock *rtp;
 	struct sdp_media *sdp;

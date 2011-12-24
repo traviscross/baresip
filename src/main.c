@@ -67,17 +67,9 @@ static void ua_exit_handler(int err)
 
 static int ua_add(const struct pl *addr)
 {
-	struct sip_addr sip_addr;
 	struct ua *ua;
 	char buf[512];
 	int err;
-
-	if (0 == sip_addr_decode(&sip_addr, addr)) {
-		err = natbd_init(net_laddr(), &sip_addr.uri.host,
-				 sip_addr.uri.port, net_dnsc());
-		if (err)
-			return err;
-	}
 
 	pl_strcpy(addr, buf, sizeof(buf));
 
@@ -207,26 +199,27 @@ static int app_start(void)
 	err = conf_contacts_get(contact_add, &n);
 	if (err) {
 		DEBUG_WARNING("Could not get contacts (%s)\n", strerror(err));
-		return err;
+		goto out;
 	}
-	else {
-		(void)re_fprintf(stderr, "Populated %u contact%s\n",
-				 n, 1==n?"":"s");
-	}
+	(void)re_fprintf(stderr, "Populated %u contact%s\n", n, 1==n?"":"s");
 
 	err = ui_start();
 	if (err)
-		return err;
+		goto out;
 
 	net_change(60, net_change_handler, NULL);
 
-	return 0;
+ out:
+	if (err) {
+		ua_stop_all(true);
+	}
+
+	return err;
 }
 
 
 static void app_close(void)
 {
-	natbd_close();
 	ua_close();
 	ui_close();
 	contact_close();

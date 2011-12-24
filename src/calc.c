@@ -63,12 +63,3 @@ int16_t calc_avg_s16(struct mbuf *mb)
 
 	return v;
 }
-
-
-/**
- * Calculate the picture size with YUV420P pixel format
- */
-uint32_t yuv420p_size(const struct vidsz *sz)
-{
-	return sz ? (sz->w * sz->h * 3 / 2) : 0;
-}

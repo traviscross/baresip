@@ -20,6 +20,7 @@
 static const char *codec = NULL; /*"pcmu";*/
 
 
+/** Audio Loop */
 struct audio_loop {
 	uint32_t index;
 	struct aubuf *ab;
@@ -209,7 +210,8 @@ static int auloop_reset(struct audio_loop *al)
 	ausrc_prm.srate      = al->srate;
 	ausrc_prm.ch         = al->ch;
 	ausrc_prm.frame_size = al->fs;
-	err = ausrc_alloc(&al->ausrc, NULL, &ausrc_prm, config.audio.device,
+	err = ausrc_alloc(&al->ausrc, NULL, NULL,
+			  &ausrc_prm, config.audio.device,
 			  read_handler, error_handler, al);
 	if (err) {
 		DEBUG_WARNING("ausrc failed: %s\n", strerror(err));
@@ -274,6 +276,11 @@ static int audio_loop_cycle(struct audio_loop *al)
 }
 
 
+/**
+ * Start the audio loop (for testing)
+ *
+ * @param stop True to force stopping, otherwise false
+ */
 void audio_loop_test(bool stop)
 {
 	int err;

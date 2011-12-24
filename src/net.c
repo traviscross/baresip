@@ -71,6 +71,11 @@ static void ipchange_handler(void *arg)
 }
 
 
+/**
+ * Check if local IP address(es) changed
+ *
+ * @return True if changed, otherwise false
+ */
 bool net_check(void)
 {
 	struct sa la;
@@ -207,6 +212,11 @@ int net_init(bool prefer_ipv6)
 }
 
 
+/**
+ * Reset the DNS resolver
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int net_reset(void)
 {
 	net.dnsc = mem_deref(net.dnsc);
@@ -243,6 +253,13 @@ int net_dnssrv_add(const struct sa *sa)
 }
 
 
+/**
+ * Check for networking changes with a regular interval
+ *
+ * @param interval  Interval in seconds
+ * @param ch        Handler called when a change was detected
+ * @param arg       Handler argument
+ */
 void net_change(uint32_t interval, net_change_h *ch, void *arg)
 {
 	net.interval = interval;

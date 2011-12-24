@@ -238,9 +238,6 @@ int decode_sdpparam_h264(struct vidcodec_st *st, const struct pl *name,
 	else if (0 == pl_strcasecmp(name, "max-smbps")) {
 		st->u.h264.max_smbps = pl_u32(val);
 	}
-	else {
-		DEBUG_NOTICE("unknown H264 param: %r=%r\n", name, val);
-	}
 
 	return 0;
 }

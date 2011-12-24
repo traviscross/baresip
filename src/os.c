@@ -23,6 +23,7 @@
 #endif
 #include <re.h>
 #include <baresip.h>
+#include "core.h"
 
 
 int mkpath(const char *path)
@@ -44,27 +45,29 @@ int mkpath(const char *path)
 }
 
 
-int get_login_name(const char **login)
+int get_login_name(const char **loginp)
 {
 #ifdef HAVE_PWD_H
-	struct passwd *pw;
+	char *login;
 
-	*login = getenv("LOGNAME");
-	if (!*login) {
+	login = getenv("LOGNAME");
+	if (!login)
+		login = getenv("USER");
 #ifdef HAVE_UNISTD_H
-		*login = getlogin();
-#endif
-		if (!*login)
-			return errno;
+	if (!login) {
+		login = getlogin();
 	}
+#endif
 
-	pw = getpwnam(*login);
-	if (!pw)
-		return errno;
+	if (!login || !login[0])
+		return errno ? errno : ENOENT;
+
+	if (loginp)
+		*loginp = login;
 
 	return 0;
 #else
-	(void)login;
+	(void)loginp;
 	return ENOSYS;
 #endif
 }
@@ -98,16 +101,12 @@ static int get_home_unix(char *path, uint32_t sz)
 {
 #ifdef HAVE_PWD_H
 	struct passwd *pw;
-	char *loginname = NULL;
+	const char *loginname;
+	int err;
 
-	loginname = getenv("LOGNAME");
-	if (!loginname) {
-#ifdef HAVE_UNISTD_H
-		loginname = getlogin();
-#endif
-		if (!loginname)
-			return errno;
-	}
+	err = get_login_name(&loginname);
+	if (err)
+		return err;
 
 	pw = getpwnam(loginname);
 	if (!pw)

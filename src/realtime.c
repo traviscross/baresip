@@ -37,6 +37,14 @@ static int set_realtime(int period, int computation, int constraint)
 #endif
 
 
+/**
+ * Enable real-time scheduling (for selected platforms)
+ *
+ * @param enable True to enable, false to disable
+ * @param fps    Wanted video framerate
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int realtime_enable(bool enable, int fps)
 {
 #ifdef DARWIN

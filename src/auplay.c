@@ -20,6 +20,15 @@ static void destructor(void *arg)
 }
 
 
+/**
+ * Register an Audio Player
+ *
+ * @param app     Pointer to allocated Audio Player object
+ * @param name    Audio Player name
+ * @param alloch  Allocation handler
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int auplay_register(struct auplay **app, const char *name,
 		    auplay_alloc_h *alloch)
 {
@@ -45,6 +54,13 @@ int auplay_register(struct auplay **app, const char *name,
 }
 
 
+/**
+ * Find an Audio Player by name
+ *
+ * @param name Name of the Audio Player to find
+ *
+ * @return Matching Audio Player if found, otherwise NULL
+ */
 const struct auplay *auplay_find(const char *name)
 {
 	struct le *le;
@@ -63,6 +79,18 @@ const struct auplay *auplay_find(const char *name)
 }
 
 
+/**
+ * Allocate an Audio Player state
+ *
+ * @param stp    Pointer to allocated Audio Player state
+ * @param name   Name of Audio Player
+ * @param prm    Audio Player parameters
+ * @param device Name of Audio Player device (driver specific)
+ * @param wh     Write handler
+ * @param arg    Handler argument
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int auplay_alloc(struct auplay_st **stp, const char *name,
 		 struct auplay_prm *prm, const char *device,
 		 auplay_write_h *wh, void *arg)

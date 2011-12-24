@@ -14,6 +14,7 @@
 #endif
 #include <re.h>
 #include <baresip.h>
+#include "core.h"
 
 
 #define DEBUG_MODULE "conf"
@@ -29,7 +30,7 @@
 
 
 #undef MOD_PRE
-#define MOD_PRE ""
+#define MOD_PRE ""  /**< Module prefix */
 
 
 static const char *conf_path = NULL;
@@ -75,24 +76,15 @@ struct conf config = {
 		""
 	},
 
-	/** Jitter Buffer */
-	{
-		{5, 10}
-	},
-
 	/** Audio/Video Transport */
 	{
 		0xb8,
 		{1024, 49152},
 		{512000, 1024000},
 		true,
-		false
+		false,
+		{5, 10}
 	},
-
-	/** NAT Behavior Discovery */
-	{
-		10*60  /* 10 minutes */
-	}
 };
 
 
@@ -261,7 +253,7 @@ static int conf_write_config_template(const char *file)
 			 "------------------------------------------\n");
 
 	(void)re_fprintf(f, "\n# Core\n");
-	(void)re_fprintf(f, "poll_method\t\t%s\n",
+	(void)re_fprintf(f, "poll_method\t\t%s\t\t# poll, select, epoll ..\n",
 			 poll_method_name(poll_method_best()));
 
 	(void)re_fprintf(f, "\n# Input\n");
@@ -290,19 +282,14 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "#video_selfview\t\twindow # {window,pip}\n");
 #endif
 
-	(void)re_fprintf(f, "\n# Jitter Buffer\n");
-	(void)re_fprintf(f, "jitter_buffer_delay\t%u-%u\t\t# frames\n",
-			 config.jbuf.delay.min, config.jbuf.delay.max);
-
 	(void)re_fprintf(f, "\n# AVT - Audio/Video Transport\n");
 	(void)re_fprintf(f, "rtp_tos\t\t\t184\n");
 	(void)re_fprintf(f, "#rtp_ports\t\t\t10000-20000\n");
 	(void)re_fprintf(f, "#rtp_bandwidth\t\t\t512-1024 # [kbit/s]\n");
-	(void)re_fprintf(f, "rtcp_enable\t\t\t1\n");
-	(void)re_fprintf(f, "rtcp_mux\t\t\t0\n");
-
-	(void)re_fprintf(f, "\n# NAT Behavior Discovery\n");
-	(void)re_fprintf(f, "natbd_interval\t\t0\t\t# in seconds\n");
+	(void)re_fprintf(f, "rtcp_enable\t\t\tyes\n");
+	(void)re_fprintf(f, "rtcp_mux\t\t\tno\n");
+	(void)re_fprintf(f, "jitter_buffer_delay\t%u-%u\t\t# frames\n",
+			 config.avt.jbuf_del.min, config.avt.jbuf_del.max);
 
 	(void)re_fprintf(f, "\n# Network\n");
 	(void)re_fprintf(f, "#dns_server\t\t10.0.0.1:53\n");
@@ -399,6 +386,9 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "\n# Media encoding modules\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "srtp" MOD_EXT "\n");
 
+	(void)re_fprintf(f, "\n# Other modules\n");
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "natbd" MOD_EXT "\n");
+
 	(void)re_fprintf(f, "\n#------------------------------------"
 			 "------------------------------------------\n");
 	(void)re_fprintf(f, "# Module parameters\n");
@@ -412,6 +402,10 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "speex_vad\t\t0 # Voice Activity Detection 0-1\n");
 	(void)re_fprintf(f, "speex_agc_level\t8000\n");
 
+	(void)re_fprintf(f, "\n# NAT Behavior Discovery\n");
+	(void)re_fprintf(f, "natbd_server\t\tcreytiv.com\n");
+	(void)re_fprintf(f, "natbd_interval\t\t600\t\t# in seconds\n");
+
 	if (f)
 		(void)fclose(f);
 
@@ -419,12 +413,25 @@ static int conf_write_config_template(const char *file)
 }
 
 
+/**
+ * Set the path to configuration files
+ *
+ * @param path Configuration path
+ */
 void conf_path_set(const char *path)
 {
 	conf_path = path;
 }
 
 
+/**
+ * Get the path to configuration files
+ *
+ * @param path Buffer to write path
+ * @param sz   Size of path buffer
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int conf_path_get(char *path, uint32_t sz)
 {
 	/* Use explicit conf path */
@@ -438,6 +445,14 @@ int conf_path_get(char *path, uint32_t sz)
 }
 
 
+/**
+ * Get the SIP accounts
+ *
+ * @param ch Account handler
+ * @param n  On return, contains number of accounts
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int conf_accounts_get(confline_h *ch, uint32_t *n)
 {
 	char path[256] = "", file[256] = "";
@@ -468,6 +483,14 @@ int conf_accounts_get(confline_h *ch, uint32_t *n)
 }
 
 
+/**
+ * Get the SIP contacts
+ *
+ * @param ch Contact handler
+ * @param n  On return, contains number of contacts
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int conf_contacts_get(confline_h *ch, uint32_t *n)
 {
 	char path[256] = "", file[256] = "";
@@ -634,23 +657,19 @@ static int config_parse(struct conf *conf)
 	(void)conf_get_str(conf, "video_selfview", config.video.selfview,
 			   sizeof(config.video.selfview));
 
-	/* Jitter buffer */
-	(void)conf_get_range(conf, "jitter_buffer_delay", &config.jbuf.delay);
-
 	/* AVT - Audio/Video Transport */
 	if (0 == conf_get_u32(conf, "rtp_tos", &v))
 		config.avt.rtp_tos = v;
 	(void)conf_get_range(conf, "rtp_ports", &config.avt.rtp_ports);
 	if (0 == conf_get_range(conf, "rtp_bandwidth",
-				&config.avt.rtp_bandwidth)) {
-		config.avt.rtp_bandwidth.min *= 1024;
-		config.avt.rtp_bandwidth.max *= 1024;
+				&config.avt.rtp_bw)) {
+		config.avt.rtp_bw.min *= 1024;
+		config.avt.rtp_bw.max *= 1024;
 	}
 	(void)conf_get_bool(conf, "rtcp_enable", &config.avt.rtcp_enable);
 	(void)conf_get_bool(conf, "rtcp_mux", &config.avt.rtcp_mux);
-
-	/* NAT Behavior Discovery */
-	(void)conf_get_u32(conf, "natbd_interval", &config.natbd.interval);
+	(void)conf_get_range(conf, "jitter_buffer_delay",
+			     &config.avt.jbuf_del);
 
 	if (err) {
 		DEBUG_WARNING("configure parse error (%s)\n", strerror(err));
@@ -723,6 +742,14 @@ static int load_module(struct mod **mp, const struct pl *name)
 }
 
 
+/**
+ * Load a module by name
+ *
+ * @param mp   Pointer to allocate module object
+ * @param name Name of module to load
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int conf_load_module(struct mod **mp, const char *name)
 {
 	char buf[64];
@@ -769,6 +796,11 @@ static int config_mod_parse(struct conf *conf)
 }
 
 
+/**
+ * Configure the system with default settings
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int configure(void)
 {
 	char path[256], file[256];
@@ -814,6 +846,13 @@ int configure(void)
 }
 
 
+/**
+ * Get system configuration from a specific file
+ *
+ * @param file Config file
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int conf_system_get_file(const char *file)
 {
 	int err;
@@ -834,6 +873,13 @@ int conf_system_get_file(const char *file)
 }
 
 
+/**
+ * Get system configuration for a given path
+ *
+ * @param path Path to config file
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int conf_system_get(const char *path)
 {
 	char file[512];
@@ -845,6 +891,14 @@ int conf_system_get(const char *path)
 }
 
 
+/**
+ * Get system configuration from a buffer
+ *
+ * @param buf Config buffer
+ * @param sz  Size of buffer
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int conf_system_get_buf(const uint8_t *buf, size_t sz)
 {
 	int err;
@@ -865,19 +919,35 @@ int conf_system_get_buf(const uint8_t *buf, size_t sz)
 }
 
 
+/**
+ * Get the path to plugin-modules
+ *
+ * @return Path to modules
+ */
 const char *conf_modpath(void)
 {
 	return modpath;
 }
 
 
-/* NOTE: only available during init */
+/**
+ * Get the current configuration object
+ *
+ * @return Config object
+ *
+ * @note It is only available during init
+ */
 struct conf *conf_cur(void)
 {
 	return conf_obj;
 }
 
 
+/**
+ * Set the DNS domain for config templates
+ *
+ * @param domain DNS domain
+ */
 void conf_set_domain(const char *domain)
 {
 	str_ncpy(dns_domain, domain, sizeof(dns_domain));

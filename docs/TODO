@@ -3,9 +3,7 @@ TODO:
 -------------------------------------------------------------------------------
 Version v0.x.y:
 
-  toggle video sources
   look into ffmpeg rate-control
-  RFC 6236 Negotiation of Generic Image Attributes in SDP
   S605th: no DNS-server IP
 
 -------------------------------------------------------------------------------

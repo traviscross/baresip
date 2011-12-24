@@ -9,6 +9,7 @@
 #include "core.h"
 
 
+/** SIP Authenticated Request */
 struct sip_req {
 	struct sip_loopstate ls;
 	struct sip_dialog *dlg;

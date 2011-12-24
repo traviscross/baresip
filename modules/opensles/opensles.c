@@ -1,7 +1,7 @@
 /**
  * @file opensles.c  OpenSLES audio driver
  *
- * Copyright (C) 2010 Alfred E. Heggestad
+ * Copyright (C) 2010 Creytiv.com
  */
 #include <re.h>
 #include <baresip.h>

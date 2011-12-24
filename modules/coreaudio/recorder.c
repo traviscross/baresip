@@ -104,6 +104,7 @@ static void record_handler(void *userData, AudioQueueRef inQ,
 
 
 int coreaudio_recorder_alloc(struct ausrc_st **stp, struct ausrc *as,
+			     struct media_ctx **ctx,
 			     struct ausrc_prm *prm, const char *device,
 			     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
@@ -113,6 +114,7 @@ int coreaudio_recorder_alloc(struct ausrc_st **stp, struct ausrc *as,
 	OSStatus status;
 	int err;
 
+	(void)ctx;
 	(void)device;
 	(void)errh;
 

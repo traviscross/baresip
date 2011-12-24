@@ -1,166 +1,211 @@
 /**
- * @file rst.c Streamer
+ * @file rst.c MP3/ICY HTTP AV Source
  *
  * Copyright (C) 2011 Creytiv.com
  */
 
-#define _BSD_SOURCE 1
-#include <pthread.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <string.h>
 #include <re.h>
 #include <baresip.h>
-#include <mpg123.h>
+#include "rst.h"
 
 
-struct ausrc_st {
-	struct ausrc *as;
-	pthread_t thread;
-	mpg123_handle *mp3;
-	struct aubuf *aubuf;
-	char *host;
-	char *path;
+enum {
+	RETRY_WAIT = 10000,
+};
+
+
+struct rst {
+	const char *id;
+	struct ausrc_st *ausrc_st;
+	struct vidsrc_st *vidsrc_st;
+	struct tmr tmr;
 	struct dns_query *dnsq;
 	struct tcp_conn *tc;
-	ausrc_read_h *rh;
-	ausrc_error_h *errh;
-	void *arg;
+	struct mbuf *mb;
+	char *host;
+	char *path;
+	char *name;
+	char *meta;
 	bool head_recv;
-	bool run;
-	uint32_t psize;
-	uint32_t ptime;
+	size_t metaint;
+	size_t metasz;
+	size_t bytec;
 	uint16_t port;
 };
 
 
-static struct ausrc *ausrc;
+static int rst_connect(struct rst *rst);
 
 
 static void destructor(void *arg)
 {
-	struct ausrc_st *st = arg;
+	struct rst *rst = arg;
 
-	if (st->run) {
-		st->run = false;
-		pthread_join(st->thread, NULL);
-	}
-
-	if (st->mp3) {
-		mpg123_close(st->mp3);
-		mpg123_delete(st->mp3);
-	}
-
-	mem_deref(st->aubuf);
-	mem_deref(st->host);
-	mem_deref(st->path);
-	mem_deref(st->dnsq);
-	mem_deref(st->tc);
-	mem_deref(st->as);
+	tmr_cancel(&rst->tmr);
+	mem_deref(rst->dnsq);
+	mem_deref(rst->tc);
+	mem_deref(rst->mb);
+	mem_deref(rst->host);
+	mem_deref(rst->path);
+	mem_deref(rst->name);
+	mem_deref(rst->meta);
 }
 
 
-static void *play_thread(void *arg)
+static void reconnect(void *arg)
 {
-	uint64_t now, ts = tmr_jiffies();
-	struct ausrc_st *st = arg;
-	uint8_t *buf;
+	struct rst *rst = arg;
+	int err;
 
-	buf = mem_alloc(st->psize, NULL);
-	if (!buf)
-		return NULL;
+	rst->mb   = mem_deref(rst->mb);
+	rst->name = mem_deref(rst->name);
+	rst->meta = mem_deref(rst->meta);
 
-	while (st->run) {
+	rst->head_recv = false;
+	rst->metaint   = 0;
+	rst->metasz    = 0;
+	rst->bytec     = 0;
 
-		(void)usleep(4000);
-
-		now = tmr_jiffies();
-
-		if (ts > now)
-			continue;
-#if 1
-		if (now > ts + 100) {
-			re_printf("rst: cpu lagging behind (%u ms)\n",
-				  now - ts);
-		}
-#endif
-
-		aubuf_read(st->aubuf, buf, st->psize);
-
-		st->rh(buf, st->psize, st->arg);
-
-		ts += st->ptime;
-	}
-
-	mem_deref(buf);
-
-	return NULL;
-}
-
-
-static inline int decode(struct ausrc_st *st)
-{
-	int err, ch, encoding;
-	struct mbuf *mb;
-	long srate;
-
-	mb = mbuf_alloc(4096);
-	if (!mb)
-		return ENOMEM;
-
-	err = mpg123_read(st->mp3, mb->buf, mb->size, &mb->end);
-
-	switch (err) {
-
-	case MPG123_NEW_FORMAT:
-		mpg123_getformat(st->mp3, &srate, &ch, &encoding);
-		re_printf("rst: new format: %i hz, %i ch, encoding 0x%04x\n",
-		      srate, ch, encoding);
-		/*@fallthrough@*/
-
-	case MPG123_OK:
-	case MPG123_NEED_MORE:
-		if (mb->end == 0)
-			break;
-		aubuf_append(st->aubuf, mb);
-		break;
-
-	default:
-		re_printf("rst: mpg123_read error: %s\n",
-			  mpg123_plain_strerror(err));
-		break;
-	}
-
-	mem_deref(mb);
-
-	return err;
+	err = rst_connect(rst);
+	if (err)
+		tmr_start(&rst->tmr, RETRY_WAIT, reconnect, rst);
 }
 
 
 static void recv_handler(struct mbuf *mb, void *arg)
 {
-	struct ausrc_st *st = arg;
-	int err;
+	struct rst *rst = arg;
+	size_t n;
 
-	if (!st->head_recv) {
-		st->head_recv = true;
-		return;
+	if (!rst->head_recv) {
+
+		struct pl hdr, name, metaint, eoh;
+
+		if (rst->mb) {
+			size_t pos;
+			int err;
+
+			pos = rst->mb->pos;
+
+			rst->mb->pos = rst->mb->end;
+
+			err = mbuf_write_mem(rst->mb, mbuf_buf(mb),
+					     mbuf_get_left(mb));
+			if (err) {
+				re_printf("rst: buffer write error: %s\n",
+					  strerror(err));
+				rst->tc = mem_deref(rst->tc);
+				tmr_start(&rst->tmr, RETRY_WAIT,
+					  reconnect, rst);
+				return;
+			}
+
+			rst->mb->pos = pos;
+		}
+		else {
+			rst->mb = mem_ref(mb);
+		}
+
+		if (re_regex((const char *)mbuf_buf(rst->mb),
+			     mbuf_get_left(rst->mb),
+			     "[^\r\n]1\r\n\r\n", &eoh))
+			return;
+
+		rst->head_recv = true;
+
+		hdr.p = (const char *)mbuf_buf(rst->mb);
+		hdr.l = eoh.p + 5 - hdr.p;
+
+		if (!re_regex(hdr.p, hdr.l, "icy-name:[ \t]*[^\r\n]+\r\n",
+			      NULL, &name))
+			(void)pl_strdup(&rst->name, &name);
+
+		if (!re_regex(hdr.p, hdr.l, "icy-metaint:[ \t]*[0-9]+\r\n",
+			      NULL, &metaint))
+			rst->metaint = pl_u32(&metaint);
+
+		if (rst->metaint == 0) {
+			re_printf("rst: icy meta interval not available\n");
+			rst->tc = mem_deref(rst->tc);
+			tmr_start(&rst->tmr, RETRY_WAIT, reconnect, rst);
+			return;
+		}
+
+		rst_video_update(rst->vidsrc_st, rst->name, NULL);
+
+		rst->mb->pos += hdr.l;
+
+		re_printf("rst: name='%s' metaint=%zu\n",
+			  rst->name, rst->metaint);
+
+		if (rst->mb->pos >= rst->mb->end)
+			return;
+
+		mb = rst->mb;
 	}
 
-	err = mpg123_feed(st->mp3, mbuf_buf(mb), mbuf_get_left(mb));
-	if (err)
-		return;
+	while (mb->pos < mb->end) {
 
-	while (MPG123_OK == decode(st))
-		;
+		if (rst->metasz > 0) {
+
+			n = min(mbuf_get_left(mb), rst->metasz - rst->bytec);
+
+			if (rst->meta)
+				mbuf_read_mem(mb,
+					     (uint8_t *)&rst->meta[rst->bytec],
+					      n);
+			else
+				mb->pos += n;
+
+			rst->bytec += n;
+#if 0
+			re_printf("rst: metadata %zu bytes\n", n);
+#endif
+			if (rst->bytec >= rst->metasz) {
+#if 1
+				re_printf("rst: metadata: [%s]\n", rst->meta);
+#endif
+				rst->metasz = 0;
+				rst->bytec  = 0;
+
+				rst_video_update(rst->vidsrc_st, rst->name,
+						 rst->meta);
+			}
+		}
+		else if (rst->bytec < rst->metaint) {
+
+			n = min(mbuf_get_left(mb), rst->metaint - rst->bytec);
+
+			rst_audio_feed(rst->ausrc_st, mbuf_buf(mb), n);
+
+			rst->bytec += n;
+			mb->pos    += n;
+#if 0
+			re_printf("rst: mp3data %zu bytes\n", n);
+#endif
+		}
+		else {
+			rst->metasz = mbuf_read_u8(mb) * 16;
+			rst->bytec  = 0;
+
+			rst->meta = mem_deref(rst->meta);
+			rst->meta = mem_zalloc(rst->metasz + 1, NULL);
+#if 0
+			re_printf("rst: metalength %zu bytes\n", rst->metasz);
+#endif
+		}
+	}
 }
 
 
 static void estab_handler(void *arg)
 {
-	struct ausrc_st *st = arg;
+	struct rst *rst = arg;
 	struct mbuf *mb;
 	int err;
+
+	re_printf("rst: connection established\n");
 
 	mb = mbuf_alloc(512);
 	if (!mb) {
@@ -168,13 +213,17 @@ static void estab_handler(void *arg)
 		goto out;
 	}
 
-	err = mbuf_printf(mb, "GET %s HTTP/1.0\r\n\r\n", st->path);
+	err = mbuf_printf(mb,
+			  "GET %s HTTP/1.0\r\n"
+			  "Icy-MetaData: 1\r\n"
+			  "\r\n",
+			  rst->path);
 	if (err)
 		goto out;
 
 	mb->pos = 0;
 
-	err = tcp_send(st->tc, mb);
+	err = tcp_send(rst->tc, mb);
 	if (err)
 		goto out;
 
@@ -190,18 +239,20 @@ static void estab_handler(void *arg)
 
 static void close_handler(int err, void *arg)
 {
-	struct ausrc_st *st = arg;
+	struct rst *rst = arg;
 
 	re_printf("rst: tcp closed: %i\n", err);
 
-	st->tc = mem_deref(st->tc);
+	rst->tc = mem_deref(rst->tc);
+
+	tmr_start(&rst->tmr, RETRY_WAIT, reconnect, rst);
 }
 
 
 static void dns_handler(int err, const struct dnshdr *hdr, struct list *ansl,
 			struct list *authl, struct list *addl, void *arg)
 {
-	struct ausrc_st *st = arg;
+	struct rst *rst = arg;
 	struct dnsrr *rr;
 	struct sa srv;
 
@@ -210,33 +261,58 @@ static void dns_handler(int err, const struct dnshdr *hdr, struct list *ansl,
 	(void)authl;
 	(void)addl;
 
-	rr = dns_rrlist_find(ansl, st->host, DNS_TYPE_A, DNS_CLASS_IN, true);
+	rr = dns_rrlist_find(ansl, rst->host, DNS_TYPE_A, DNS_CLASS_IN, true);
 	if (!rr) {
-		re_printf("rst: unable to resolve: %s\n", st->host);
+		re_printf("rst: unable to resolve: %s\n", rst->host);
+		tmr_start(&rst->tmr, RETRY_WAIT, reconnect, rst);
 		return;
 	}
 
-	sa_set_in(&srv, rr->rdata.a.addr, st->port);
+	sa_set_in(&srv, rr->rdata.a.addr, rst->port);
 
-	err = tcp_connect(&st->tc, &srv, estab_handler, recv_handler,
-			  close_handler, st);
+	err = tcp_connect(&rst->tc, &srv, estab_handler, recv_handler,
+			  close_handler, rst);
 	if (err) {
 		re_printf("rst: tcp connect error: %s\n", strerror(err));
+		tmr_start(&rst->tmr, RETRY_WAIT, reconnect, rst);
 		return;
 	}
 }
 
 
-static int rst_alloc(struct ausrc_st **stp, struct ausrc *as,
-		     struct ausrc_prm *prm, const char *dev,
-		     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
+static int rst_connect(struct rst *rst)
 {
-	struct pl host, port, path;
-	struct ausrc_st *st;
 	struct sa srv;
 	int err;
 
-	if (!stp || !as || !prm || !dev || !rh)
+	if (!sa_set_str(&srv, rst->host, rst->port)) {
+
+		err = tcp_connect(&rst->tc, &srv, estab_handler, recv_handler,
+				  close_handler, rst);
+		if (err) {
+			re_printf("rst: tcp connect error: %s\n",
+				  strerror(err));
+		}
+	}
+	else {
+		err = dnsc_query(&rst->dnsq, net_dnsc(), rst->host, DNS_TYPE_A,
+				 DNS_CLASS_IN, true, dns_handler, rst);
+		if (err) {
+			re_printf("rst: dns query error: %s\n", strerror(err));
+		}
+	}
+
+	return err;
+}
+
+
+int rst_alloc(struct rst **rstp, const char *dev)
+{
+	struct pl host, port, path;
+	struct rst *rst;
+	int err;
+
+	if (!rstp || !dev)
 		return EINVAL;
 
 	if (re_regex(dev, strlen(dev), "http://[^:/]+[:]*[0-9]*[^]+",
@@ -245,95 +321,52 @@ static int rst_alloc(struct ausrc_st **stp, struct ausrc *as,
 		return EBADMSG;
 	}
 
-	st = mem_zalloc(sizeof(*st), destructor);
-	if (!st)
+	rst = mem_zalloc(sizeof(*rst), destructor);
+	if (!rst)
 		return ENOMEM;
 
-	st->as   = mem_ref(as);
-	st->rh   = rh;
-	st->errh = errh;
-	st->arg  = arg;
+	rst->id = "rst";
 
-	st->mp3 = mpg123_new(NULL, &err);
-	if (!st->mp3) {
-		err = ENODEV;
-		goto out;
-	}
-
-	err = mpg123_open_feed(st->mp3);
-	if (err != MPG123_OK) {
-		re_printf("rst: mpg123_open_feed: %s\n",
-			  mpg123_strerror(st->mp3));
-		err = ENODEV;
-		goto out;
-	}
-
-	/* Set wanted output format */
-	mpg123_format_none(st->mp3);
-	mpg123_format(st->mp3, prm->srate, prm->ch, MPG123_ENC_SIGNED_16);
-
-	st->ptime = (1000 * prm->frame_size) / (prm->srate * prm->ch);
-	st->psize = prm->frame_size * 2;
-
-	prm->fmt = AUFMT_S16LE;
-
-	re_printf("rst: ptime=%u psize=%u aubuf=[%u:%u]\n",
-		  st->ptime, st->psize,
-		  prm->srate * prm->ch * 2,
-		  prm->srate * prm->ch * 40);
-
-	/* 1 - 20 seconds of audio */
-	err = aubuf_alloc(&st->aubuf,
-			  prm->srate * prm->ch * 2,
-			  prm->srate * prm->ch * 40);
+	err = pl_strdup(&rst->host, &host);
 	if (err)
 		goto out;
 
-	err = pl_strdup(&st->host, &host);
+	err = pl_strdup(&rst->path, &path);
 	if (err)
 		goto out;
 
-	err = pl_strdup(&st->path, &path);
+	rst->port = pl_u32(&port);
+	rst->port = rst->port ? rst->port : 80;
+
+	err = rst_connect(rst);
 	if (err)
 		goto out;
-
-	st->port = pl_u32(&port);
-	st->port = st->port ? st->port : 80;
-
-	if (!sa_set_str(&srv, st->host, st->port)) {
-
-		err = tcp_connect(&st->tc, &srv, estab_handler, recv_handler,
-				  close_handler, st);
-		if (err) {
-			re_printf("rst: tcp connect error: %s\n",
-				  strerror(err));
-			goto out;
-		}
-	}
-	else {
-		err = dnsc_query(&st->dnsq, net_dnsc(), st->host, DNS_TYPE_A,
-				 DNS_CLASS_IN, true, dns_handler, st);
-		if (err) {
-			re_printf("rst: dns query error: %s\n", strerror(err));
-			goto out;
-		}
-	}
-
-	st->run = true;
-
-	err = pthread_create(&st->thread, NULL, play_thread, st);
-	if (err) {
-		st->run = false;
-		goto out;
-	}
 
  out:
 	if (err)
-		mem_deref(st);
+		mem_deref(rst);
 	else
-		*stp = st;
+		*rstp = rst;
 
 	return err;
+}
+
+
+void rst_set_audio(struct rst *rst, struct ausrc_st *st)
+{
+	if (!rst)
+		return;
+
+	rst->ausrc_st = st;
+}
+
+
+void rst_set_video(struct rst *rst, struct vidsrc_st *st)
+{
+	if (!rst)
+		return;
+
+	rst->vidsrc_st = st;
 }
 
 
@@ -341,22 +374,28 @@ static int module_init(void)
 {
 	int err;
 
-	err = mpg123_init();
-	if (err != MPG123_OK) {
-		re_printf("rst: mpg123_init: %s\n",
-			  mpg123_plain_strerror(err));
-		return ENODEV;
+	err = rst_audio_init();
+	if (err)
+		goto out;
+
+	err = rst_video_init();
+	if (err)
+		goto out;
+
+ out:
+	if (err) {
+		rst_audio_close();
+		rst_video_close();
 	}
 
-	return ausrc_register(&ausrc, "rst", rst_alloc);
+	return err;
 }
 
 
 static int module_close(void)
 {
-	ausrc = mem_deref(ausrc);
-
-	mpg123_exit();
+	rst_audio_close();
+	rst_video_close();
 
 	return 0;
 }
@@ -364,7 +403,7 @@ static int module_close(void)
 
 EXPORT_SYM const struct mod_export DECL_EXPORTS(rst) = {
 	"rst",
-	"sound",
+	"avsrc",
 	module_init,
 	module_close
 };

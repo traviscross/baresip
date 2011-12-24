@@ -54,6 +54,7 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		return ENOMEM;
 
 	st->ac = mem_ref(ac);
+
 	st->enc = gsm_create();
 	if (!st->enc) {
 		DEBUG_WARNING("gsm_create() encoder failed\n");
@@ -114,6 +115,9 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 	gsm_signal *sig;
 	gsm_byte *byte;
 	int err;
+
+	if (!mbuf_get_left(src))
+		return 0;
 
 	/* Make sure we have a complete GSM frame */
 	if (mbuf_get_left(src) < sizeof(gsm_frame)) {

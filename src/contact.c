@@ -25,12 +25,18 @@ static struct list contactl = LIST_INIT;  /**< Contacts (struct contact)  */
 static bool options_verbose;              /**< Print verbose OPTIONS info */
 
 
+/**
+ * Initialise the contacts module
+ */
 void contact_init(void)
 {
 	list_init(&contactl);
 }
 
 
+/**
+ * Delete all contacts
+ */
 void contact_close(void)
 {
 	list_flush(&contactl);
@@ -46,6 +52,13 @@ static void contact_destructor(void *arg)
 }
 
 
+/**
+ * Add a new contact
+ *
+ * @param addr Name and SIP address of contact
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int contact_add(const struct pl *addr)
 {
 	struct sip_addr sip_addr;

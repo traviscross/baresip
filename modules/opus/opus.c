@@ -16,11 +16,11 @@
 
 /* NOTE: This is experimental code!
  *
- * Latest supported version: 0.9.5
+ * Latest supported version: 0.9.8
  *
  * References:
  *
- *    draft-ietf-codec-opus-08
+ *    draft-ietf-codec-opus-10
  *    draft-spittka-payload-rtp-opus-00
  *
  *    http://opus-codec.org/downloads/
@@ -40,7 +40,7 @@ struct aucodec_st {
 	OpusDecoder *dec;           /**< Decoder state                */
 	uint32_t frame_size;        /**< Frame size in [samples]      */
 	uint32_t fsize;             /**< PCM Frame size in bytes      */
-	bool got_packet;
+	bool got_packet;            /**< We have received a packet    */
 };
 
 
@@ -48,15 +48,13 @@ static struct aucodec *codecv[4];
 
 static struct {
 	int app;
-	int mode;
 	int bandwidth;
 	uint32_t bitrate;
 	uint32_t complex;
 	bool vbr;
 } opus = {
 	OPUS_APPLICATION_AUDIO,
-	MODE_HYBRID,
-	OPUS_BANDWIDTH_AUTO,
+	OPUS_BANDWIDTH_FULLBAND,
 	DEFAULT_BITRATE,
 	10,
 	0,
@@ -87,6 +85,7 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	int use_inbandfec;
 	int use_dtx;
 	int err = 0;
+	int opuserr;
 
 	(void)decp;
 	(void)sdp_fmtp;
@@ -103,7 +102,7 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	st->fsize      = 2 * st->frame_size * ch;
 
 	/* Encoder */
-	st->enc = opus_encoder_create(srate, ch, opus.app);
+	st->enc = opus_encoder_create(srate, ch, opus.app, &opuserr);
 	if (!st->enc) {
 		err = ENOMEM;
 		goto out;
@@ -112,16 +111,15 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	use_inbandfec = 1;
 	use_dtx = 1;
 
-	opus_encoder_ctl(st->enc, OPUS_SET_MODE(opus.mode));
 	opus_encoder_ctl(st->enc, OPUS_SET_BITRATE(opus.bitrate));
 	opus_encoder_ctl(st->enc, OPUS_SET_BANDWIDTH(opus.bandwidth));
-	opus_encoder_ctl(st->enc, OPUS_SET_VBR_FLAG(opus.vbr));
+	opus_encoder_ctl(st->enc, OPUS_SET_VBR(opus.vbr));
 	opus_encoder_ctl(st->enc, OPUS_SET_COMPLEXITY(opus.complex));
-	opus_encoder_ctl(st->enc, OPUS_SET_INBAND_FEC_FLAG(use_inbandfec));
-	opus_encoder_ctl(st->enc, OPUS_SET_DTX_FLAG(use_dtx));
+	opus_encoder_ctl(st->enc, OPUS_SET_INBAND_FEC(use_inbandfec));
+	opus_encoder_ctl(st->enc, OPUS_SET_DTX(use_dtx));
 
 	/* Decoder */
-	st->dec = opus_decoder_create(srate, ch);
+	st->dec = opus_decoder_create(srate, ch, &opuserr);
 	if (!st->dec) {
 		err = ENOMEM;
 		goto out;
@@ -223,24 +221,9 @@ static int module_init(void)
 		}
 	}
 
-	if (!conf_get(conf_cur(), "opus_mode", &pl)) {
-
-		if (!pl_strcasecmp(&pl, "silk"))
-			opus.mode = MODE_SILK_ONLY;
-		else if (!pl_strcasecmp(&pl, "hybrid"))
-			opus.mode = MODE_HYBRID;
-		else if (!pl_strcasecmp(&pl, "celt"))
-			opus.mode = MODE_CELT_ONLY;
-		else {
-			DEBUG_WARNING("unknown mode: %r\n", &pl);
-		}
-	}
-
 	if (!conf_get(conf_cur(), "opus_bandwidth", &pl)) {
 
-		if (!pl_strcasecmp(&pl, "auto"))
-			opus.bandwidth = OPUS_BANDWIDTH_AUTO;
-		else if (!pl_strcasecmp(&pl, "narrowband"))
+		if (!pl_strcasecmp(&pl, "narrowband"))
 			opus.bandwidth = OPUS_BANDWIDTH_NARROWBAND;
 		else if (!pl_strcasecmp(&pl, "mediumband"))
 			opus.bandwidth = OPUS_BANDWIDTH_MEDIUMBAND;

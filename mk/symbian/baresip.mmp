@@ -41,7 +41,6 @@ SOURCE        main.c
 SOURCE        mctrl.c
 SOURCE        menc.c
 SOURCE        mnat.c
-SOURCE        natbd.c
 SOURCE        net.c
 SOURCE        os.c
 SOURCE        play.c

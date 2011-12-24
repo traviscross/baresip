@@ -161,7 +161,7 @@ endif
 
 # ------------------------------------------------------------------------- #
 
-MODULES   += $(EXTRA_MODULES) stun turn ice
+MODULES   += $(EXTRA_MODULES) stun turn ice natbd
 
 ifneq ($(USE_ALSA),)
 MODULES   += alsa

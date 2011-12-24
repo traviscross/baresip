@@ -292,10 +292,10 @@ int stream_alloc(struct stream **sp, struct call *call,
 		goto out;
 
 	/* Jitter buffer */
-	if (config.jbuf.delay.min && config.jbuf.delay.max) {
+	if (config.avt.jbuf_del.min && config.avt.jbuf_del.max) {
 
-		err = jbuf_alloc(&s->jbuf, config.jbuf.delay.min,
-				 config.jbuf.delay.max);
+		err = jbuf_alloc(&s->jbuf, config.avt.jbuf_del.min,
+				 config.avt.jbuf_del.max);
 		if (err)
 			goto out;
 	}

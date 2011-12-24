@@ -18,7 +18,6 @@ SRCS	+= contact.c
 SRCS	+= mctrl.c
 SRCS	+= menc.c
 SRCS	+= mnat.c
-SRCS	+= natbd.c
 SRCS	+= net.c
 SRCS	+= os.c
 SRCS	+= play.c

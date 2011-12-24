@@ -9,9 +9,9 @@
 #include "core.h"
 
 
-/* Base type */
+/** Video Codec state */
 struct vidcodec_st {
-	struct vidcodec *vc;
+	struct vidcodec *vc;  /**< Video Codec */
 };
 
 static struct list vidcodecl = LIST_INIT;
@@ -25,6 +25,19 @@ static void destructor(void *arg)
 }
 
 
+/**
+ * Register a Video Codec
+ *
+ * @param vp      Pointer to allocated Video Codec
+ * @param pt      Payload Type
+ * @param name    Name of Video Codec
+ * @param fmtp    Format parameters
+ * @param alloch  Allocation handler
+ * @param ench    Encode handler
+ * @param dech    Decode handler
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int vidcodec_register(struct vidcodec **vp, const char *pt, const char *name,
 		      const char *fmtp, vidcodec_alloc_h *alloch,
 		      vidcodec_enc_h *ench, vidcodec_dec_h *dech)
@@ -75,6 +88,13 @@ int vidcodec_clone(struct list *l, const struct vidcodec *src)
 }
 
 
+/**
+ * Find a Video Codec by name
+ *
+ * @param name Name of the Video Codec to find
+ *
+ * @return Matching Video Codec if found, otherwise NULL
+ */
 const struct vidcodec *vidcodec_find(const char *name)
 {
 	struct le *le;
@@ -93,6 +113,19 @@ const struct vidcodec *vidcodec_find(const char *name)
 }
 
 
+/**
+ * Allocate a Video Codec state
+ *
+ * @param sp        Pointer to allocated Video Codec state
+ * @param name      Name of Video Codec
+ * @param encp      Encoding parameters (optional)
+ * @param decp      Decoding parameters (optional)
+ * @param sdp_fmtp  SDP Format parameters
+ * @param sendh     Send handler
+ * @param arg       Handler argument
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int vidcodec_alloc(struct vidcodec_st **sp, const char *name,
 		   struct vidcodec_prm *encp, struct vidcodec_prm *decp,
 		   const struct pl *sdp_fmtp,
@@ -107,6 +140,11 @@ int vidcodec_alloc(struct vidcodec_st **sp, const char *name,
 }
 
 
+/**
+ * Get the list of Video Codecs
+ *
+ * @return List of Video Codecs
+ */
 struct list *vidcodec_list(void)
 {
 	return &vidcodecl;
@@ -119,18 +157,38 @@ struct vidcodec *vidcodec_get(const struct vidcodec_st *st)
 }
 
 
+/**
+ * Get the Payload Type of a Video Codec
+ *
+ * @param vc Video Codec
+ *
+ * @return Payload Type
+ */
 const char *vidcodec_pt(const struct vidcodec *vc)
 {
 	return vc ? vc->pt : NULL;
 }
 
 
+/**
+ * Get the name of a Video Codec
+ *
+ * @param vc Video Codec
+ *
+ * @return Name of the Video Codec
+ */
 const char *vidcodec_name(const struct vidcodec *vc)
 {
 	return vc ? vc->name : NULL;
 }
 
 
+/**
+ * Set the Format Parameters for a Video Codec
+ *
+ * @param vc    Video Codec
+ * @param fmtp  Format Parameters
+ */
 void vidcodec_set_fmtp(struct vidcodec *vc, const char *fmtp)
 {
 	if (vc)

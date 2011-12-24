@@ -68,10 +68,12 @@ static void media_destructor(void *arg)
 static void turn_handler1(int err, uint16_t scode, const char *reason,
 			  const struct sa *relay_addr,
 			  const struct sa *mapped_addr,
+			  const struct stun_msg *msg,
 			  void *arg)
 {
 	struct mnat_media *m = arg;
 	(void)mapped_addr;
+	(void)msg;
 
 	if (!err && !scode) {
 
@@ -93,10 +95,12 @@ static void turn_handler1(int err, uint16_t scode, const char *reason,
 static void turn_handler2(int err, uint16_t scode, const char *reason,
 			  const struct sa *relay_addr,
 			  const struct sa *mapped_addr,
+			  const struct stun_msg *msg,
 			  void *arg)
 {
 	struct mnat_media *m = arg;
 	(void)mapped_addr;
+	(void)msg;
 
 	if (!err && !scode) {
 

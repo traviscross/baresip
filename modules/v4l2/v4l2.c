@@ -498,6 +498,7 @@ static void *read_thread(void *arg)
 
 
 static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
+		 struct media_ctx **ctx,
 		 struct vidsrc_prm *prm, const char *fmt,
 		 const char *dev, vidsrc_frame_h *frameh,
 		 vidsrc_error_h *errorh, void *arg)
@@ -505,6 +506,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	struct vidsrc_st *st;
 	int err;
 
+	(void)ctx;
 	(void)fmt;
 	(void)errorh;
 
@@ -534,7 +536,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 
 	get_video_input(st);
 
-	st->mb = mbuf_alloc(yuv420p_size(&st->app_sz));
+	st->mb = mbuf_alloc(st->app_sz.w * st->app_sz.h * 3 / 2);
 	if (!st->mb) {
 		err = ENOMEM;
 		goto out;

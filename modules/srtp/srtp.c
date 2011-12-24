@@ -379,7 +379,8 @@ static int decode_crypto(struct menc_st *st, const char *value)
 	/* use SRTP for this stream/session */
 	st->use_srtp = true;
 
-	(void)re_fprintf(stderr, "SRTP is Enabled\n");
+	(void)re_fprintf(stderr, "%s: SRTP is Enabled\n",
+			 sdp_media_name(st->sdpm));
 
 	return 0;
 }

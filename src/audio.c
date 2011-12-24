@@ -1,7 +1,8 @@
 /**
- * @file audio.c  Audio stream
+ * @file src/audio.c  Audio stream
  *
  * Copyright (C) 2010 Creytiv.com
+ * \ref GenericAudioStream
  */
 #define _BSD_SOURCE 1
 #include <string.h>
@@ -11,9 +12,6 @@
 #endif
 #ifdef HAVE_PTHREAD
 #include <pthread.h>
-#endif
-#ifdef __APPLE__
-#include "TargetConditionals.h"
 #endif
 #include <re.h>
 #include <baresip.h>
@@ -30,6 +28,8 @@
 
 
 /**
+ * \page GenericAudioStream Generic Audio Stream
+ *
  * Implements a generic audio stream. The application can allocate multiple
  * instances of a audio stream, mapping it to a particular SDP media line.
  * The audio object has a DSP sound card sink and source, and an audio encoder
@@ -55,12 +55,7 @@
  */
 
 
-enum audio_mode {
-	AUDIO_MODE_POLL = 0,
-	AUDIO_MODE_THREAD,
-	AUDIO_MODE_TMR
-};
-
+/** Generic Audio stream */
 struct audio {
 	MAGIC_DECL                    /**< Magic number for debugging      */
 	struct stream *strm;          /**< Generic media stream            */
@@ -73,6 +68,7 @@ struct audio {
 	struct aubuf *aubuf_rx;       /**< Incoming audio buffer           */
 	struct telev *telev;          /**< Telephony events                */
 	struct mbuf *mb_rtp;          /**< Buffer for outgoing RTP packets */
+	struct mbuf *mb_dec;          /**< Buffer for decoded audio        */
 	audio_event_h *eventh;        /**< Event handler                   */
 	audio_err_h *errh;            /**< Audio error handler             */
 	void *arg;                    /**< Handler argument                */
@@ -109,6 +105,7 @@ static void audio_destructor(void *arg)
 	mem_deref(a->dec);
 	mem_deref(a->aubuf_tx);
 	mem_deref(a->mb_rtp);
+	mem_deref(a->mb_dec);
 	mem_deref(a->aubuf_rx);
 	mem_deref(a->strm);
 	mem_deref(a->telev);
@@ -260,6 +257,8 @@ static void check_telev(struct audio *a)
  *
  * @note The application is responsible for filling in silence in
  *       the case of underrun
+ *
+ * @note This function may be called from any thread
  */
 static bool auplay_write_handler(uint8_t *buf, size_t sz, void *arg)
 {
@@ -275,6 +274,8 @@ static bool auplay_write_handler(uint8_t *buf, size_t sz, void *arg)
  * Read samples from Audio Source
  *
  * @note This function has REAL-TIME properties
+ *
+ * @note This function may be called from any thread
  */
 static void ausrc_read_handler(const uint8_t *buf, size_t sz, void *arg)
 {
@@ -332,7 +333,7 @@ static int pt_handler(struct audio *a, uint8_t pt_old, uint8_t pt_new)
 	(void)re_fprintf(stderr, "Audio decoder changed payload %u -> %u\n",
 			 pt_old, pt_new);
 
-	return audio_decoder_set(a, lc->data, lc->pt);
+	return audio_decoder_set(a, lc->data, lc->pt, lc->params);
 }
 
 
@@ -357,7 +358,6 @@ static void handle_telev(struct audio *a, struct mbuf *mb)
  */
 static int audio_stream_decode(struct audio *a, struct mbuf *mb)
 {
-	struct mbuf *mbc;
 	int err = 0;
 	int n = 64;
 
@@ -368,13 +368,11 @@ static int audio_stream_decode(struct audio *a, struct mbuf *mb)
 	if (!a->dec)
 		return 0;
 
-	mbc = mbuf_alloc(4*320);
-	if (!mbc)
-		return ENOMEM;
+	mbuf_rewind(a->mb_dec);
 
 	/* Decode all packets */
 	do {
-		err = aucodec_get(a->dec)->dech(a->dec, mbc, mb);
+		err = aucodec_get(a->dec)->dech(a->dec, a->mb_dec, mb);
 	} while (n-- && mbuf_get_left(mb) && !err);
 
 	if (!n) {
@@ -385,28 +383,28 @@ static int audio_stream_decode(struct audio *a, struct mbuf *mb)
 		DEBUG_WARNING("codec_decode: %s\n", strerror(err));
 		goto out;
 	}
-	if (!mbc->end) {
+	if (!a->mb_dec->end) {
 		DEBUG_INFO("stream decode: no data decoded (%s)\n",
 			   strerror(err));
 	}
-	mbc->pos = 0;
+	a->mb_dec->pos = 0;
 
 	/* Perform operations on the PCM samples */
 	if (a->fc) {
-		err |= aufilt_chain_decode(a->fc, mbc);
+		err |= aufilt_chain_decode(a->fc, a->mb_dec);
 	}
 
 	if (a->vu_meter)
-		a->avg = calc_avg_s16(mbc);
+		a->avg = calc_avg_s16(a->mb_dec);
 
 	if (a->aubuf_rx) {
-		err = aubuf_append(a->aubuf_rx, mbc);
+
+		err = aubuf_write(a->aubuf_rx, a->mb_dec->buf, a->mb_dec->end);
 		if (err)
 			goto out;
 	}
 
  out:
-	mem_deref(mbc);
 	return err;
 }
 
@@ -451,7 +449,7 @@ static void stream_recv_handler(const struct rtp_header *hdr,
 int audio_alloc(struct audio **ap, struct call *call,
 		struct sdp_session *sdp_sess, int label,
 		const struct mnat *mnat, struct mnat_sess *mnat_sess,
-		const struct menc *menc, uint32_t ptime,
+		const struct menc *menc, uint32_t ptime, enum audio_mode mode,
 		audio_event_h *eventh, audio_err_h *errh, void *arg)
 {
 	struct audio *a;
@@ -487,9 +485,10 @@ int audio_alloc(struct audio **ap, struct call *call,
 		err |= add_audio_codec(stream_sdpmedia(a->strm), ac);
 	}
 
-	/* This buffer will grow automatically */
+	/* These buffers will grow automatically */
 	a->mb_rtp = mbuf_alloc(STREAM_PRESZ + 320);
-	if (!a->mb_rtp) {
+	a->mb_dec = mbuf_alloc(4 * 320);
+	if (!a->mb_rtp || !a->mb_dec) {
 		err = ENOMEM;
 		goto out;
 	}
@@ -503,27 +502,10 @@ int audio_alloc(struct audio **ap, struct call *call,
 	a->ptime_tx  = a->ptime_rx  = ptime;
 	a->ts_tx     = 160;
 	a->marker    = true;
+	a->mode      = mode;
 	a->eventh    = eventh;
 	a->errh      = errh;
 	a->arg       = arg;
-
-#if TARGET_OS_IPHONE
-
-#ifdef HAVE_PTHREAD
-	a->mode = AUDIO_MODE_THREAD;
-#else
-	a->mode = AUDIO_MODE_POLL;
-#endif
-
-#else /* #if defined (TARGET_OS_IPHONE) */
-
-#ifdef ANDROID
-	a->mode = AUDIO_MODE_TMR;
-#else
-	a->mode = AUDIO_MODE_POLL;
-#endif
-
-#endif /* #if defined (TARGET_OS_IPHONE) */
 
  out:
 	if (err)
@@ -540,15 +522,15 @@ static void *tx_thread(void *arg)
 {
 	struct audio *a = arg;
 
-#if TARGET_OS_IPHONE && !(TARGET_IPHONE_SIMULATOR)
-	realtime_enable(true, 1);
-#endif
+	/* Enable Real-time mode for this thread, if available */
+	if (a->mode == AUDIO_MODE_THREAD_REALTIME)
+		(void)realtime_enable(true, 1);
 
 	while (a->run_tx) {
 
 		poll_aubuf_tx(a);
 
-		usleep(5000);
+		sys_msleep(5);
 	}
 
 	return NULL;
@@ -708,7 +690,7 @@ int audio_start(struct audio *a)
 				return err;
 		}
 
-		err = ausrc_alloc(&a->ausrc, NULL, &prm, dev,
+		err = ausrc_alloc(&a->ausrc, NULL, NULL, &prm, dev,
 				  ausrc_read_handler, ausrc_error_handler, a);
 		if (err) {
 			DEBUG_WARNING("start: audio source failed: %s\n",
@@ -719,6 +701,7 @@ int audio_start(struct audio *a)
 		switch (a->mode) {
 #ifdef HAVE_PTHREAD
 		case AUDIO_MODE_THREAD:
+		case AUDIO_MODE_THREAD_REALTIME:
 			if (!a->run_tx) {
 				a->run_tx = true;
 				err = pthread_create(&a->tid_tx, NULL,
@@ -760,6 +743,7 @@ void audio_stop(struct audio *a)
 
 #ifdef HAVE_PTHREAD
 	case AUDIO_MODE_THREAD:
+	case AUDIO_MODE_THREAD_REALTIME:
 		if (a->run_tx) {
 			a->run_tx = false;
 			pthread_join(a->tid_tx, NULL);
@@ -775,8 +759,8 @@ void audio_stop(struct audio *a)
 	}
 
 	/* audio device must be stopped first */
-	a->ausrc    = mem_deref(a->ausrc);
-	a->auplay   = mem_deref(a->auplay);
+	a->ausrc  = mem_deref(a->ausrc);
+	a->auplay = mem_deref(a->auplay);
 
 	p = a->fc;
 	a->fc = NULL;
@@ -791,6 +775,7 @@ int audio_encoder_set(struct audio *a, struct aucodec *ac,
 {
 	struct pl fmtp = pl_null;
 	struct aucodec *ac_old;
+	bool reset;
 	int err = 0;
 
 	if (!a || !ac)
@@ -800,6 +785,14 @@ int audio_encoder_set(struct audio *a, struct aucodec *ac,
 			 ac->name, get_srate(ac), ac->ch);
 
 	ac_old = aucodec_get(a->enc);
+
+	reset = ac_old && !aucodec_equal(ac_old, ac);
+
+	/* Audio source must be stopped first */
+	if (reset) {
+		a->ausrc = mem_deref(a->ausrc);
+	}
+
 	pl_set_str(&fmtp, params);
 
 	a->is_g722 = (0 == str_casecmp(ac->name, "G722"));
@@ -827,9 +820,7 @@ int audio_encoder_set(struct audio *a, struct aucodec *ac,
 
 	stream_set_srate(a->strm, get_srate(ac), get_srate(ac));
 
-	if (ac_old && !aucodec_equal(ac_old, ac)) {
-
-		a->ausrc = mem_deref(a->ausrc);
+	if (reset) {
 
 		err |= audio_start(a);
 	}
@@ -838,8 +829,10 @@ int audio_encoder_set(struct audio *a, struct aucodec *ac,
 }
 
 
-int audio_decoder_set(struct audio *a, struct aucodec *ac, uint8_t pt_rx)
+int audio_decoder_set(struct audio *a, struct aucodec *ac,
+		      uint8_t pt_rx, const char *params)
 {
+	struct pl fmtp = pl_null;
 	struct aucodec *ac_old;
 	int err = 0;
 
@@ -848,6 +841,8 @@ int audio_decoder_set(struct audio *a, struct aucodec *ac, uint8_t pt_rx)
 
 	(void)re_fprintf(stderr, "Set audio decoder: %s %uHz %dch\n",
 			 ac->name, get_srate(ac), ac->ch);
+
+	pl_set_str(&fmtp, params);
 
 	ac_old = aucodec_get(a->dec);
 	a->pt_rx = pt_rx;
@@ -858,7 +853,7 @@ int audio_decoder_set(struct audio *a, struct aucodec *ac, uint8_t pt_rx)
 		a->dec = mem_ref(a->enc);
 	}
 	else {
-		err = ac->alloch(&a->dec, ac, NULL, NULL, NULL);
+		err = ac->alloch(&a->dec, ac, NULL, NULL, &fmtp);
 		if (err) {
 			DEBUG_WARNING("alloc decoder: %s\n", strerror(err));
 			return err;
@@ -895,13 +890,6 @@ static void audio_ptime_tx_set(struct audio *a, uint32_t ptime_tx)
 
 		/* todo: refresh a->psize */
 	}
-}
-
-
-void audio_update(struct audio *a, bool speakerphone)
-{
-	if (a && a->fc)
-		(void)aufilt_chain_update(a->fc, speakerphone);
 }
 
 
@@ -974,21 +962,18 @@ int audio_send_digit(struct audio *a, char key)
 }
 
 
+/**
+ * Mute the audio stream
+ *
+ * @param a      Audio stream
+ * @param muted  True to mute, false to un-mute
+ */
 void audio_mute(struct audio *a, bool muted)
 {
 	if (!a)
 		return;
 
 	a->muted = muted;
-}
-
-
-void audio_enable_txthread(struct audio *a, bool enabled)
-{
-	if (!a)
-		return;
-
-	a->mode = enabled ? AUDIO_MODE_THREAD : AUDIO_MODE_POLL;
 }
 
 

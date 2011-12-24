@@ -29,6 +29,15 @@
  */
 
 
+#ifndef L_FRAME16k
+#define L_FRAME16k 320
+#endif
+
+#ifndef NB_SERIAL_MAX
+#define NB_SERIAL_MAX 61
+#endif
+
+
 struct aucodec_st {
 	struct aucodec *ac;         /**< Inheritance - base class */
 	void *enc;                  /**< Encoder state            */
@@ -139,7 +148,7 @@ static int encode_wb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 static int decode_wb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
 	if (!src)
-		return EPROTO;
+		return 0;
 
 	/* Make sure there is enough space in the buffer */
 	if (mbuf_get_space(dst) < 2*L_FRAME16k) {
@@ -197,7 +206,7 @@ static int encode_nb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 static int decode_nb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
 	if (!src)
-		return EPROTO;
+		return 0;
 
 	/* Make sure there is enough space in the buffer */
 	if (mbuf_get_space(dst) < 2*L_FRAME16k) {

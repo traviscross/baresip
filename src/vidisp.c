@@ -8,8 +8,9 @@
 #include "core.h"
 
 
+/** Video Display state */
 struct vidisp_st {
-	struct vidisp *vd;
+	struct vidisp *vd;  /**< Video Display */
 };
 
 
@@ -24,6 +25,18 @@ static void destructor(void *arg)
 }
 
 
+/**
+ * Register a Video output display
+ *
+ * @param vp       Pointer to allocated Video Display
+ * @param name     Name of Video Display
+ * @param alloch   Allocation handler
+ * @param updateh  Update handler
+ * @param disph    Display handler
+ * @param hideh    Hide-window handler
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int vidisp_register(struct vidisp **vp, const char *name,
 		    vidisp_alloc_h *alloch, vidisp_update_h *updateh,
 		    vidisp_disp_h *disph, vidisp_hide_h *hideh)

@@ -200,12 +200,14 @@ static void *play_thread(void *arg)
 
 
 static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
+		     struct media_ctx **ctx,
 		     struct ausrc_prm *prm, const char *device,
 		     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
 	int err;
 
+	(void)ctx;
 	(void)errh;
 
 	st = mem_zalloc(sizeof(*st), ausrc_destructor);

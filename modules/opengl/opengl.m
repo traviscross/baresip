@@ -4,6 +4,8 @@
  * Copyright (C) 2010 Creytiv.com
  */
 #include <Cocoa/Cocoa.h>
+#include <OpenGL/gl.h>
+#include <OpenGL/glext.h>
 #include <re.h>
 #include <baresip.h>
 

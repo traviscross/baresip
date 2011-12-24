@@ -5,7 +5,9 @@
 #
 
 MOD		:= rst
+$(MOD)_SRCS	+= audio.c
 $(MOD)_SRCS	+= rst.c
-$(MOD)_LFLAGS	+= -lmpg123
+$(MOD)_SRCS	+= video.c
+$(MOD)_LFLAGS	+= -lmpg123 -lcairo
 
 include mk/mod.mk

@@ -188,6 +188,7 @@ static void *read_thread(void *data)
 
 
 static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
+		 struct media_ctx **mctx,
 		 struct vidsrc_prm *prm, const char *fmt,
 		 const char *dev, vidsrc_frame_h *frameh,
 		 vidsrc_error_h *errorh, void *arg)
@@ -197,6 +198,8 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	bool found_stream = false;
 	uint32_t i;
 	int ret, err = 0;
+
+	(void)mctx;
 	(void)errorh;
 
 	if (!frameh)

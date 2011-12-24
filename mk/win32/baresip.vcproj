@@ -167,9 +167,6 @@
 				RelativePath="..\..\src\mnat.c">
 			</File>
 			<File
-				RelativePath="..\..\src\natbd.c">
-			</File>
-			<File
 				RelativePath="..\..\src\net.c">
 			</File>
 			<File

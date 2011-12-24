@@ -44,9 +44,6 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 	SF_INFO sfinfo_enc, sfinfo_dec;
 	struct aufilt_st *st;
 
-	DEBUG_NOTICE("alloc: enc=%uHz dec=%uHz\n",
-		     encprm->srate, decprm->srate);
-
 	st = mem_zalloc(sizeof(*st), sndfile_destructor);
 	if (!st)
 		return EINVAL;
@@ -80,6 +77,9 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 		goto error;
 	}
 
+	DEBUG_NOTICE("dumping audio to %s and %s\n",
+		     filename_enc, filename_dec);
+
 	++count;
 	*stp = st;
 	return 0;
@@ -92,7 +92,7 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 
 static int enc(struct aufilt_st *st, struct mbuf *mb)
 {
-	sf_writef_short(st->enc, (short *)mbuf_buf(mb), mbuf_get_left(mb)/2);
+	sf_write_short(st->enc, (short *)mbuf_buf(mb), mbuf_get_left(mb)/2);
 
 	return 0;
 }
@@ -100,7 +100,7 @@ static int enc(struct aufilt_st *st, struct mbuf *mb)
 
 static int dec(struct aufilt_st *st, struct mbuf *mb)
 {
-	sf_writef_short(st->dec, (short *)mbuf_buf(mb), mbuf_get_left(mb)/2);
+	sf_write_short(st->dec, (short *)mbuf_buf(mb), mbuf_get_left(mb)/2);
 
 	return 0;
 }

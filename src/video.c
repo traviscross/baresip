@@ -1,7 +1,9 @@
 /**
- * @file video.c  Video stream
+ * @file src/video.c  Video stream
  *
  * Copyright (C) 2010 Creytiv.com
+ *
+ * \ref GenericVideoStream
  */
 #include <string.h>
 #include <stdlib.h>
@@ -38,6 +40,8 @@ enum selfview {
 
 
 /**
+ * \page GenericVideoStream Generic Video Stream
+ *
  * Implements a generic video stream. The application can allocate multiple
  * instances of a video stream, mapping it to a particular SDP media line.
  * The video object has a Video Display and Source, and a video encoder
@@ -62,6 +66,8 @@ enum selfview {
  *        '-------'  '-------'
  *</pre>
  */
+
+/** Generic Video stream */
 struct video {
 	MAGIC_DECL              /**< Magic number for debugging           */
 	struct stream *strm;    /**< Generic media stream                 */
@@ -555,7 +561,7 @@ static int set_encoder_format(struct vtx *vtx, const char *src,
 	vtx->vsrc = mem_deref(vtx->vsrc);
 
 	if (!vtx->video->shuttered) {
-		err = vs->alloch(&vtx->vsrc, vs, &vtx->vsrc_prm,
+		err = vs->alloch(&vtx->vsrc, vs, NULL, &vtx->vsrc_prm,
 				 NULL, dev, vidsrc_frame_handler,
 				 vidsrc_error_handler, vtx);
 		if (err) {
@@ -653,6 +659,12 @@ void video_stop(struct video *v)
 }
 
 
+/**
+ * Mute the video stream
+ *
+ * @param v     Video stream
+ * @param muted True to mute, false to un-mute
+ */
 void video_mute(struct video *v, bool muted)
 {
 	if (!v)
@@ -678,6 +690,14 @@ static int vidisp_update(struct vrx *vrx)
 }
 
 
+/**
+ * Enable driver-specific Picture-in-Picture (PIP) selfview
+ *
+ * @param v     Video stream
+ * @param rect  Area to draw PIP
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int video_pip(struct video *v, const struct vidrect *rect)
 {
 	struct vtx *vtx;
@@ -716,6 +736,14 @@ int video_pip(struct video *v, const struct vidrect *rect)
 }
 
 
+/**
+ * Enable video display fullscreen
+ *
+ * @param v  Video stream
+ * @param fs True for fullscreen, otherwise false
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int video_set_fullscreen(struct video *v, bool fs)
 {
 	if (!v)
@@ -736,6 +764,14 @@ static void vidsrc_update(struct vtx *vtx, const char *dev)
 }
 
 
+/**
+ * Set the orientation of the Video source and display
+ *
+ * @param v      Video stream
+ * @param orient Video orientation
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int video_set_orient(struct video *v, enum vidorient orient)
 {
 	int err = 0;
@@ -880,6 +916,13 @@ void video_update_picture(struct video *v)
 }
 
 
+/**
+ * Get the driver-specific view of the video stream
+ *
+ * @param v Video stream
+ *
+ * @return Opaque view
+ */
 void *video_view(const struct video *v)
 {
 	if (!v || !v->vrx)
@@ -889,6 +932,12 @@ void *video_view(const struct video *v)
 }
 
 
+/**
+ * Set the current Video Source device name
+ *
+ * @param v   Video stream
+ * @param dev Device name
+ */
 void video_vidsrc_set_device(struct video *v, const char *dev)
 {
 	if (v && v->vtx)
@@ -951,4 +1000,24 @@ int video_set_shuttered(struct video *v, bool shuttered)
 	v->shuttered = shuttered;
 
 	return video_start(v, NULL, config.video.device, NULL);
+}
+
+
+int video_set_source(struct video *v, const char *name, const char *dev)
+{
+	struct vidsrc *vs = (struct vidsrc *)vidsrc_find(name);
+	struct vtx *vtx;
+
+	if (!v || !v->vtx)
+		return EINVAL;
+
+	if (!vs)
+		return ENOENT;
+
+	vtx = v->vtx;
+
+	vtx->vsrc = mem_deref(vtx->vsrc);
+
+	return vs->alloch(&vtx->vsrc, vs, NULL, &vtx->vsrc_prm, NULL, dev,
+			  vidsrc_frame_handler, vidsrc_error_handler, vtx);
 }

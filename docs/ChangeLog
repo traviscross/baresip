@@ -1,3 +1,46 @@
+2011-12-25 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.0
+
+	* updated doxygen comments (thanks to Olle E. Johansson)
+
+	* docs: added modules description
+
+	* baresip: add ua_set_aumode(), configurable audio-tx mode
+		   vidsrc API: added media_ctx shared with ausrc
+		   ausrc API: add media_ctx shared with vidsrc
+		   audio_encoder_set() - stop audio source first
+		   audio_decoder_set() - include SDP format parameters
+		   aufile: add PREFIX to share path (thanks to Juha Heinanen)
+		   natbd.c: move code to a new module 'natbd'
+		   get_login_name: check both LOGNAME and USER
+		   ua.c: unique contact-user with address of struct ua
+		   ua.c: find correct UA for incoming SIP Requests
+		   ua_connect: param is optional (thanks to Juha Heinanen)
+		   video: add video_set_source()
+	
+	* amr: minor improvements
+
+	* audiounit: new module for MacOSX/iOS audio driver
+
+	* avcapture: new module for iOS video source
+
+	* avcodec: fixes for newer versions of libavcodec
+
+	* gsm: handle packet-loss
+
+	* natbd: move to separate module from core
+	
+	* opengl: fix building on MacOSX 10.7
+		  (thanks to David Jedda and Atle Samuelsen)
+
+	* opus: upgrade to opus v0.9.8
+
+	* rst: use media_ctx for shared audio/video stream
+
+	* sndfile: fix stereo mode
+	
+
 2011-09-07 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.3.0
