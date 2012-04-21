@@ -217,7 +217,7 @@ static bool if_handler(const char *ifname, const struct sa *sa, void *arg)
 		return false;
 
 	/* Interface filter */
-	if (str_len(ice.ifc)) {
+	if (str_isset(ice.ifc)) {
 
 		if (0 != str_casecmp(ifname, ice.ifc)) {
 			re_printf("ICE: skip interface: %s\n", ifname);

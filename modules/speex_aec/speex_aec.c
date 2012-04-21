@@ -91,9 +91,6 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 }
 
 
-/*
- * mb=NULL means no speech
- */
 static int enc(struct aufilt_st *st, struct mbuf *mb)
 {
 	int16_t out[mbuf_get_left(mb)/2];

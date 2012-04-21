@@ -12,6 +12,7 @@
 #include <X11/Xutil.h>
 #include <pthread.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 
 
@@ -162,8 +163,8 @@ static void destructor(void *arg)
 
 
 static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
-		 struct media_ctx **ctx,
-		 struct vidsrc_prm *prm, const char *fmt,
+		 struct media_ctx **ctx, struct vidsrc_prm *prm,
+		 const struct vidsz *size, const char *fmt,
 		 const char *dev, vidsrc_frame_h *frameh,
 		 vidsrc_error_h *errorh, void *arg)
 {
@@ -175,17 +176,20 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	(void)dev;
 	(void)errorh;
 
+	if (!stp || !prm || !size || !frameh)
+		return EINVAL;
+
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
 		return ENOMEM;
 
 	st->vs     = mem_ref(vs);
-	st->size   = prm->size;
+	st->size   = *size;
 	st->fps    = prm->fps;
 	st->frameh = frameh;
 	st->arg    = arg;
 
-	err = x11grab_open(st, &prm->size);
+	err = x11grab_open(st, size);
 	if (err)
 		goto out;
 

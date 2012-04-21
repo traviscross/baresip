@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <alsa/asoundlib.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "alsa.h"
 

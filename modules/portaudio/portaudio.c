@@ -6,6 +6,7 @@
 #include <string.h>
 #include <portaudio.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 
 

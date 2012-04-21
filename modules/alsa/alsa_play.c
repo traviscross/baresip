@@ -10,6 +10,7 @@
 #include <alsa/asoundlib.h>
 #include <pthread.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "alsa.h"
 
@@ -94,7 +95,7 @@ int alsa_play_alloc(struct auplay_st **stp, struct auplay *ap,
 	struct auplay_st *st;
 	int err;
 
-	if (!str_len(device))
+	if (!str_isset(device))
 		device = alsa_dev;
 
 	st = mem_zalloc(sizeof(*st), auplay_destructor);
@@ -123,14 +124,6 @@ int alsa_play_alloc(struct auplay_st **stp, struct auplay *ap,
 			 prm->frame_size);
 	if (err)
 		goto out;
-
-	/* Start */
-	err = snd_pcm_start(st->write);
-	if (err) {
-		DEBUG_WARNING("snd_pcm_start on write: %s\n",
-			      snd_strerror(err));
-		goto out;
-	}
 
 	st->run = true;
 	err = pthread_create(&st->thread, NULL, write_thread, st);

@@ -6,7 +6,6 @@
 
 SRCS	+= aucodec.c
 SRCS	+= audio.c
-SRCS	+= aufile.c
 SRCS	+= aufilt.c
 SRCS	+= auloop.c
 SRCS	+= auplay.c

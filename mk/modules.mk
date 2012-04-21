@@ -6,7 +6,9 @@
 # External libraries:
 #
 #   USE_ALSA          ALSA audio driver
+#   USE_AMR           Adaptive Multi-Rate (AMR) audio codec
 #   USE_BV32          BroadVoice32 Wideband Audio codec
+#   USE_CAIRO         Cairo module
 #   USE_CELT          CELT audio codec
 #   USE_CONS          Console input driver
 #   USE_COREAUDIO     MacOSX Coreaudio audio driver
@@ -19,11 +21,13 @@
 #   USE_GST           Gstreamer audio module
 #   USE_ILBC          iLBC audio codec
 #   USE_L16           L16 audio codec
+#   USE_MPG123        Use mpg123
 #   USE_OPUS          Opus audio codec
 #   USE_OSS           OSS audio driver
 #   USE_PLC           Packet Loss Concealment
 #   USE_PORTAUDIO     Portaudio audio driver
 #   USE_SDL           libSDL video output
+#   USE_SILK          SILK (Skype) audio codec
 #   USE_SNDFILE       sndfile wav dumper
 #   USE_SPEEX         Speex audio codec
 #   USE_SPEEX_AEC     Speex Acoustic Echo Canceller
@@ -52,8 +56,14 @@ ifneq ($(OS),win32)
 
 USE_ALSA  := $(shell [ -f $(SYSROOT)/include/alsa/asoundlib.h ] || \
 	[ -f $(SYSROOT_ALT)/include/alsa/asoundlib.h ] && echo "yes")
+USE_AMR   := $(shell [ -d $(SYSROOT)/include/opencore-amrnb ] || \
+	[ -d $(SYSROOT_ALT)/include/opencore-amrnb ] || \
+	[ -d $(SYSROOT)/local/include/amrnb ] || \
+	[ -d $(SYSROOT)/include/amrnb ] && echo "yes")
 USE_BV32  := $(shell [ -f $(SYSROOT)/include/bv32/bv32.h ] || \
 	[ -f $(SYSROOT)/local/include/bv32/bv32.h ] && echo "yes")
+USE_CAIRO  := $(shell [ -f $(SYSROOT)/include/cairo/cairo.h ] || \
+	[ -f $(SYSROOT_ALT)/include/cairo/cairo.h ] && echo "yes")
 USE_CELT  := $(shell [ -f $(SYSROOT)/include/celt/celt.h ] || \
 	[ -f $(SYSROOT)/local/include/celt/celt.h ] && echo "yes")
 USE_FFMPEG := $(shell [ -f $(SYSROOT)/include/libavcodec/avcodec.h ] || \
@@ -77,6 +87,8 @@ USE_GST := $(shell [ -f $(SYSROOT)/include/gstreamer-0.10/gst/gst.h ] || \
 	[ -f $(SYSROOT_ALT)/include/gstreamer-0.10/gst/gst.h ] && echo "yes")
 USE_ILBC := $(shell [ -f $(SYSROOT)/include/iLBC_define.h ] || \
 	[ -f $(SYSROOT)/local/include/iLBC_define.h ] && echo "yes")
+USE_MPG123  := $(shell [ -f $(SYSROOT)/include/mpg123.h ] || \
+	[ -f $(SYSROOT_ALT)/include/mpg123.h ] && echo "yes")
 USE_OPUS := $(shell [ -f $(SYSROOT)/include/opus/opus.h ] || \
 	[ -f $(SYSROOT_ALT)/include/opus/opus.h ] || \
 	[ -f $(SYSROOT)/local/include/opus/opus.h ] && echo "yes")
@@ -91,6 +103,9 @@ USE_PORTAUDIO := $(shell [ -f $(SYSROOT)/local/include/portaudio.h ] || \
 USE_SDL  := $(shell [ -f $(SYSROOT)/include/SDL/SDL.h ] || \
 	[ -f $(SYSROOT)/local/include/SDL/SDL.h ] || \
 	[ -f $(SYSROOT_ALT)/include/SDL/SDl.h ] && echo "yes")
+USE_SILK := $(shell [ -f $(SYSROOT)/include/silk/SKP_Silk_SDK_API.h ] || \
+       [ -f $(SYSROOT_ALT)/include/silk/SKP_Silk_SDK_API.h ] || \
+       [ -f $(SYSROOT)/local/include/silk/SKP_Silk_SDK_API.h ] && echo "yes")
 USE_SNDFILE := $(shell [ -f $(SYSROOT)/include/sndfile.h ] || \
 	[ -f $(SYSROOT_ALT)/include/sndfile.h ] && echo "yes")
 USE_STDIO := $(shell [ -f $(SYSROOT)/include/termios.h ] && echo "yes")
@@ -119,11 +134,14 @@ USE_SRTP := $(shell [ -f $(SYSROOT)/include/srtp/srtp.h ] || \
 	[ -f $(SYSROOT_ALT)/include/srtp/srtp.h ] || \
 	[ -f $(SYSROOT)/local/include/srtp/srtp.h ] && echo "yes")
 USE_UUID  := $(shell [ -f $(SYSROOT)/include/uuid/uuid.h ] && echo "yes")
-USE_V4L  := $(shell [ -f $(SYSROOT)/include/linux/videodev.h ] \
+USE_V4L  := $(shell [ -f $(SYSROOT)/include/linux/videodev.h ] || \
+	[ -f $(SYSROOT)/local/include/linux/videodev.h ] \
 	&& echo "yes")
-USE_V4L2  := $(shell [ -f $(SYSROOT)/include/libv4l2.h ] \
+USE_V4L2  := $(shell [ -f $(SYSROOT)/include/libv4l2.h ] || \
+	[ -f $(SYSROOT)/local/include/libv4l2.h ] \
 	&& echo "yes")
 USE_X11 := $(shell [ -f $(SYSROOT)/include/X11/Xlib.h ] || \
+	[ -f $(SYSROOT)/local/include/X11/Xlib.h ] || \
 	[ -f $(SYSROOT_ALT)/include/X11/Xlib.h ] && echo "yes")
 USE_VPX  := $(shell [ -f $(SYSROOT)/include/vpx/vp8.h ] \
 	|| [ -f $(SYSROOT)/local/include/vpx/vp8.h ] \
@@ -166,8 +184,17 @@ MODULES   += $(EXTRA_MODULES) stun turn ice natbd
 ifneq ($(USE_ALSA),)
 MODULES   += alsa
 endif
+ifneq ($(USE_AMR),)
+MODULES   += amr
+endif
 ifneq ($(USE_BV32),)
 MODULES   += bv32
+endif
+ifneq ($(USE_CAIRO),)
+MODULES   += cairo
+ifneq ($(USE_MPG123),)
+MODULES   += rst
+endif
 endif
 ifneq ($(USE_CELT),)
 MODULES   += celt
@@ -238,6 +265,9 @@ MODULES   += portaudio
 endif
 ifneq ($(USE_SDL),)
 MODULES   += sdl
+endif
+ifneq ($(USE_SILK),)
+MODULES   += silk
 endif
 ifneq ($(USE_SNDFILE),)
 MODULES   += sndfile

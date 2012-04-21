@@ -230,6 +230,7 @@ static void app_close(void)
 	video_loop_test(true);
 #endif
 	mod_close();
+
 	libre_close();
 
 	/* Check for memory leaks */

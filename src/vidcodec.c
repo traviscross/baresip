@@ -34,13 +34,16 @@ static void destructor(void *arg)
  * @param fmtp    Format parameters
  * @param alloch  Allocation handler
  * @param ench    Encode handler
+ * @param pktizeh Packetize handler (optional)
  * @param dech    Decode handler
+ * @param cmph    SDP compare handler
  *
  * @return 0 if success, otherwise errorcode
  */
 int vidcodec_register(struct vidcodec **vp, const char *pt, const char *name,
 		      const char *fmtp, vidcodec_alloc_h *alloch,
-		      vidcodec_enc_h *ench, vidcodec_dec_h *dech)
+		      vidcodec_enc_h *ench, vidcodec_pktize_h *pktizeh,
+		      vidcodec_dec_h *dech, sdp_fmtp_cmp_h *cmph)
 {
 	struct vidcodec *vc;
 
@@ -53,12 +56,14 @@ int vidcodec_register(struct vidcodec **vp, const char *pt, const char *name,
 
 	list_append(&vidcodecl, &vc->le, vc);
 
-	vc->pt     = pt;
-	vc->name   = name;
-	vc->fmtp   = fmtp;
-	vc->alloch = alloch;
-	vc->ench   = ench;
-	vc->dech   = dech;
+	vc->pt      = pt;
+	vc->name    = name;
+	vc->fmtp    = fmtp;
+	vc->alloch  = alloch;
+	vc->ench    = ench;
+	vc->pktizeh = pktizeh;
+	vc->dech    = dech;
+	vc->cmph    = cmph;
 
 	(void)re_printf("vidcodec: %s\n", name);
 
@@ -119,24 +124,22 @@ const struct vidcodec *vidcodec_find(const char *name)
  * @param sp        Pointer to allocated Video Codec state
  * @param name      Name of Video Codec
  * @param encp      Encoding parameters (optional)
- * @param decp      Decoding parameters (optional)
- * @param sdp_fmtp  SDP Format parameters
+ * @param fmtp      SDP Format parameters
+ * @param enqh      Enqueue handler
  * @param sendh     Send handler
  * @param arg       Handler argument
  *
  * @return 0 if success, otherwise errorcode
  */
 int vidcodec_alloc(struct vidcodec_st **sp, const char *name,
-		   struct vidcodec_prm *encp, struct vidcodec_prm *decp,
-		   const struct pl *sdp_fmtp,
-		   vidcodec_send_h *sendh, void *arg)
+		   struct vidcodec_prm *encp, const char *fmtp,
+		   vidcodec_enq_h *enqh, vidcodec_send_h *sendh, void *arg)
 {
 	struct vidcodec *vc = (struct vidcodec *)vidcodec_find(name);
 	if (!vc)
 		return ENOENT;
 
-	return vc->alloch(sp, vc, name, encp, decp, sdp_fmtp,
-			  sendh, arg);
+	return vc->alloch(sp, vc, name, encp, fmtp, enqh, sendh, arg);
 }
 
 

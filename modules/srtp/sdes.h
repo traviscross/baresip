@@ -8,7 +8,10 @@
 struct crypto {
 	uint32_t tag;
 	struct pl suite;
-	struct pl key_method, key_info;
+	struct pl key_method;
+	struct pl key_info;
+	struct pl lifetime;  /* optional */
+	struct pl mki;       /* optional */
 	struct pl sess_prms; /* optional */
 };
 

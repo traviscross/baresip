@@ -43,14 +43,14 @@ static void destructor(void *arg)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 	int ret, err = 0;
 	int32_t enc_size, dec_size;
 
 	(void)decp;
-	(void)sdp_fmtp;
+	(void)fmtp;
 
 	ret  = SKP_Silk_SDK_Get_Encoder_Size(&enc_size);
 	ret |= SKP_Silk_SDK_Get_Decoder_Size(&dec_size);
@@ -85,6 +85,8 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	st->encControl.API_sampleRate = aucodec_srate(ac);
 	st->encControl.maxInternalSampleRate = aucodec_srate(ac);
 	st->encControl.packetSize = encp->ptime * aucodec_srate(ac) / 1000;
+	st->encControl.bitRate = 64000;
+	st->encControl.complexity = 2;
 	st->encControl.useInBandFEC = 0;
 	st->encControl.useDTX = 0;
 
@@ -166,7 +168,8 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 		re_printf("SKP_Silk_SDK_Decode: ret=%d\n", ret);
 	}
 
-	mbuf_skip_to_end(src);
+	if (src)
+		mbuf_skip_to_end(src);
 	if (nsamp > 0)
 		mbuf_set_end(dst, dst->end + nsamp*2);
 
@@ -181,13 +184,13 @@ static int module_init(void)
 	re_printf("SILK %s\n", SKP_Silk_SDK_get_version());
 
 	err |= aucodec_register(&silk[0], NULL, "SILK", 24000, 1,
-				NULL, alloc, encode, decode);
+				NULL, alloc, encode, decode, NULL);
 	err |= aucodec_register(&silk[1], NULL, "SILK", 16000, 1,
-				NULL, alloc, encode, decode);
+				NULL, alloc, encode, decode, NULL);
 	err |= aucodec_register(&silk[2], NULL, "SILK", 12000, 1,
-				NULL, alloc, encode, decode);
+				NULL, alloc, encode, decode, NULL);
 	err |= aucodec_register(&silk[3], NULL, "SILK", 8000, 1,
-				NULL, alloc, encode, decode);
+				NULL, alloc, encode, decode, NULL);
 
 	return err;
 }

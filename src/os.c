@@ -53,7 +53,7 @@ int get_login_name(const char **loginp)
 	login = getenv("LOGNAME");
 	if (!login)
 		login = getenv("USER");
-#ifdef HAVE_UNISTD_H
+#if defined (HAVE_UNISTD_H) && !defined (__SYMBIAN32__)
 	if (!login) {
 		login = getlogin();
 	}

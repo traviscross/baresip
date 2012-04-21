@@ -109,14 +109,14 @@ static void set_decoder_mode(struct aucodec_st *st, int mode)
 }
 
 
-static void fmtp_decode(struct aucodec_st *st, const struct pl *pl)
+static void fmtp_decode(struct aucodec_st *st, const char *fmtp)
 {
 	struct pl mode;
 
-	if (!pl)
+	if (!fmtp)
 		return;
 
-	if (re_regex(pl->p, pl->l, "mode=[0-9]+", &mode))
+	if (re_regex(fmtp, strlen(fmtp), "mode=[0-9]+", &mode))
 		return;
 
 	set_encoder_mode(st, pl_u32(&mode));
@@ -152,7 +152,7 @@ static int check_ptime(const struct aucodec_prm *prm)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 
@@ -168,8 +168,8 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	set_encoder_mode(st, DEFAULT_MODE);
 	set_decoder_mode(st, DEFAULT_MODE);
 
-	if (pl_isset(sdp_fmtp))
-		fmtp_decode(st, sdp_fmtp);
+	if (str_isset(fmtp))
+		fmtp_decode(st, fmtp);
 
 	/* update parameters after SDP was decoded */
 	if (encp) {

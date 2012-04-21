@@ -3,15 +3,14 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
+#include <re.h>
+#include <baresip.h>
 #ifdef DARWIN
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <stdio.h>
 #include <mach/mach.h>
 #endif
-#include <re_types.h>
-#include <re_fmt.h>
-#include <baresip.h>
 
 
 #ifdef DARWIN

@@ -1,3 +1,70 @@
+2012-04-21 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.1
+
+	* baresip: do not include rem.h from baresip.h
+		   rename struct conf to struct config
+		   vidsrc API: move size to alloc handler
+		   aucodec API: change fmtp type to 'const char *'
+				add SDP fmtp compare handler
+		   vidcodec API: added enqueue and packetizer handlers
+				 remove size from vidcodec_prm
+				 remove decoder parameters from alloc
+				 change fmtp type to 'const char *'
+				 add SDP fmtp compare handler
+		   remove aufile.c, use librem instead
+		   audio: fix Telev timestamp (thanks Paulo Vicentini)
+			  configurable order of playback/source start
+		   ua_find: match AOR for interop (thanks Tomasz Ostrowski)
+		   ua: more robust parsing for incoming MESSAGE
+		   ua: password prompt (thanks to Juha Heinanen)
+	
+	* build: detect amr, cairo, rst, silk modules
+
+	* config: split 'audio_dev' parameter into 'audio_player/audio_source'
+		  order of audio_player/audio_source decide opening order
+		  rename 'video_dev' parameter to 'video_source'
+		  added optional 'auth_user=NAME' account parameter
+		  (idea was suggested by Juha Heinanen)
+	
+	* alsa: play: no need to call snd_pcm_start(), explictly started when
+		writing data to the device. (thanks to Christof Meerwald)
+
+	* amr: 	more portable AMR codec
+	
+	* avcodec: automatic size from encoded frames
+		   detect packetization-mode from SDP format
+		   use enqueue handler
+	
+	* avformat: update to latest versions of ffmpeg
+	
+	* cairo: new experimental video source module
+
+	* cons: added support for TCP
+
+	* evdev: added KEY_KPx (thanks to ccwufu on OpenWRT forum)
+
+	* g7221: use bitrate from decoded SDP format
+		 added optional G722_PCM_SHIFT for 14-bit compat
+	
+	* rst: thread-based video source
+	
+	* silk: fix crash, init encoder, bitrate=64000 and complexity=2
+	        (reported by Juha Heinanen)
+	
+	* srtp: decode SDES lifetime and MKI
+
+	* v4l, v4l2: better module detection for FreeBSD 9
+		     do not include malloc.h
+		     (thanks to Matthias Apitz)
+
+	* vpx: auto init of encoder
+	
+	* winwave: fix memory leak (thanks to Tomasz Ostrowski)
+
+	* x11: add support for 16-bit graphics
+	
+
 2011-12-25 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.4.0

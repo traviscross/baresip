@@ -4,6 +4,7 @@
  * Copyright (C) 2010 Creytiv.com
  */
 #include <re.h>
+#include <rem.h>
 #include <windows.h>
 #include <mmsystem.h>
 #include <stdio.h>
@@ -350,6 +351,7 @@ static void ausrc_destructor(void *arg)
 	struct ausrc_st *st = arg;
 
 	read_stream_close(st);
+	mem_deref(st->as);
 }
 
 
@@ -358,6 +360,7 @@ static void auplay_destructor(void *arg)
 	struct auplay_st *st = arg;
 
 	write_stream_close(st);
+	mem_deref(st->ap);
 }
 
 

@@ -99,7 +99,6 @@ static int help_idle(struct re_printf *pf)
 
 	err  = re_hprintf(pf, "--- Help ---\n");
 	err |= re_hprintf(pf, " /     - Search contacts\n");
-	err |= re_hprintf(pf, " =     - Chat mode\n");
 	err |= re_hprintf(pf, " a  A  - Audio-loop toggle\n");
 	err |= re_hprintf(pf, " b ESC - Hangup\n");
 	err |= re_hprintf(pf, " C     - List contacts\n");
@@ -117,7 +116,7 @@ static int help_idle(struct re_printf *pf)
 	err |= re_hprintf(pf, " o  O  - Send OPTIONS to all contacts\n");
 	err |= re_hprintf(pf, " P     - Polling method toggle\n");
 	err |= re_hprintf(pf, " q     - Quit\n");
-	err |= re_hprintf(pf, " r     - Reg status\n");
+	err |= re_hprintf(pf, " r     - Registration status\n");
 	err |= re_hprintf(pf, " s     - System info\n");
 	err |= re_hprintf(pf, " t     - Timer debug\n");
 	err |= re_hprintf(pf, " u     - UA debug\n");
@@ -616,21 +615,6 @@ static int ui_idle(char key, struct re_printf *pf)
 				 "  =      Chatmode\n"
 				 );
 		break;
-
-	case '=':
-		mbuf_reset(&uig.chatmsg);
-
-		if (uig.chatpeer.buf && uig.chatpeer.end) {
-			(void)re_fprintf(stderr, "\nChat mode with %b - "
-					 "ESCAPE to quit\n",
-					 uig.chatpeer.buf, uig.chatpeer.end);
-		}
-		else {
-			(void)re_fprintf(stderr, "\nChat mode with callee - "
-					 "ESCAPE to quit\n");
-		}
-		ui_view_set(VIEW_CHAT);
-		return 0;
 
 	case 'P':
 		{

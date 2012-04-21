@@ -77,7 +77,7 @@ const struct vidsrc *vidsrc_find(const char *name)
 
 		struct vidsrc *vs = le->data;
 
-		if (name && 0 != str_casecmp(name, vs->name))
+		if (str_isset(name) && 0 != str_casecmp(name, vs->name))
 			continue;
 
 		return vs;

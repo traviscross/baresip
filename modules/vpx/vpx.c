@@ -5,6 +5,7 @@
  */
 #include <string.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #define VPX_CODEC_DISABLE_COMPAT 1
 #define VPX_DISABLE_CTRL_TYPECHECKS 1
@@ -30,6 +31,8 @@ enum {
 
 struct vidcodec_st {
 	struct vidcodec *vc;  /* base class */
+	struct vidcodec_prm encprm;
+	struct vidsz encsz;
 	struct mbuf *mb;
 	uint64_t picid;
 	int pts;
@@ -37,6 +40,7 @@ struct vidcodec_st {
 	vpx_codec_ctx_t dec;
 	vidcodec_send_h *sendh;
 	void *arg;
+	bool encup, decup;
 };
 
 /** Fragmentation information */
@@ -144,15 +148,20 @@ static void destructor(void *arg)
 {
 	struct vidcodec_st *st = arg;
 
-	vpx_codec_destroy(&st->enc);
-	vpx_codec_destroy(&st->dec);
+	if (st->encup)
+		vpx_codec_destroy(&st->enc);
+
+	if (st->decup)
+		vpx_codec_destroy(&st->dec);
+
 	mem_deref(st->mb);
 
 	mem_deref(st->vc);
 }
 
 
-static int init_encoder(struct vidcodec_st *st, struct vidcodec_prm *prm)
+static int open_encoder(struct vidcodec_st *st, struct vidcodec_prm *prm,
+			const struct vidsz *size)
 {
 	vpx_codec_enc_cfg_t cfg;
 	vpx_codec_err_t res;
@@ -162,14 +171,17 @@ static int init_encoder(struct vidcodec_st *st, struct vidcodec_prm *prm)
 	if (res)
 		return EPROTO;
 
-	cfg.rc_target_bitrate = prm->size.w * prm->size.h
-		* cfg.rc_target_bitrate
-		/ cfg.g_w / cfg.g_h;
-	cfg.g_w = prm->size.w;
-	cfg.g_h = prm->size.h;
+	cfg.g_w = size->w;
+	cfg.g_h = size->h;
+	cfg.rc_target_bitrate = prm->bitrate / 1024;
 	cfg.g_error_resilient = 1;
 
 	re_printf("VPX encoder bitrate: %d\n", cfg.rc_target_bitrate);
+
+	if (st->encup) {
+		vpx_codec_destroy(&st->enc);
+		st->encup = false;
+	}
 
 	res = vpx_codec_enc_init(&st->enc, &vpx_codec_vp8_cx_algo, &cfg, 0);
 	if (res) {
@@ -177,6 +189,9 @@ static int init_encoder(struct vidcodec_st *st, struct vidcodec_prm *prm)
 			   vpx_codec_err_to_string(res));
 		return EPROTO;
 	}
+
+	st->encup = true;
+	st->encsz = *size;
 
 	return 0;
 }
@@ -194,6 +209,8 @@ static int init_decoder(struct vidcodec_st *st)
 		return EPROTO;
 	}
 
+	st->decup = true;
+
 	st->mb = mbuf_alloc(512);
 	if (!st->mb)
 		return ENOMEM;
@@ -203,33 +220,31 @@ static int init_decoder(struct vidcodec_st *st)
 
 
 static int alloc(struct vidcodec_st **stp, struct vidcodec *vc,
-		 const char *name,
-		 struct vidcodec_prm *encp, struct vidcodec_prm *decp,
-		 const struct pl *sdp_fmtp,
+		 const char *name, struct vidcodec_prm *encp,
+		 const char *fmtp, vidcodec_enq_h *enqh,
 		 vidcodec_send_h *sendh, void *arg)
 {
 	struct vidcodec_st *st;
-	int err = 0;
+	int err;
 
-	(void)sdp_fmtp;
+	(void)fmtp;
+	(void)enqh;
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
 		return ENOMEM;
 
 	st->vc = mem_ref(vc);
+	st->encprm = *encp;
 	st->sendh = sendh;
 	st->arg = arg;
 
-	if (encp)
-		err |= init_encoder(st, encp);
-	if (decp)
-		err |= init_decoder(st);
+	err = init_decoder(st);
 	if (err)
 		goto out;
 
-	re_printf("video codec %s: encoder=%ux%u decoder=%ux%u\n", name,
-		  encp->size.w, encp->size.h, decp->size.w, decp->size.h);
+	re_printf("video codec %s: %d fps, %d bit/s\n", name,
+		  encp->fps, encp->bitrate);
 
  out:
 	if (err)
@@ -303,6 +318,13 @@ static int enc(struct vidcodec_st *st, bool update,
 	vpx_codec_err_t res;
 	vpx_enc_frame_flags_t flags = 0;
 	int err, i;
+
+	if (!st->encup || !vidsz_cmp(&st->encsz, &frame->size)) {
+
+		err = open_encoder(st, &st->encprm, &frame->size);
+		if (err)
+			return err;
+	}
 
 	++st->picid;
 
@@ -413,7 +435,7 @@ static int dec(struct vidcodec_st *st, struct vidframe *frame,
 static int module_init(void)
 {
 	return vidcodec_register(&vp8, 0, "VP8", "version=0",
-				 alloc, enc, dec);
+				 alloc, enc, NULL, dec, NULL);
 }
 
 

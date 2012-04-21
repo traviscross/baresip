@@ -14,9 +14,11 @@
 #include <re_dbg.h>
 
 
-/* NOTE: This is experimental code!
+/*
+ * Latest supported version: CELT 0.11.1
  *
- *   Tested with CELT version 0.9.0 from git://git.xiph.org/celt.git
+ *    http://www.celt-codec.org/downloads/
+ *
  *
  * References:
  *
@@ -122,9 +124,13 @@ static void decode_param(const struct pl *name, const struct pl *val,
 }
 
 
-static int decode_params(struct aucodec_st *st, const struct pl *params)
+static int decode_params(struct aucodec_st *st, const char *fmtp)
 {
-	fmt_param_apply(params, decode_param, st);
+	struct pl params;
+
+	pl_set_str(&params, fmtp);
+
+	fmt_param_apply(&params, decode_param, st);
 
 	return 0;
 }
@@ -132,7 +138,7 @@ static int decode_params(struct aucodec_st *st, const struct pl *params)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 	const uint32_t srate = aucodec_srate(ac);
@@ -159,8 +165,8 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		st->frame_size = DEFAULT_FRAME_SIZE;
 	}
 
-	if (sdp_fmtp)
-		decode_params(st, sdp_fmtp);
+	if (str_isset(fmtp))
+		decode_params(st, fmtp);
 
 	/* Common mode */
 	st->mode = celt_mode_create(srate, st->frame_size, NULL);
@@ -382,9 +388,9 @@ static int module_init(void)
 	int err;
 
 	err  = aucodec_register(&celtv[0], 0, "CELT", 48000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 	err |= aucodec_register(&celtv[1], 0, "CELT", 32000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 
 	return err;
 }

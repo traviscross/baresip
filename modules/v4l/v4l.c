@@ -7,7 +7,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <malloc.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -17,6 +16,7 @@
 #include <linux/videodev.h>
 #include <pthread.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 
 
@@ -173,8 +173,8 @@ static uint32_t rgb24_size(const struct vidsz *sz)
 
 
 static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
-		 struct media_ctx **ctx,
-		 struct vidsrc_prm *prm, const char *fmt,
+		 struct media_ctx **ctx, struct vidsrc_prm *prm,
+		 const struct vidsz *size, const char *fmt,
 		 const char *dev, vidsrc_frame_h *frameh,
 		 vidsrc_error_h *errorh, void *arg)
 {
@@ -182,10 +182,14 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	int err;
 
 	(void)ctx;
+	(void)prm;
 	(void)fmt;
 	(void)errorh;
 
-	if (!str_len(dev))
+	if (!stp || !size || !frameh)
+		return EINVAL;
+
+	if (!str_isset(dev))
 		dev = "/dev/video0";
 
 	st = mem_zalloc(sizeof(*st), destructor);
@@ -194,11 +198,11 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 
 	st->vs     = mem_ref(vs);
 	st->fd     = -1;
-	st->size   = prm->size;
+	st->size   = *size;
 	st->frameh = frameh;
 	st->arg    = arg;
 
-	DEBUG_NOTICE("open: %s %ux%u\n", dev, prm->size.w, prm->size.h);
+	DEBUG_NOTICE("open: %s %ix%i\n", dev, size->w, size->h);
 
 	err = vd_open(st, dev);
 	if (err)

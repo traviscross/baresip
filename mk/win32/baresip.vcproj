@@ -128,9 +128,6 @@
 				RelativePath="..\..\src\audio.c">
 			</File>
 			<File
-				RelativePath="..\..\src\aufile.c">
-			</File>
-			<File
 				RelativePath="..\..\src\aufilt.c">
 			</File>
 			<File

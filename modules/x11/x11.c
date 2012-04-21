@@ -13,6 +13,7 @@
 #include <sys/shm.h>
 #include <X11/extensions/XShm.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 
 
@@ -27,6 +28,7 @@ struct vidisp_st {
 	XShmSegmentInfo shm;
 	bool xshmat;
 	bool internal;
+	enum vidfmt pixfmt;
 };
 
 
@@ -102,15 +104,52 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 {
 	XWindowAttributes attrs;
 	XGCValues gcv;
-	size_t bufsz;
+	size_t bufsz, pixsz;
 	int err = 0;
 
-	bufsz = sz->w * sz->h * 4;
+	if (!XGetWindowAttributes(st->disp, st->win, &attrs)) {
+		re_printf("cant't get window attributes\n");
+		return EINVAL;
+	}
+
+	switch (attrs.depth) {
+
+	case 24:
+		st->pixfmt = VID_FMT_RGB32;
+		pixsz = 4;
+		break;
+
+	case 16:
+		st->pixfmt = VID_FMT_RGB565;
+		pixsz = 2;
+		break;
+
+	case 15:
+		st->pixfmt = VID_FMT_RGB555;
+		pixsz = 2;
+		break;
+
+	default:
+		re_printf("x11: colordepth not supported: %d\n",
+			  attrs.depth);
+		return ENOSYS;
+	}
+
+	bufsz = sz->w * sz->h * pixsz;
 
 	if (st->image) {
 		XDestroyImage(st->image);
 		st->image = NULL;
 	}
+
+	if (st->xshmat)
+		XShmDetach(st->disp, &st->shm);
+
+	if (st->shm.shmaddr != (char *)-1)
+		shmdt(st->shm.shmaddr);
+
+	if (st->shm.shmid >= 0)
+		shmctl(st->shm.shmid, IPC_RMID, NULL);
 
 	st->shm.shmid = shmget(IPC_PRIVATE, bufsz, IPC_CREAT | 0777);
 	if (st->shm.shmid < 0) {
@@ -148,11 +187,6 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 	if (!st->gc) {
 		re_printf("failed to create graphics context\n");
 		return ENOMEM;
-	}
-
-	if (!XGetWindowAttributes(st->disp, st->win, &attrs)) {
-		re_printf("cant't get window attributes\n");
-		return EINVAL;
 	}
 
 	if (st->xshmat) {
@@ -259,9 +293,9 @@ static int display(struct vidisp_st *st, const char *title,
 		XStoreName(st->disp, st->win, capt);
 	}
 
-	/* Convert from YUV420P to RGB32 */
+	/* Convert from YUV420P to RGB */
 
-	vidframe_init_buf(&frame_rgb, VID_FMT_RGB32, &frame->size,
+	vidframe_init_buf(&frame_rgb, st->pixfmt, &frame->size,
 			  (uint8_t *)st->shm.shmaddr);
 
 	vidconv(&frame_rgb, frame, 0);

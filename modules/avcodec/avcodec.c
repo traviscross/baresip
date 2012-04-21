@@ -4,6 +4,7 @@
  * Copyright (C) 2010 Creytiv.com
  */
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include <libavcodec/avcodec.h>
 #ifdef USE_X264
@@ -24,7 +25,7 @@ enum {
 
 static struct vidcodec *h263, *h264, *mpg4;
 static char h264_fmtp[256];
-static const uint8_t h264_level_idc = 0x0c;
+const uint8_t h264_level_idc = 0x0c;
 
 
 static void destructor(void *arg)
@@ -73,13 +74,29 @@ static void param_handler(const struct pl *name, const struct pl *val,
 }
 
 
-static int init_encoder(struct vidcodec_st *st, const struct vidcodec_prm *prm)
+static int init_encoder(struct vidcodec_st *st)
 {
-	st->enc.size = prm->size;
-
 	st->enc.codec = avcodec_find_encoder(st->codec_id);
 	if (!st->enc.codec)
 		return ENOENT;
+
+	return 0;
+}
+
+
+static int open_encoder(struct vidcodec_st *st, const struct vidcodec_prm *prm,
+			const struct vidsz *size)
+{
+	int err = 0;
+
+	if (st->enc.ctx) {
+		if (st->enc.ctx->codec)
+			avcodec_close(st->enc.ctx);
+		av_free(st->enc.ctx);
+	}
+
+	if (st->enc.pict)
+		av_free(st->enc.pict);
 
 #if LIBAVCODEC_VERSION_INT >= ((52<<16)+(92<<8)+0)
 	st->enc.ctx = avcodec_alloc_context3(st->enc.codec);
@@ -89,12 +106,14 @@ static int init_encoder(struct vidcodec_st *st, const struct vidcodec_prm *prm)
 
 	st->enc.pict = avcodec_alloc_frame();
 
-	if (!st->enc.ctx || !st->enc.pict)
-		return ENOMEM;
+	if (!st->enc.ctx || !st->enc.pict) {
+		err = ENOMEM;
+		goto out;
+	}
 
 	st->enc.ctx->bit_rate  = prm->bitrate;
-	st->enc.ctx->width     = prm->size.w;
-	st->enc.ctx->height    = prm->size.h;
+	st->enc.ctx->width     = size->w;
+	st->enc.ctx->height    = size->h;
 	st->enc.ctx->gop_size  = DEFAULT_GOP_SIZE;
 	st->enc.ctx->pix_fmt   = PIX_FMT_YUV420P;
 	st->enc.ctx->time_base.num = 1;
@@ -110,93 +129,40 @@ static int init_encoder(struct vidcodec_st *st, const struct vidcodec_prm *prm)
 	}
 
 #if LIBAVCODEC_VERSION_INT >= ((53<<16)+(8<<8)+0)
-	if (avcodec_open2(st->enc.ctx, st->enc.codec, NULL) < 0)
-		return ENOENT;
-#else
-	if (avcodec_open(st->enc.ctx, st->enc.codec) < 0)
-		return ENOENT;
-#endif
-
-	return 0;
-}
-
-
-#ifdef USE_X264
-static int init_encoder_x264(struct vidcodec_st *st, struct vidcodec_prm *prm)
-{
-	x264_param_t xprm;
-
-	st->enc.size = prm->size;
-
-	x264_param_default(&xprm);
-
-#if X264_BUILD >= 87
-	x264_param_apply_profile(&xprm, "baseline");
-#endif
-
-	xprm.i_level_idc = h264_level_idc;
-	xprm.i_width = prm->size.w;
-	xprm.i_height = prm->size.h;
-	xprm.i_csp = X264_CSP_I420;
-	xprm.i_fps_num = 1;
-	xprm.i_fps_den = prm->fps;
-	xprm.rc.i_bitrate = prm->bitrate / 1024; /* kbit/s */
-	xprm.rc.i_rc_method = X264_RC_CQP;
-	xprm.i_log_level = X264_LOG_WARNING;
-
-	/* ultrafast preset */
-	xprm.i_frame_reference = 1;
-	xprm.i_scenecut_threshold = 0;
-	xprm.b_deblocking_filter = 0;
-	xprm.b_cabac = 0;
-	xprm.i_bframe = 0;
-	xprm.analyse.intra = 0;
-	xprm.analyse.inter = 0;
-	xprm.analyse.b_transform_8x8 = 0;
-	xprm.analyse.i_me_method = X264_ME_DIA;
-	xprm.analyse.i_subpel_refine = 0;
-#if X264_BUILD >= 59
-	xprm.rc.i_aq_mode = 0;
-#endif
-	xprm.analyse.b_mixed_references = 0;
-	xprm.analyse.i_trellis = 0;
-#if X264_BUILD >= 63
-	xprm.i_bframe_adaptive = X264_B_ADAPT_NONE;
-#endif
-#if X264_BUILD >= 70
-	xprm.rc.b_mb_tree = 0;
-#endif
-
-	/* slice-based threading (--tune=zerolatency) */
-#if X264_BUILD >= 80
-	xprm.rc.i_lookahead = 0;
-	xprm.i_sync_lookahead = 0;
-	xprm.i_bframe = 0;
-#endif
-
-	/* put SPS/PPS before each keyframe */
-	xprm.b_repeat_headers = 1;
-
-#if X264_BUILD >= 82
-	/* needed for x264_encoder_intra_refresh() */
-	xprm.b_intra_refresh = 1;
-#endif
-
-	st->x264 = x264_encoder_open(&xprm);
-	if (!st->x264) {
-		DEBUG_WARNING("x264_encoder_open() failed\n");
-		return ENOENT;
+	if (avcodec_open2(st->enc.ctx, st->enc.codec, NULL) < 0) {
+		err = ENOENT;
+		goto out;
 	}
-
-	return 0;
-}
+#else
+	if (avcodec_open(st->enc.ctx, st->enc.codec) < 0) {
+		err = ENOENT;
+		goto out;
+	}
 #endif
 
+ out:
+	if (err) {
+		if (st->enc.ctx) {
+			if (st->enc.ctx->codec)
+				avcodec_close(st->enc.ctx);
+			av_free(st->enc.ctx);
+			st->enc.ctx = NULL;
+		}
 
-static int init_decoder(struct vidcodec_st *st, const struct vidcodec_prm *prm)
+		if (st->enc.pict) {
+			av_free(st->enc.pict);
+			st->enc.pict = NULL;
+		}
+	}
+	else
+		st->encsize = *size;
+
+	return err;
+}
+
+
+static int init_decoder(struct vidcodec_st *st)
 {
-	st->dec.size = prm->size;
-
 	st->dec.codec = avcodec_find_decoder(st->codec_id);
 	if (!st->dec.codec)
 		return ENOENT;
@@ -225,19 +191,22 @@ static int init_decoder(struct vidcodec_st *st, const struct vidcodec_prm *prm)
 
 
 static int alloc(struct vidcodec_st **stp, struct vidcodec *vc,
-		 const char *name,
-		 struct vidcodec_prm *encp, struct vidcodec_prm *decp,
-		 const struct pl *sdp_fmtp,
+		 const char *name, struct vidcodec_prm *encp,
+		 const char *fmtp, vidcodec_enq_h *enqh,
 		 vidcodec_send_h *sendh, void *arg)
 {
 	struct vidcodec_st *st;
-	int err;
+	int err = 0;
+
+	if (!encp)
+		return EINVAL;
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
 		return ENOMEM;
 
 	st->vc = mem_ref(vc);
+	st->encprm = *encp;
 
 	if (0 == str_casecmp(name, "H263"))
 		st->codec_id = CODEC_ID_H263;
@@ -262,34 +231,37 @@ static int alloc(struct vidcodec_st **stp, struct vidcodec *vc,
 	st->dec.sz_max = st->dec.mb->size;
 
 	if (st->codec_id == CODEC_ID_H264) {
-#ifdef USE_X264
-		err = init_encoder_x264(st, encp);
-#else
-		err = init_encoder(st, encp);
+#ifndef USE_X264
+		err = init_encoder(st);
 #endif
 	}
 	else
-		err = init_encoder(st, encp);
+		err = init_encoder(st);
 	if (err) {
 		DEBUG_WARNING("%s: could not init encoder\n", name);
 		goto out;
 	}
 
-	err = init_decoder(st, decp);
+	err = init_decoder(st);
 	if (err) {
 		DEBUG_WARNING("%s: could not init decoder\n", name);
 		goto out;
 	}
 
-	if (pl_isset(sdp_fmtp)) {
-		fmt_param_apply(sdp_fmtp, param_handler, st);
+	if (str_isset(fmtp)) {
+		struct pl sdp_fmtp;
+
+		pl_set_str(&sdp_fmtp, fmtp);
+
+		fmt_param_apply(&sdp_fmtp, param_handler, st);
 	}
 
+	st->enqh  = enqh;
 	st->sendh = sendh;
 	st->arg = arg;
 
-	re_printf("video codec %s: encoder=%ux%u decoder=%ux%u\n", name,
-		  encp->size.w, encp->size.h, decp->size.w, decp->size.h);
+	re_printf("video codec %s: %d fps, %d bit/s\n", name,
+		  encp->fps, encp->bitrate);
 
  out:
 	if (err)
@@ -334,7 +306,14 @@ static int enc(struct vidcodec_st *st, bool update,
 {
 	int i, err, ret;
 
-	/* todo: compare frame-size with enc-size */
+	if (!st->enc.ctx || !vidsz_cmp(&st->encsize, &frame->size)) {
+
+		err = open_encoder(st, &st->encprm, &frame->size);
+		if (err) {
+			DEBUG_WARNING("open_encoder: %s\n", strerror(err));
+			return err;
+		}
+	}
 
 	for (i=0; i<4; i++) {
 		st->enc.pict->data[i]     = frame->data[i];
@@ -507,6 +486,30 @@ static int dec_mpeg4(struct vidcodec_st *st, struct vidframe *frame,
 }
 
 
+static uint32_t packetization_mode(const char *fmtp)
+{
+	struct pl pl, mode;
+
+	if (!fmtp)
+		return 0;
+
+	pl_set_str(&pl, fmtp);
+
+	if (fmt_param_get(&pl, "packetization-mode", &mode))
+		return pl_u32(&mode);
+
+	return 0;
+}
+
+
+static bool h264_fmtp_cmp(const char *fmtp1, const char *fmtp2, void *data)
+{
+	(void)data;
+
+	return packetization_mode(fmtp1) == packetization_mode(fmtp2);
+}
+
+
 static int module_init(void)
 {
 	const uint8_t profile_idc = 0x42; /* baseline profile */
@@ -551,21 +554,22 @@ static int module_init(void)
 #else
 					 enc,
 #endif
-					 dec_h264);
+					 h264_nal_send,
+					 dec_h264, h264_fmtp_cmp);
 	}
 
 	if (avcodec_find_decoder(CODEC_ID_H263)) {
 
 		err |= vidcodec_register(&h263, "34", "H263",
 					 "F=1;CIF=1;CIF4=1",
-					 alloc, enc, dec_h263);
+					 alloc, enc, NULL, dec_h263, NULL);
 	}
 
 	if (avcodec_find_decoder(CODEC_ID_MPEG4)) {
 
 		err |= vidcodec_register(&mpg4, 0, "MP4V-ES",
 					 "profile-level-id=3",
-					 alloc, enc, dec_mpeg4);
+					 alloc, enc, NULL, dec_mpeg4, NULL);
 	}
 
 	return err;

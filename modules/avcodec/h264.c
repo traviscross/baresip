@@ -5,6 +5,7 @@
  */
 #include <string.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include <libavcodec/avcodec.h>
 #ifdef USE_X264
@@ -262,30 +263,36 @@ static int rtp_send_data(struct vidcodec_st *st,
 }
 
 
-static int h264_nal_send(struct vidcodec_st *st, uint8_t hdr,
-			 const uint8_t *buf, size_t size, bool last)
+int h264_nal_send(struct vidcodec_st *st, bool first, bool last,
+		  bool marker, uint32_t ihdr, const uint8_t *buf,
+		  size_t size, size_t maxsz)
 {
+	uint8_t hdr = (uint8_t)ihdr;
 	int err = 0;
 
-	if (size <= MAX_RTP_SIZE) {
-		err = rtp_send_data(st, &hdr, 1, buf, size, last);
+	if (first && last && size <= maxsz) {
+		err = rtp_send_data(st, &hdr, 1, buf, size, marker);
 	}
 	else {
 		uint8_t fu_hdr[2];
 		const uint8_t type = hdr & 0x1f;
 		const uint8_t nri  = hdr & 0x60;
-		const size_t sz = MAX_RTP_SIZE - 2;
+		const size_t sz = maxsz - 2;
 
 		fu_hdr[0] = nri | H264_NAL_FU_A;
-		fu_hdr[1] = 1<<7 | type;
+		fu_hdr[1] = first ? (1<<7 | type) : type;
+
 		while (size > sz) {
 			err |= rtp_send_data(st, fu_hdr, 2, buf, sz, false);
 			buf += sz;
 			size -= sz;
 			fu_hdr[1] &= ~(1 << 7);
 		}
-		fu_hdr[1] |= 1<<6;  /* end bit */
-		err |= rtp_send_data(st, fu_hdr, 2, buf, size, true);
+
+		if (last)
+			fu_hdr[1] |= 1<<6;  /* end bit */
+
+		err |= rtp_send_data(st, fu_hdr, 2, buf, size, marker && last);
 	}
 
 	return err;
@@ -309,7 +316,13 @@ int h264_packetize(struct vidcodec_st *st, struct mbuf *mb)
 			;
 
 		r1 = h264_find_startcode(r, end);
-		err |= h264_nal_send(st, r[0], r+1, r1-r-1, (r1 >= end));
+
+		if (st->enqh)
+			err |= st->enqh((r1 >= end), r[0], r+1, r1-r-1,
+					st->arg);
+		else
+			err |= h264_nal_send(st, true, true, (r1 >= end), r[0],
+					     r+1, r1-r-1, MAX_RTP_SIZE);
 		r = r1;
 	}
 
@@ -318,6 +331,80 @@ int h264_packetize(struct vidcodec_st *st, struct mbuf *mb)
 
 
 #ifdef USE_X264
+static int open_encoder_x264(struct vidcodec_st *st, struct vidcodec_prm *prm,
+			     const struct vidsz *size)
+{
+	x264_param_t xprm;
+
+	x264_param_default(&xprm);
+
+#if X264_BUILD >= 87
+	x264_param_apply_profile(&xprm, "baseline");
+#endif
+
+	xprm.i_level_idc = h264_level_idc;
+	xprm.i_width = size->w;
+	xprm.i_height = size->h;
+	xprm.i_csp = X264_CSP_I420;
+	xprm.i_fps_num = 1;
+	xprm.i_fps_den = prm->fps;
+	xprm.rc.i_bitrate = prm->bitrate / 1024; /* kbit/s */
+	xprm.rc.i_rc_method = X264_RC_CQP;
+	xprm.i_log_level = X264_LOG_WARNING;
+
+	/* ultrafast preset */
+	xprm.i_frame_reference = 1;
+	xprm.i_scenecut_threshold = 0;
+	xprm.b_deblocking_filter = 0;
+	xprm.b_cabac = 0;
+	xprm.i_bframe = 0;
+	xprm.analyse.intra = 0;
+	xprm.analyse.inter = 0;
+	xprm.analyse.b_transform_8x8 = 0;
+	xprm.analyse.i_me_method = X264_ME_DIA;
+	xprm.analyse.i_subpel_refine = 0;
+#if X264_BUILD >= 59
+	xprm.rc.i_aq_mode = 0;
+#endif
+	xprm.analyse.b_mixed_references = 0;
+	xprm.analyse.i_trellis = 0;
+#if X264_BUILD >= 63
+	xprm.i_bframe_adaptive = X264_B_ADAPT_NONE;
+#endif
+#if X264_BUILD >= 70
+	xprm.rc.b_mb_tree = 0;
+#endif
+
+	/* slice-based threading (--tune=zerolatency) */
+#if X264_BUILD >= 80
+	xprm.rc.i_lookahead = 0;
+	xprm.i_sync_lookahead = 0;
+	xprm.i_bframe = 0;
+#endif
+
+	/* put SPS/PPS before each keyframe */
+	xprm.b_repeat_headers = 1;
+
+#if X264_BUILD >= 82
+	/* needed for x264_encoder_intra_refresh() */
+	xprm.b_intra_refresh = 1;
+#endif
+
+	if (st->x264)
+		x264_encoder_close(st->x264);
+
+	st->x264 = x264_encoder_open(&xprm);
+	if (!st->x264) {
+		DEBUG_WARNING("x264_encoder_open() failed\n");
+		return ENOENT;
+	}
+
+	st->encsize = *size;
+
+	return 0;
+}
+
+
 int enc_x264(struct vidcodec_st *st, bool update,
 	     const struct vidframe *frame)
 {
@@ -325,6 +412,13 @@ int enc_x264(struct vidcodec_st *st, bool update,
 	x264_nal_t *nal;
 	int i_nal;
 	int i, err, ret;
+
+	if (!st->x264 || !vidsz_cmp(&st->encsize, &frame->size)) {
+
+		err = open_encoder_x264(st, &st->encprm, &frame->size);
+		if (err)
+			return err;
+	}
 
 	if (update) {
 #if X264_BUILD >= 95
@@ -376,10 +470,16 @@ int enc_x264(struct vidcodec_st *st, bool update,
 		if (nal[i].i_type == H264_NAL_SEI)
 			continue;
 
-		err = h264_nal_send(st, hdr,
-				    nal[i].p_payload + offset,
-				    nal[i].i_payload - offset,
-				    (i+1) == i_nal);
+		if (st->enqh)
+			err = st->enqh((i+1) == i_nal, hdr,
+				       nal[i].p_payload + offset,
+				       nal[i].i_payload - offset,
+				       st->arg);
+		else
+			err = h264_nal_send(st, true, true, (i+1)==i_nal, hdr,
+					    nal[i].p_payload + offset,
+					    nal[i].i_payload - offset,
+					    MAX_RTP_SIZE);
 	}
 
 	return err;

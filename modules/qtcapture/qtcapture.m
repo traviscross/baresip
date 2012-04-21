@@ -4,6 +4,7 @@
  * Copyright (C) 2010 Creytiv.com
  */
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include <QTKit/QTKit.h>
 
@@ -64,7 +65,7 @@ struct vidsrc_st {
 	if (!sess)
 		goto out;
 
-	if (str_len(name)) {
+	if (str_isset(name)) {
 		NSString *s = [NSString stringWithUTF8String:name];
 		dev = [QTCaptureDevice deviceWithUniqueID:s];
 		re_printf("qtcapture: using device: %s\n", name);
@@ -299,8 +300,8 @@ static void tmr_handler(void *arg)
 
 
 static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
-		 struct media_ctx **ctx,
-		 struct vidsrc_prm *prm, const char *fmt,
+		 struct media_ctx **ctx, struct vidsrc_prm *prm,
+		 const struct vidsz *size, const char *fmt,
 		 const char *dev, vidsrc_frame_h *frameh,
 		 vidsrc_error_h *errorh, void *arg)
 {
@@ -308,9 +309,12 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	int err;
 
 	(void)ctx;
+	(void)prm;
 	(void)fmt;
-	(void)dev;
 	(void)errorh;
+
+	if (!stp)
+		return EINVAL;
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
@@ -320,8 +324,8 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	st->frameh = frameh;
 	st->arg    = arg;
 
-	if (prm)
-		st->app_sz = prm->size;
+	if (size)
+		st->app_sz = *size;
 
 	err = lock_alloc(&st->lock);
 	if (err)

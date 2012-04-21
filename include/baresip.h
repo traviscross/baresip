@@ -9,14 +9,14 @@ extern "C" {
 #endif
 
 
-#include <rem.h>
-
-
 /* forward declarations */
 struct sa;
 struct sip_msg;
 struct sdp_media;
 struct sdp_session;
+struct vidframe;
+struct vidrect;
+struct vidsz;
 
 
 /** Defines the exit handler */
@@ -27,10 +27,6 @@ typedef void (exit_h)(int ret);
 
 /** Calculate the average of two numeric values */
 #define avg(a, b) ((a)+(b))/2
-
-/** Safe division macro */
-#define DIV(num, denom) (denom) ? ((num)/(denom)) : 0
-
 
 uint32_t calc_nsamp(uint32_t srate, int channels, uint16_t ptime);
 uint32_t calc_ptime(uint32_t srate, int channels, uint32_t nsamp);
@@ -69,9 +65,8 @@ static inline bool in_range(const struct range *rng, uint32_t val)
 	return rng ? (val >= rng->min && val <= rng->max) : false;
 }
 
-
 /** Core configuration */
-struct conf {
+struct config {
 	/** Input */
 	struct {
 		char device[64];       /**< Input device name */
@@ -86,18 +81,23 @@ struct conf {
 
 	/** Audio */
 	struct {
-		char device[64];       /**< Audio device name              */
+		char src_mod[16];      /**< Audio source module            */
+		char src_dev[64];      /**< Audio source device            */
+		char play_mod[16];     /**< Audio playback module          */
+		char play_dev[64];     /**< Audio playback device          */
 		struct range srate;    /**< Audio sampling rate in [Hz]    */
 		struct range channels; /**< Nr. of audio channels (1=mono) */
 		uint32_t aec_len;      /**< AEC Tail length in [ms]        */
 		struct range srate_play;/**< Sampling rates for player     */
 		struct range srate_src; /**< Sampling rates for source     */
+		bool src_first;        /**< Audio source opened first      */
 	} audio;
 
 	/** Video */
 	struct {
-		char device[64];       /**< Video device name             */
-		struct vidsz size;     /**< Video resolution              */
+		char src_mod[16];      /**< Video source module           */
+		char src_dev[64];      /**< Video source device           */
+		int width, height;     /**< Video resolution              */
 		uint32_t bitrate;      /**< Encoder bitrate in [bit/s]    */
 		uint32_t fps;          /**< Video framerate               */
 		char exclude[64];      /**< CSV-list of codecs to exclude */
@@ -115,8 +115,8 @@ struct conf {
 	} avt;
 };
 
+
 struct mod;
-extern struct conf config;
 
 /** Defines the configuration line handler */
 typedef int (confline_h)(const struct pl *addr);
@@ -158,15 +158,12 @@ struct media_ctx {
  * Audio Source
  */
 
-/** Audio formats */
-enum aufmt {AUFMT_S16LE, AUFMT_PCMA, AUFMT_PCMU};
-
 struct ausrc;
 struct ausrc_st;
 
 /** Audio Source parameters */
 struct ausrc_prm {
-	enum aufmt fmt;         /**< Audio format          */
+	int        fmt;         /**< Audio format (enum aufmt) */
 	uint32_t   srate;       /**< Sampling rate in [Hz] */
 	uint8_t    ch;          /**< Number of channels    */
 	uint32_t   frame_size;  /**< Frame size in samples */
@@ -198,7 +195,7 @@ struct auplay_st;
 
 /** Audio Player parameters */
 struct auplay_prm {
-	enum aufmt fmt;         /**< Audio format          */
+	int        fmt;         /**< Audio format (enum aufmt) */
 	uint32_t   srate;       /**< Sampling rate in [Hz] */
 	uint8_t    ch;          /**< Number of channels    */
 	uint32_t   frame_size;  /**< Frame size in samples */
@@ -427,9 +424,8 @@ struct vidsrc_st;
 
 /** Video Source parameters */
 struct vidsrc_prm {
-	struct vidsz size;      /**< Wanted picture size        */
-	enum vidorient orient;  /**< Wanted picture orientation */
-	int fps;                /**< Wanted framerate           */
+	int orient;       /**< Wanted picture orientation (enum vidorient) */
+	int fps;          /**< Wanted framerate                            */
 };
 
 typedef void (vidsrc_frame_h)(const struct vidframe *frame, void *arg);
@@ -437,6 +433,7 @@ typedef void (vidsrc_error_h)(int err, void *arg);
 
 typedef int  (vidsrc_alloc_h)(struct vidsrc_st **vsp, struct vidsrc *vs,
 			      struct media_ctx **ctx, struct vidsrc_prm *prm,
+			      const struct vidsz *size,
 			      const char *fmt, const char *dev,
 			      vidsrc_frame_h *frameh,
 			      vidsrc_error_h *errorh, void *arg);
@@ -470,8 +467,7 @@ typedef int  (vidisp_alloc_h)(struct vidisp_st **vp, struct vidisp_st *parent,
 			      const char *dev, vidisp_input_h *inputh,
 			      vidisp_resize_h *resizeh, void *arg);
 typedef int  (vidisp_update_h)(struct vidisp_st *st, bool fullscreen,
-			       enum vidorient orient,
-			       const struct vidrect *window);
+			       int orient, const struct vidrect *window);
 typedef int  (vidisp_disp_h)(struct vidisp_st *st, const char *title,
 			     const struct vidframe *frame);
 typedef void (vidisp_hide_h)(struct vidisp_st *st);
@@ -495,7 +491,7 @@ struct aucodec_prm {
 typedef int (aucodec_alloc_h)(struct aucodec_st **asp, struct aucodec *ac,
 			      struct aucodec_prm *encp,
 			      struct aucodec_prm *decp,
-			      const struct pl *sdp_fmtp);
+			      const char *fmtp);
 typedef int (aucodec_enc_h)(struct aucodec_st *s, struct mbuf *dst,
 			   struct mbuf *src);
 typedef int (aucodec_dec_h)(struct aucodec_st *s, struct mbuf *dst,
@@ -503,8 +499,8 @@ typedef int (aucodec_dec_h)(struct aucodec_st *s, struct mbuf *dst,
 
 int aucodec_register(struct aucodec **ap, const char *pt, const char *name,
 		     uint32_t srate, uint8_t ch, const char *fmtp,
-		     aucodec_alloc_h *alloch,
-		     aucodec_enc_h *ench, aucodec_dec_h *dech);
+		     aucodec_alloc_h *alloch, aucodec_enc_h *ench,
+		     aucodec_dec_h *dech, sdp_fmtp_cmp_h *cmph);
 const char *aucodec_pt(const struct aucodec *ac);
 const char *aucodec_name(const struct aucodec *ac);
 struct list *aucodec_list(void);
@@ -512,7 +508,7 @@ uint32_t aucodec_srate(const struct aucodec *ac);
 uint8_t  aucodec_ch(const struct aucodec *ac);
 int  aucodec_alloc(struct aucodec_st **sp, const char *name, uint32_t srate,
 		   int channels, struct aucodec_prm *enc_prm,
-		   struct aucodec_prm *dec_prm, const struct pl *sdp_fmtp);
+		   struct aucodec_prm *dec_prm, const char *fmtp);
 int aucodec_encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src);
 int aucodec_decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src);
 
@@ -526,26 +522,31 @@ struct vidcodec_st;    /* must "inherit" from struct vidcodec */
 
 /** Video Codec parameters */
 struct vidcodec_prm {
-	struct vidsz size;  /**< Video resolution           */
 	int fps;            /**< Video framerate            */
 	int bitrate;        /**< Encoder bitrate in [bit/s] */
 };
 
 typedef int (vidcodec_send_h)(bool marker, struct mbuf *mb, void *arg);
 
+typedef int (vidcodec_enq_h)(bool marker, const uint32_t hdr,
+			     const uint8_t *buf, size_t len, void *arg);
+
 typedef int (vidcodec_alloc_h)(struct vidcodec_st **sp, struct vidcodec *c,
 			       const char *name, struct vidcodec_prm *encp,
-			       struct vidcodec_prm *decp,
-			       const struct pl *sdp_fmtp,
+			       const char *fmtp, vidcodec_enq_h *enqh,
 			       vidcodec_send_h *sendh, void *arg);
 typedef int (vidcodec_enc_h)(struct vidcodec_st *s, bool update,
 			     const struct vidframe *frame);
+typedef int (vidcodec_pktize_h)(struct vidcodec_st *s, bool first, bool last,
+				bool marker, uint32_t hdr, const uint8_t *buf,
+				size_t len, size_t maxlen);
 typedef int (vidcodec_dec_h)(struct vidcodec_st *s, struct vidframe *frame,
 			     bool marker, struct mbuf *src);
 
-int vidcodec_register(struct vidcodec **cp, const char *pt, const char *name,
+int vidcodec_register(struct vidcodec **vp, const char *pt, const char *name,
 		      const char *fmtp, vidcodec_alloc_h *alloch,
-		      vidcodec_enc_h *ench, vidcodec_dec_h *dech);
+		      vidcodec_enc_h *ench, vidcodec_pktize_h *pktizeh,
+		      vidcodec_dec_h *dech, sdp_fmtp_cmp_h *cmph);
 const struct vidcodec *vidcodec_find(const char *name);
 const char *vidcodec_pt(const struct vidcodec *vc);
 const char *vidcodec_name(const struct vidcodec *vc);
@@ -572,7 +573,7 @@ void  video_mute(struct video *v, bool muted);
 void *video_view(const struct video *v);
 int   video_pip(struct video *v, const struct vidrect *rect);
 int   video_set_fullscreen(struct video *v, bool fs);
-int   video_set_orient(struct video *v, enum vidorient orient);
+int   video_set_orient(struct video *v, int orient);
 void  video_vidsrc_set_device(struct video *v, const char *dev);
 int   video_set_source(struct video *v, const char *name, const char *dev);
 

@@ -34,8 +34,10 @@ int sdes_decode_crypto(struct crypto *c, const char *val)
 
 	c->tag = pl_u32(&tag);
 
-	err = re_regex(key_prms.p, key_prms.l, "[^:]+:[^]+",
-		       &c->key_method, &c->key_info);
+	c->lifetime = c->mki = pl_null;
+	err = re_regex(key_prms.p, key_prms.l, "[^:]+:[^|]+[|]*[^|]*[|]*[^|]*",
+		       &c->key_method, &c->key_info,
+		       NULL, &c->lifetime, NULL, &c->mki);
 	if (err)
 		return err;
 

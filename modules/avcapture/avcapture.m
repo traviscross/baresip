@@ -4,6 +4,7 @@
  * Copyright (C) 2010 Creytiv.com
  */
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include <AVFoundation/AVFoundation.h>
 
@@ -287,8 +288,8 @@ static void destructor(void *arg)
 
 
 static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
-		 struct media_ctx **ctx,
-		 struct vidsrc_prm *prm, const char *fmt,
+		 struct media_ctx **ctx, struct vidsrc_prm *prm,
+		 const struct vidsz *size, const char *fmt,
 		 const char *dev, vidsrc_frame_h *frameh,
 		 vidsrc_error_h *errorh, void *arg)
 {
@@ -297,11 +298,12 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	int err = 0;
 
 	(void)ctx;
+	(void)prm;
 	(void)fmt;
 	(void)dev;
 	(void)errorh;
 
-	if (!prm)
+	if (!stp || !size)
 		return EINVAL;
 
 	st = mem_zalloc(sizeof(*st), destructor);
@@ -316,7 +318,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 
 	st->cap = [[avcap alloc] init:st
 				 dev:dev ? dev : "front"
-				 size:&prm->size];
+				 size:size];
 	if (!st->cap) {
 		err = ENODEV;
 		goto out;

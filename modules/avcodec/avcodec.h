@@ -22,7 +22,6 @@ struct vidcodec_st {
 		AVCodec *codec;
 		AVCodecContext *ctx;
 		AVFrame *pict;
-		struct vidsz size;
 		struct mbuf *mb;
 		size_t sz_max; /* todo: figure out proper buffer size */
 	} enc, dec;
@@ -50,9 +49,16 @@ struct vidcodec_st {
 		} h264;
 	} u;
 
+	struct vidcodec_prm encprm;
+	struct vidsz encsize;
+	vidcodec_enq_h *enqh;
 	vidcodec_send_h *sendh;
 	void *arg;
 };
+
+
+extern const uint8_t h264_level_idc;
+
 
 int decode_sdpparam_h263(struct vidcodec_st *st, const struct pl *name,
 			 const struct pl *val);
@@ -61,6 +67,9 @@ int decode_sdpparam_h264(struct vidcodec_st *st, const struct pl *name,
 int h263_packetize(struct vidcodec_st *st, struct mbuf *mb);
 int h264_packetize(struct vidcodec_st *st, struct mbuf *mb);
 int h264_decode(struct vidcodec_st *st, struct mbuf *src);
+int h264_nal_send(struct vidcodec_st *st, bool first, bool last,
+		  bool marker, uint32_t hdr, const uint8_t *buf,
+		  size_t len, size_t maxlen);
 #ifdef USE_X264
 int enc_x264(struct vidcodec_st *st, bool update,
 	     const struct vidframe *frame);

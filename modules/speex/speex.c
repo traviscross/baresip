@@ -199,7 +199,7 @@ static void param_handler(const struct pl *name, const struct pl *val,
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 	const uint32_t srate = aucodec_srate(ac);
@@ -261,8 +261,13 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		DEBUG_WARNING("SPEEX_GET_FRAME_SIZE: %d\n", ret);
 	}
 
-	if (sdp_fmtp)
-		fmt_param_apply(sdp_fmtp, param_handler, st);
+	if (str_isset(fmtp)) {
+		struct pl params;
+
+		pl_set_str(&params, fmtp);
+
+		fmt_param_apply(&params, param_handler, st);
+	}
 
 	/* Decoder */
 	st->dec.st = speex_decoder_init((SpeexMode *)mode);
@@ -448,19 +453,19 @@ static int speex_init(void)
 
 	/* Stereo Speex */
 	err  = aucodec_register(&speexv[0], NULL, "speex", 32000, 2,
-				speex_fmtp, alloc, enc, dec);
+				speex_fmtp, alloc, enc, dec, NULL);
 	err |= aucodec_register(&speexv[1], NULL, "speex", 16000, 2,
-				speex_fmtp, alloc, enc, dec);
+				speex_fmtp, alloc, enc, dec, NULL);
 	err |= aucodec_register(&speexv[2], NULL, "speex",  8000, 2,
-				speex_fmtp, alloc, enc, dec);
+				speex_fmtp, alloc, enc, dec, NULL);
 
 	/* Standard Speex */
 	err |= aucodec_register(&speexv[3], NULL, "speex", 32000, 1,
-				speex_fmtp, alloc, enc, dec);
+				speex_fmtp, alloc, enc, dec, NULL);
 	err |= aucodec_register(&speexv[4], NULL, "speex", 16000, 1,
-				speex_fmtp, alloc, enc, dec);
+				speex_fmtp, alloc, enc, dec, NULL);
 	err |= aucodec_register(&speexv[5], NULL, "speex",  8000, 1,
-				speex_fmtp, alloc, enc, dec);
+				speex_fmtp, alloc, enc, dec, NULL);
 
 	return err;
 }

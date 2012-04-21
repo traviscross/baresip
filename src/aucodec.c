@@ -37,13 +37,14 @@ static void destructor(void *arg)
  * @param alloch Allocation handler
  * @param ench   Encode handler
  * @param dech   Decode handler
+ * @param cmph   SDP compare handler
  *
  * @return 0 if success, otherwise errorcode
  */
 int aucodec_register(struct aucodec **ap, const char *pt, const char *name,
 		     uint32_t srate, uint8_t ch, const char *fmtp,
 		     aucodec_alloc_h *alloch, aucodec_enc_h *ench,
-		     aucodec_dec_h *dech)
+		     aucodec_dec_h *dech, sdp_fmtp_cmp_h *cmph)
 {
 	struct aucodec *ac;
 
@@ -64,6 +65,7 @@ int aucodec_register(struct aucodec **ap, const char *pt, const char *name,
 	ac->alloch = alloch;
 	ac->ench   = ench;
 	ac->dech   = dech;
+	ac->cmph   = cmph;
 
 	(void)re_printf("aucodec: %s %uHz %uch\n", name, srate, ch);
 
@@ -135,13 +137,13 @@ struct list *aucodec_list(void)
  * @param channels  Audio Codec channels
  * @param encp      Optional encoding parameters
  * @param decp      Optional decoding parameters
- * @param sdp_fmtp  Optional SDP format parameters
+ * @param fmtp      Optional SDP format parameters
  *
  * @return 0 if success, otherwise errorcode
  */
 int aucodec_alloc(struct aucodec_st **sp, const char *name, uint32_t srate,
 		  int channels, struct aucodec_prm *encp,
-		  struct aucodec_prm *decp, const struct pl *sdp_fmtp)
+		  struct aucodec_prm *decp, const char *fmtp)
 {
 	struct aucodec *ac;
 
@@ -149,7 +151,7 @@ int aucodec_alloc(struct aucodec_st **sp, const char *name, uint32_t srate,
 	if (!ac)
 		return ENOENT;
 
-	return ac->alloch(sp, ac, encp, decp, sdp_fmtp);
+	return ac->alloch(sp, ac, encp, decp, fmtp);
 }
 
 

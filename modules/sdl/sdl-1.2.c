@@ -6,6 +6,7 @@
 #include <SDL/SDL.h>
 #include <string.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "sdl.h"
 
@@ -222,12 +223,6 @@ static int display(struct vidisp_st *st, const char *title,
 		       const struct vidframe *frame)
 {
 	SDL_Rect rect;
-
-#if 0
-	re_printf("display: valid=%d %u x %u\n", frame->valid,
-		  frame->size.w, frame->size.h);
-	vidframe_print(frame);
-#endif
 
 	if (!st || !sdl.open)
 		return EINVAL;

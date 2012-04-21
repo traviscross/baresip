@@ -6,6 +6,6 @@
 
 MOD		:= celt
 $(MOD)_SRCS	+= celt.c
-$(MOD)_LFLAGS	+= -lcelt0
+$(MOD)_LFLAGS	+= `pkg-config --libs celt`
 
 include mk/mod.mk

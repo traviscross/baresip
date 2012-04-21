@@ -13,6 +13,7 @@
 #include <io.h>
 #endif
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "core.h"
 
@@ -43,7 +44,7 @@ static char dns_domain[64] = "domain";
 
 
 /** Core Run-time Configuration - populated from config file */
-struct conf config = {
+struct config config = {
 	/* Input */
 	{
 		"/dev/event0",
@@ -58,18 +59,20 @@ struct conf config = {
 
 	/** Audio */
 	{
-		"",
+		"","",
+		"","",
 		{8000, 48000},
 		{1, 2},
 		0,
 		{0, 0},
 		{0, 0},
+		false,
 	},
 
 	/** Video */
 	{
-		"",
-		{352, 288},
+		"", "",
+		352, 288,
 		384000,
 		25,
 		"",
@@ -175,6 +178,7 @@ static int conf_write_template(const char *file)
 	(void)re_fprintf(f, "#    ;outbound=sip:primary.example.com\n");
 	(void)re_fprintf(f, "#    ;regint=3600\n");
 	(void)re_fprintf(f, "#    ;sipnat={outbound}\n");
+	(void)re_fprintf(f, "#    ;auth_user=username\n");
 	(void)re_fprintf(f, "#    ;medianat={stun,turn,ice}\n");
 	(void)re_fprintf(f, "#    ;rtpkeep={zero,stun,dyna,rtcp}\n");
 	(void)re_fprintf(f, "#    ;stunserver="
@@ -265,7 +269,8 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "#sip_listen\t\t127.0.0.1:5050\n");
 
 	(void)re_fprintf(f, "\n# Audio\n");
-	(void)re_fprintf(f, "audio_dev\t\t%s\n", config.audio.device);
+	(void)re_fprintf(f, "#audio_player\t\talsa,default\n");
+	(void)re_fprintf(f, "#audio_source\t\talsa,default\n");
 	(void)re_fprintf(f, "audio_srate\t\t%u-%u\n", config.audio.srate.min,
 			 config.audio.srate.max);
 	(void)re_fprintf(f, "audio_channels\t\t%u-%u\n",
@@ -274,9 +279,9 @@ static int conf_write_config_template(const char *file)
 
 #ifdef USE_VIDEO
 	(void)re_fprintf(f, "\n# Video\n");
-	(void)re_fprintf(f, "video_dev\t\t%s\n", config.video.device);
-	(void)re_fprintf(f, "video_size\t\t%ux%u\n", config.video.size.w,
-			 config.video.size.h);
+	(void)re_fprintf(f, "#video_source\t\tv4l2,/dev/video0\n");
+	(void)re_fprintf(f, "video_size\t\t%dx%d\n", config.video.width,
+			 config.video.height);
 	(void)re_fprintf(f, "video_bitrate\t\t%u\n", config.video.bitrate);
 	(void)re_fprintf(f, "video_fps\t\t%u\n", config.video.fps);
 	(void)re_fprintf(f, "#video_selfview\t\twindow # {window,pip}\n");
@@ -552,6 +557,28 @@ static int conf_get_range(struct conf *conf, const char *name,
 }
 
 
+static int conf_get_csv(struct conf *conf, const char *name,
+			char *str1, size_t sz1, char *str2, size_t sz2)
+{
+	struct pl r, pl1, pl2 = pl_null;
+	int err;
+
+	err = conf_get(conf, name, &r);
+	if (err)
+		return err;
+
+	err = re_regex(r.p, r.l, "[^,]+,[^]*", &pl1, &pl2);
+	if (err)
+		return err;
+
+	(void)pl_strcpy(&pl1, str1, sz1);
+	if (pl_isset(&pl2))
+		(void)pl_strcpy(&pl2, str2, sz2);
+
+	return 0;
+}
+
+
 static int get_video_size(struct conf *conf, const char *name,
 			  struct vidsz *sz)
 {
@@ -608,8 +635,9 @@ static int dns_server_handler(const struct pl *pl, void *arg)
 
 static int config_parse(struct conf *conf)
 {
-	struct pl pollm;
+	struct pl pollm, audev = pl_null, as, ap;
 	enum poll_method method;
+	struct vidsz size = {0, 0};
 	uint32_t v;
 	int err = 0;
 
@@ -638,18 +666,41 @@ static int config_parse(struct conf *conf)
 			   sizeof(config.sip.local));
 
 	/* Audio */
-	(void)conf_get_str(conf, "audio_dev", config.audio.device,
-			   sizeof(config.audio.device));
+	(void)conf_get(conf, "audio_dev", &audev);
+
+	if (conf_get_csv(conf, "audio_player",
+			 config.audio.play_mod, sizeof(config.audio.play_mod),
+			 config.audio.play_dev,
+			 sizeof(config.audio.play_dev))) {
+		(void)pl_strcpy(&audev, config.audio.play_dev,
+				sizeof(config.audio.play_dev));
+	}
+
+	if (conf_get_csv(conf, "audio_source",
+			 config.audio.src_mod, sizeof(config.audio.src_mod),
+			 config.audio.src_dev, sizeof(config.audio.src_dev))) {
+		(void)pl_strcpy(&audev, config.audio.src_dev,
+				sizeof(config.audio.src_dev));
+	}
+
 	(void)conf_get_range(conf, "audio_srate", &config.audio.srate);
 	(void)conf_get_range(conf, "audio_channels", &config.audio.channels);
 	(void)conf_get_u32(conf, "audio_aec_length", &config.audio.aec_len);
 	(void)conf_get_range(conf, "ausrc_srate", &config.audio.srate_src);
 	(void)conf_get_range(conf, "auplay_srate", &config.audio.srate_play);
 
+	if (0 == conf_get(conf, "audio_source", &as) &&
+	    0 == conf_get(conf, "audio_player", &ap))
+		config.audio.src_first = as.p < ap.p;
+
 	/* Video */
-	(void)conf_get_str(conf, "video_dev", config.video.device,
-			   sizeof(config.video.device));
-	(void)get_video_size(conf, "video_size", &config.video.size);
+	(void)conf_get_csv(conf, "video_source",
+			   config.video.src_mod, sizeof(config.video.src_mod),
+			   config.video.src_dev, sizeof(config.video.src_dev));
+	if (0 == get_video_size(conf, "video_size", &size)) {
+		config.video.width  = size.w;
+		config.video.height = size.h;
+	}
 	(void)conf_get_u32(conf, "video_bitrate", &config.video.bitrate);
 	(void)conf_get_u32(conf, "video_fps", &config.video.fps);
 	(void)conf_get_str(conf, "video_exclude", config.video.exclude,

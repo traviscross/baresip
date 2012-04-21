@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include <mpg123.h>
 #include "rst.h"

@@ -65,12 +65,12 @@ static void destructor(void *arg)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 	int err = 0;
 
-	(void)sdp_fmtp;
+	(void)fmtp;
 
 	st = mem_alloc(sizeof(*st), destructor);
 	if (!st)
@@ -174,7 +174,7 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 static int module_init(void)
 {
 	return aucodec_register(&g722, "9", "G722", 8000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 }
 
 

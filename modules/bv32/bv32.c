@@ -47,13 +47,13 @@ static void destructor(void *arg)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 
 	(void)encp;
 	(void)decp;
-	(void)sdp_fmtp;
+	(void)fmtp;
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
@@ -136,7 +136,7 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 static int module_init(void)
 {
 	return aucodec_register(&bv32, 0, "BV32", 16000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 }
 
 

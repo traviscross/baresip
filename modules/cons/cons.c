@@ -18,6 +18,8 @@ enum {CONS_PORT = 5555};
 struct ui_st {
 	struct ui *ui; /* base class */
 	struct udp_sock *us;
+	struct tcp_sock *ts;
+	struct tcp_conn *tc;
 	struct mbuf mb;
 	struct mbuf mbr;
 	ui_input_h *h;
@@ -81,9 +83,65 @@ static void cons_destructor(void *arg)
 	mbuf_reset(&st->mb);
 	mbuf_reset(&st->mbr);
 	mem_deref(st->us);
+	mem_deref(st->tc);
+	mem_deref(st->ts);
+
 	mem_deref(st->ui);
 
 	cons_cur = NULL;
+}
+
+
+static int tcp_write_handler(const char *p, size_t size, void *arg)
+{
+	struct ui_st *st = arg;
+	struct mbuf mb;
+
+	mb.buf = (uint8_t *)p;
+	mb.pos = 0;
+	mb.end = mb.size = size;
+
+	return tcp_send(st->tc, &mb);
+}
+
+
+static void tcp_recv_handler(struct mbuf *mb, void *arg)
+{
+	struct ui_st *st = arg;
+	struct re_printf pf;
+
+	pf.vph = tcp_write_handler;
+	pf.arg = st;
+
+	while (mbuf_get_left(mb) > 0) {
+
+		const char key = mbuf_read_u8(mb);
+
+		st->h(key, &pf, st->arg);
+	}
+}
+
+
+static void tcp_close_handler(int err, void *arg)
+{
+	struct ui_st *st = arg;
+
+	(void)err;
+
+	st->tc = mem_deref(st->tc);
+}
+
+
+static void tcp_conn_handler(const struct sa *peer, void *arg)
+{
+	struct ui_st *st = arg;
+
+	(void)peer;
+
+	/* only one connection allowed */
+	st->tc = mem_deref(st->tc);
+	(void)tcp_accept(&st->tc, st->ts, NULL, tcp_recv_handler,
+			 tcp_close_handler, st);
 }
 
 
@@ -117,6 +175,10 @@ static int cons_alloc(struct ui_st **stp, struct ui_prm *prm,
 	if (err)
 		goto out;
 	err = udp_listen(&st->us, &local, udp_recv, st);
+	if (err)
+		goto out;
+
+	err = tcp_listen(&st->ts, &local, tcp_conn_handler, st);
 	if (err)
 		goto out;
 

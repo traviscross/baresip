@@ -10,6 +10,7 @@
 #include <alsa/asoundlib.h>
 #include <pthread.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "alsa.h"
 
@@ -86,7 +87,7 @@ int alsa_src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	(void)ctx;
 	(void)errh;
 
-	if (!str_len(device))
+	if (!str_isset(device))
 		device = alsa_dev;
 
 	st = mem_zalloc(sizeof(*st), ausrc_destructor);

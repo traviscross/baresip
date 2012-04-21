@@ -2,7 +2,7 @@ README
 ------
 
 Baresip is a portable and modular SIP User-Agent with audio and video support
-Copyright (c) 2010 - 2011 Creytiv.com
+Copyright (c) 2010 - 2012 Creytiv.com
 
 Distributed under BSD license
 
@@ -26,6 +26,7 @@ avcapture     Video source using iOS AVFoundation video capture
 avcodec       Video codec using FFmpeg
 avformat      Video source using FFmpeg libavformat
 bv32          BroadVoice32 audio codec
+cairo         Cairo video source
 celt          CELT audio codec
 cons          UDP console
 coreaudio     Apple Coreaudio driver
@@ -39,6 +40,7 @@ ice           ICE protocol for NAT Traversal
 ilbc          iLBC audio codec
 l16           L16 audio codec
 mda           Symbian Mediaserver audio driver
+natbd         NAT Behavior Discovery Module
 opengl        OpenGL video output
 opensles      OpenSLES audio driver
 opus          OPUS Interactive audio codec

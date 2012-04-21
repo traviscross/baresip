@@ -28,7 +28,6 @@ MACRO         HAVE_UNISTD_H
 SOURCEPATH    ..\..\src
 SOURCE        aucodec.c
 SOURCE        audio.c
-SOURCE        aufile.c
 SOURCE        aufilt.c
 SOURCE        auloop.c
 SOURCE        auplay.c
@@ -47,7 +46,6 @@ SOURCE        play.c
 SOURCE        rtpkeep.c
 SOURCE        sipreq.c
 SOURCE        stream.c
-SOURCE        stub.cpp
 SOURCE        ua.c
 SOURCE        ui.c
 SOURCE        uuid.c

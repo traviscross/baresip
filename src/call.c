@@ -202,8 +202,9 @@ static void call_stream_start(struct call *call, bool active)
 					 sc->params);
 		err |= video_decoder_set(call->video, sc->data, sc->pt);
 		if (!err) {
-			err = video_start(call->video, NULL,
-					  config.video.device, call->peer_uri);
+			err = video_start(call->video, config.video.src_mod,
+					  config.video.src_dev,
+					  call->peer_uri);
 		}
 		if (err) {
 			DEBUG_WARNING("video stream: %s\n", strerror(err));
@@ -997,7 +998,7 @@ void call_enable_vumeter(struct call *call, bool en)
  * Send a DTMF digit to the peer
  *
  * @param call  Call object
- * @param key   DTMF digit to send
+ * @param key   DTMF digit to send (0x00 for key release)
  *
  * @return 0 if success, otherwise errorcode
  */

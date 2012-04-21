@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "core.h"
 
@@ -106,18 +107,17 @@ static int vidcodec_send_handler(bool marker, struct mbuf *mb, void *arg)
 }
 
 
-static int enable_codec(struct video_loop *vl, const struct vidsz *sz)
+static int enable_codec(struct video_loop *vl)
 {
 	struct vidcodec_prm prm;
 	int err;
 
-	prm.size    = *sz;
 	prm.fps     = config.video.fps;
 	prm.bitrate = config.video.bitrate;
 
 	/* Use the first video codec */
 	err = vidcodec_alloc(&vl->codec, vidcodec_name(vidcodec_find(NULL)),
-			     &prm, &prm, NULL, vidcodec_send_handler, vl);
+			     &prm, NULL, NULL, vidcodec_send_handler, vl);
 	if (err) {
 		DEBUG_WARNING("alloc encoder: %s\n", strerror(err));
 		return err;
@@ -167,24 +167,24 @@ static void timeout_bw(void *arg)
 
 static int vsrc_reopen(struct video_loop *vl, const struct vidsz *sz)
 {
-	struct vidsrc *vs = (struct vidsrc *)vidsrc_find(NULL);
+	struct vidsrc *vs;
 	struct vidsrc_prm prm;
 	int err;
 
+	vs = (struct vidsrc *)vidsrc_find(config.video.src_mod);
 	if (!vs)
 		return ENOENT;
 
-	(void)re_printf("%s: open video source: %u x %u\n",
-			vs->name, sz->w, sz->h);
+	(void)re_printf("%s,%s: open video source: %u x %u\n",
+			vs->name, config.video.src_dev, sz->w, sz->h);
 
-	prm.size   = *sz;
 	prm.orient = VIDORIENT_PORTRAIT;
 	prm.fps    = config.video.fps;
 
 	vl->vsrc = mem_deref(vl->vsrc);
 
-	err = vs->alloch(&vl->vsrc, vs, NULL, &prm, NULL,
-			  config.video.device, vidsrc_frame_handler,
+	err = vs->alloch(&vl->vsrc, vs, NULL, &prm, sz, NULL,
+			  config.video.src_dev, vidsrc_frame_handler,
 			  NULL, vl);
 	if (err) {
 		DEBUG_WARNING("vidsrc %s failed: %s\n",
@@ -242,6 +242,7 @@ static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 void video_loop_test(bool stop)
 {
 	static struct video_loop *vl = NULL;
+	struct vidsz size;
 	int err;
 
 	if (stop) {
@@ -251,22 +252,25 @@ void video_loop_test(bool stop)
 		return;
 	}
 
+	size.w = config.video.width;
+	size.h = config.video.height;
+
 	if (vl) {
 		if (vl->codec)
 			vl->codec = mem_deref(vl->codec);
 		else
-			(void)enable_codec(vl, &config.video.size);
+			(void)enable_codec(vl);
 
 		(void)re_printf("%sabled codec: %s\n",
 				vl->codec ? "En" : "Dis",
 				vidcodec_name(vidcodec_get(vl->codec)));
 	}
 	else {
-		(void)re_printf("Enable video-loop on %s: %u x %u\n",
-				config.video.device,
-				config.video.size.w, config.video.size.h);
+		(void)re_printf("Enable video-loop on %s,%s: %u x %u\n",
+				config.video.src_mod, config.video.src_dev,
+				size.w, size.h);
 
-		err = video_loop_alloc(&vl, &config.video.size);
+		err = video_loop_alloc(&vl, &size);
 		if (err) {
 			DEBUG_WARNING("vidloop alloc: %s\n", strerror(err));
 		}

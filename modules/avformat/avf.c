@@ -8,6 +8,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #define FF_API_OLD_METADATA 0
 #include <libavformat/avformat.h>
@@ -68,8 +69,13 @@ static void destructor(void *arg)
 	if (st->ctx && st->ctx->codec)
 		avcodec_close(st->ctx);
 
-	if (st->ic)
+	if (st->ic) {
+#if LIBAVFORMAT_VERSION_INT >= ((53<<16) + (26<<8) + 0)
+		avformat_close_input(&st->ic);
+#else
 		av_close_input_file(st->ic);
+#endif
+	}
 
 	mem_deref(st->vs);
 }
@@ -188,8 +194,8 @@ static void *read_thread(void *data)
 
 
 static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
-		 struct media_ctx **mctx,
-		 struct vidsrc_prm *prm, const char *fmt,
+		 struct media_ctx **mctx, struct vidsrc_prm *prm,
+		 const struct vidsz *size, const char *fmt,
 		 const char *dev, vidsrc_frame_h *frameh,
 		 vidsrc_error_h *errorh, void *arg)
 {
@@ -202,7 +208,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	(void)mctx;
 	(void)errorh;
 
-	if (!frameh)
+	if (!stp || !size || !frameh)
 		return EINVAL;
 
 	st = mem_zalloc(sizeof(*st), destructor);
@@ -210,11 +216,11 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 		return ENOMEM;
 
 	st->vs     = mem_ref(vs);
+	st->app_sz = *size;
 	st->frameh = frameh;
 	st->arg    = arg;
 
 	if (prm) {
-		st->app_sz = prm->size;
 		st->fps    = prm->fps;
 	}
 	else {
@@ -237,8 +243,8 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 
 	prms.time_base          = (AVRational){1, st->fps};
 	prms.channels           = 1;
-	prms.width              = prm ? prm->size.w : 0;
-	prms.height             = prm ? prm->size.h : 0;
+	prms.width              = size->w;
+	prms.height             = size->h;
 	prms.pix_fmt            = PIX_FMT_YUV420P;
 	prms.channel            = 0;
 
@@ -251,7 +257,13 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 		goto out;
 	}
 
-	if (av_find_stream_info(st->ic) < 0) {
+#if LIBAVFORMAT_VERSION_INT >= ((53<<16) + (4<<8) + 0)
+	ret = avformat_find_stream_info(st->ic, NULL);
+#else
+	ret = av_find_stream_info(st->ic);
+#endif
+
+	if (ret < 0) {
 		re_printf("%s: no stream info\n", dev);
 		err = ENOENT;
 		goto out;
@@ -284,7 +296,13 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 				err = ENOENT;
 				goto out;
 			}
-			if (avcodec_open(ctx, st->codec) < 0) {
+
+#if LIBAVCODEC_VERSION_INT >= ((53<<16)+(8<<8)+0)
+			ret = avcodec_open2(ctx, st->codec, NULL);
+#else
+			ret = avcodec_open(ctx, st->codec);
+#endif
+			if (ret < 0) {
 				err = ENOENT;
 				goto out;
 			}

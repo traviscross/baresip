@@ -69,7 +69,7 @@ const struct auplay *auplay_find(const char *name)
 
 		struct auplay *ap = le->data;
 
-		if (name && 0 != str_casecmp(name, ap->name))
+		if (str_isset(name) && 0 != str_casecmp(name, ap->name))
 			continue;
 
 		return ap;

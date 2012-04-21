@@ -104,9 +104,6 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 }
 
 
-/*
- * src=NULL means no speech
- */
 static int enc(struct aufilt_st *st, struct mbuf *mb)
 {
 	int is_speech = 1;

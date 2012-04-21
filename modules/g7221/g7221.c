@@ -27,6 +27,22 @@ struct aucodec_st {
 static struct aucodec *g7221[2];
 
 
+static uint32_t fmtp_bitrate(const char *fmtp)
+{
+	struct pl pl, br;
+
+	if (!fmtp)
+		return 0;
+
+	pl_set_str(&pl, fmtp);
+
+	if (fmt_param_get(&pl, "bitrate", &br))
+		return pl_u32(&br);
+
+	return 0;
+}
+
+
 static void destructor(void *arg)
 {
 	struct aucodec_st *st = arg;
@@ -37,18 +53,24 @@ static void destructor(void *arg)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
-	struct pl br;
 	int bitrate = DEFAULT_BITRATE;
 	int err = 0;
 
 	(void)encp;
 	(void)decp;
 
-	if (fmt_param_get(sdp_fmtp, "bitrate", &br)) {
-		bitrate = pl_u32(&br);
+	if (str_isset(fmtp)) {
+
+		struct pl sdp_fmtp, br;
+
+		pl_set_str(&sdp_fmtp, fmtp);
+
+		if (fmt_param_get(&sdp_fmtp, "bitrate", &br)) {
+			bitrate = pl_u32(&br);
+		}
 	}
 
 	st = mem_alloc(sizeof(*st), destructor);
@@ -79,6 +101,7 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 
 static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
+	struct mbuf *mb;
 	size_t n;
 	int len;
 
@@ -89,9 +112,31 @@ static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 			return err;
 	}
 
+#ifdef G722_PCM_SHIFT
+	mb = mbuf_alloc(mbuf_get_left(src));
+	if (!mb)
+		return ENOMEM;
+
+	while (mbuf_get_left(src) >= 2) {
+
+		int16_t sample;
+
+		sample = mbuf_read_u16(src);
+		(void)mbuf_write_u16(mb, sample>>1);
+	}
+
+	mbuf_set_pos(mb, 0);
+
+	src = mb;
+#else
+	mb = NULL;
+#endif
+
 	n = mbuf_get_left(src);
 	len = g722_1_encode(&st->enc, mbuf_buf(dst),
 			    (int16_t *)mbuf_buf(src), (int)n/2);
+	mbuf_advance(src, n);
+	mem_deref(mb);
 	if (len <= 0) {
 		re_printf("g722_encode: len=%d\n", len);
 	}
@@ -99,7 +144,6 @@ static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 		return EBADMSG;
 	}
 
-	mbuf_advance(src, n);
 	mbuf_set_end(dst, dst->end + len);
 
 	return 0;
@@ -110,6 +154,7 @@ static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
 	const size_t n = sizeof(uint16_t) * st->dec.frame_size;
+	size_t start;
 	int nsamp;
 
 	/* Make sure there is enough space in the buffer */
@@ -136,7 +181,32 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 	if (nsamp > 0)
 		mbuf_set_end(dst, dst->end + nsamp*2);
 
+#ifdef G722_PCM_SHIFT
+	start = dst->pos;
+
+	while (mbuf_get_left(dst) >= 2) {
+
+		int16_t sample;
+
+		sample = mbuf_read_u16(dst);
+		dst->pos -= 2;
+		mbuf_write_u16(dst, sample<<1);
+	}
+
+	dst->pos = start;
+#else
+	(void)start;
+#endif
+
 	return 0;
+}
+
+
+static bool g7221_fmtp_cmp(const char *fmtp1, const char *fmtp2, void *data)
+{
+	(void)data;
+
+	return fmtp_bitrate(fmtp1) == fmtp_bitrate(fmtp2);
 }
 
 
@@ -145,9 +215,11 @@ static int module_init(void)
 	int err = 0;
 
 	err |= aucodec_register(&g7221[0], NULL, "G7221", 32000, 1,
-				"bitrate=48000", alloc, encode, decode);
+				"bitrate=48000", alloc, encode, decode,
+				g7221_fmtp_cmp);
 	err |= aucodec_register(&g7221[1], NULL, "G7221", 16000, 1,
-				"bitrate=32000", alloc, encode, decode);
+				"bitrate=32000", alloc, encode, decode,
+				g7221_fmtp_cmp);
 
 	return err;
 }

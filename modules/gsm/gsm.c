@@ -40,14 +40,14 @@ static void gsm_destructor(void *arg)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 	int err = 0;
 
 	(void)encp;
 	(void)decp;
-	(void)sdp_fmtp;
+	(void)fmtp;
 
 	st = mem_zalloc(sizeof(*st), gsm_destructor);
 	if (!st)
@@ -154,7 +154,7 @@ static int module_init(void)
 	DEBUG_INFO("GSM v%u.%u.%u\n", GSM_MAJOR, GSM_MINOR, GSM_PATCHLEVEL);
 
 	return aucodec_register(&ac_gsm, "3", "GSM", 8000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 }
 
 

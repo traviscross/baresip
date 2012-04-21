@@ -4,10 +4,17 @@
  * Copyright (C) 2010 Creytiv.com
  */
 #include <stdlib.h>
-#include <amrnb/interf_enc.h>
-#include <amrnb/interf_dec.h>
-#include <amrwb/enc_if.h>
-#include <amrwb/dec_if.h>
+#ifdef AMR_NB
+#include <interf_enc.h>
+#include <interf_dec.h>
+#endif
+#ifdef AMR_WB
+#ifdef _TYPEDEF_H
+#define typedef_h
+#endif
+#include <enc_if.h>
+#include <dec_if.h>
+#endif
 #include <re.h>
 #include <baresip.h>
 
@@ -54,15 +61,19 @@ static void destructor(void *arg)
 
 	switch (aucodec_srate(st->ac)) {
 
+#ifdef AMR_NB
 	case 8000:
 		Encoder_Interface_exit(st->enc);
 		Decoder_Interface_exit(st->dec);
 		break;
+#endif
 
+#ifdef AMR_WB
 	case 16000:
 		E_IF_exit(st->enc);
 		D_IF_exit(st->dec);
 		break;
+#endif
 	}
 
 	mem_deref(st->ac);
@@ -71,14 +82,14 @@ static void destructor(void *arg)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 	int err = 0;
 
 	(void)encp;
 	(void)decp;
-	(void)sdp_fmtp;
+	(void)fmtp;
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
@@ -88,15 +99,19 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 
 	switch (aucodec_srate(ac)) {
 
+#ifdef AMR_NB
 	case 8000:
 		st->enc = Encoder_Interface_init(0);
 		st->dec = Decoder_Interface_init();
 		break;
+#endif
 
+#ifdef AMR_WB
 	case 16000:
 		st->enc = E_IF_init();
 		st->dec = D_IF_init();
 		break;
+#endif
 	}
 
 	if (!st->enc || !st->dec)
@@ -111,6 +126,7 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 }
 
 
+#ifdef AMR_WB
 static int encode_wb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
 	int len;
@@ -166,8 +182,10 @@ static int decode_wb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 
 	return 0;
 }
+#endif
 
 
+#ifdef AMR_NB
 static int encode_nb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
 	enum Mode mode = MR475;
@@ -225,16 +243,21 @@ static int decode_nb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 
 	return 0;
 }
+#endif
 
 
 static int module_init(void)
 {
 	int err = 0;
 
+#ifdef AMR_WB
 	err |= aucodec_register(&codecv[0], NULL, "AMR-WB", 16000, 1, NULL,
-				alloc, encode_wb, decode_wb);
+				alloc, encode_wb, decode_wb, NULL);
+#endif
+#ifdef AMR_NB
 	err |= aucodec_register(&codecv[1], NULL, "AMR", 8000, 1, NULL,
-				alloc, encode_nb, decode_nb);
+				alloc, encode_nb, decode_nb, NULL);
+#endif
 
 	return err;
 }

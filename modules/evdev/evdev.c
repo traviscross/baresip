@@ -112,6 +112,42 @@ static int code2ascii(uint16_t modifier, uint16_t code)
 #ifdef KEY_NUMERIC_POUND
 	case KEY_NUMERIC_POUND: return '#';
 #endif
+#ifdef KEY_KP0
+	case KEY_KP0:        return '0';
+#endif
+#ifdef KEY_KP1
+	case KEY_KP1:        return '1';
+#endif
+#ifdef KEY_KP2
+	case KEY_KP2:        return '2';
+#endif
+#ifdef KEY_KP3
+	case KEY_KP3:        return '3';
+#endif
+#ifdef KEY_KP4
+	case KEY_KP4:        return '4';
+#endif
+#ifdef KEY_KP5
+	case KEY_KP5:        return '5';
+#endif
+#ifdef KEY_KP6
+	case KEY_KP6:        return '6';
+#endif
+#ifdef KEY_KP7
+	case KEY_KP7:        return '7';
+#endif
+#ifdef KEY_KP8
+	case KEY_KP8:        return '8';
+#endif
+#ifdef KEY_KP9
+	case KEY_KP9:        return '9';
+#endif
+#ifdef KEY_KPDOT
+	case KEY_KPDOT:      return 0x1b;
+#endif
+#ifdef KEY_KPENTER
+	case KEY_KPENTER:    return '\n';
+#endif
 	default:             return -1;
 	}
 }
@@ -202,7 +238,7 @@ static void evdev_fd_handler(int flags, void *arg)
 static int evdev_alloc(struct ui_st **stp, struct ui_prm *prm,
 		       ui_input_h *uih, void *arg)
 {
-	const char *device = str_len(prm->device) ? prm->device : evdev_device;
+	const char *dev = str_isset(prm->device) ? prm->device : evdev_device;
 	struct ui_st *st;
 	int err = 0;
 
@@ -214,7 +250,7 @@ static int evdev_alloc(struct ui_st **stp, struct ui_prm *prm,
 		return ENOMEM;
 
 	st->ui = mem_ref(evdev);
-	st->fd = open(device, O_RDWR);
+	st->fd = open(dev, O_RDWR);
 	if (st->fd < 0) {
 		err = errno;
 		goto out;
@@ -224,7 +260,7 @@ static int evdev_alloc(struct ui_st **stp, struct ui_prm *prm,
 	/* grab the event device to prevent it from propagating
 	   its events to the regular keyboard driver            */
 	if (-1 == ioctl(st->fd, EVIOCGRAB, (void *)1)) {
-		DEBUG_WARNING("ioctl EVIOCGRAB on %s (%s)\n", device,
+		DEBUG_WARNING("ioctl EVIOCGRAB on %s (%s)\n", dev,
 			      strerror(errno));
 	}
 #endif

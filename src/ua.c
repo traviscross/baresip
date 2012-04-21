@@ -53,7 +53,7 @@ struct ua {
 	ua_event_h *eh;              /**< Event handler                      */
 	ua_message_h *msgh;          /**< Incoming message handler           */
 	void *arg;                   /**< Handler argument                   */
-	char local_uri[256];         /**< Local SIP uri                      */
+	char *local_uri;             /**< Local SIP uri                      */
 	char *cuser;                 /**< SIP Contact username               */
 	char *outbound;              /**< Optional SIP outbound proxy        */
 	bool aucodecs;               /**< audio_codecs parameter is set      */
@@ -67,6 +67,8 @@ struct ua {
 	char *stun_pass;             /**< STUN Password                      */
 	char *stun_host;             /**< STUN Hostname                      */
 	uint16_t stun_port;          /**< STUN Port number                   */
+	char *auth_user;             /**< Authentication username            */
+	char password[64];           /**< Password asked from user (if any)  */
 
 	/** Statistics */
 	struct {
@@ -135,6 +137,14 @@ static struct ua *ua_find(const struct pl *cuser)
 			return ua;
 	}
 
+	/* Try also matching by AOR, for better interop */
+	for (le = uag.ual.head; le; le = le->next) {
+		struct ua *ua = le->data;
+
+		if (0 == pl_casecmp(cuser, &ua->aor.uri.user))
+			return ua;
+	}
+
 	return NULL;
 }
 
@@ -176,6 +186,31 @@ static void ua_event(struct ua *ua, enum ua_event ev, const char *prm)
 }
 
 
+static int password_prompt(struct ua *ua)
+{
+	char *nl;
+
+	(void)re_printf("Please enter password for %r@%r: ",
+			&ua->aor.uri.user, &ua->aor.uri.host);
+
+	/* note: blocking UI call */
+	fgets(ua->password, sizeof(ua->password), stdin);
+	ua->password[sizeof(ua->password) - 1] = '\0';
+
+	nl = strchr(ua->password, '\n');
+	if (nl == NULL) {
+		(void)re_printf("Invalid password (0 - 63 characters"
+				" followed by newline)\n");
+		return EINVAL;
+	}
+
+	ua->aor.uri.password.p = ua->password;
+	ua->aor.uri.password.l = nl - ua->password;
+
+	return 0;
+}
+
+
 int ua_auth(struct ua *ua, char **username, char **password, const char *realm)
 {
 	int err;
@@ -185,8 +220,8 @@ int ua_auth(struct ua *ua, char **username, char **password, const char *realm)
 
 	(void)realm;
 
-	err  = pl_strdup(username, &ua->aor.uri.user);
-	err |= pl_strdup(password, &ua->aor.uri.password);
+	*username = mem_ref(ua->auth_user);
+	err = pl_strdup(password, &ua->aor.uri.password);
 
 	return err;
 }
@@ -233,7 +268,7 @@ int ua_register(struct ua *ua)
 	if (re_snprintf(reg_uri, sizeof(reg_uri), "%H", uri_encode, &uri) < 0)
 		return ENOMEM;
 
-	if (str_len(uag.uuid)) {
+	if (str_isset(uag.uuid)) {
 		if (re_snprintf(params, sizeof(params),
 				";+sip.instance=\"<urn:uuid:%s>\"",
 				uag.uuid) < 0)
@@ -503,13 +538,6 @@ static void call_event_handler(enum call_event ev, const char *prm, void *arg)
 		ua_event(ua, UA_EVENT_CALL_CLOSED, prm);
 		ua->call = mem_deref(ua->call);
 		break;
-
-	default:
-		DEBUG_WARNING("call event: unhandled event %d\n", ev);
-		alert_stop(ua);
-		ua->call = mem_deref(ua->call);
-		tmr_cancel(&ua->tmr_stat);
-		break;
 	}
 }
 
@@ -581,12 +609,16 @@ static void handle_options(struct ua *ua, const struct sip_msg *msg)
 static void handle_message(struct ua *ua, const struct sip_msg *msg)
 {
 	static const char *ctype_text = "text/plain";
+	struct pl mtype;
+
+	if (re_regex(msg->ctype.p, msg->ctype.l, "[^;]+", &mtype))
+		mtype = msg->ctype;
 
 	if (ua->msgh) {
 		ua->msgh(&msg->from.auri, &msg->ctype, msg->mb, ua->arg);
 		(void)sip_reply(uag.sip, msg, 200, "OK");
 	}
-	else if (!pl_strcasecmp(&msg->ctype, ctype_text)) {
+	else if (!pl_strcasecmp(&mtype, ctype_text)) {
 		(void)re_fprintf(stderr, "\r%r: \"%b\"\n", &msg->from.auri,
 				 mbuf_buf(msg->mb), mbuf_get_left(msg->mb));
 		(void)play_file(NULL, "message.wav", 0);
@@ -617,12 +649,14 @@ static void ua_destructor(void *arg)
 	mem_deref(ua->call);
 	mem_deref(ua->reg);
 	mem_deref(ua->cuser);
+	mem_deref(ua->local_uri);
 	mem_deref(ua->outbound);
 	mem_deref(ua->stun_user);
 	mem_deref(ua->stun_pass);
 	mem_deref(ua->stun_host);
 	mem_deref(ua->sipnat);
 	mem_deref(ua->rtpkeep);
+	mem_deref(ua->auth_user);
 
 	list_flush(&ua->aucodecl);
 	list_flush(&ua->vidcodecl);
@@ -631,7 +665,7 @@ static void ua_destructor(void *arg)
 
 /**
  * Decode STUN Server parameter. We use the SIP parameters as default,
- * and override with an STUN parameters present.
+ * and override with any STUN parameters present.
  *
  * \verbatim
  *   ;stunserver=stun:username:password@host:port
@@ -885,9 +919,9 @@ static int mk_aor(struct ua *ua, const char *aor)
 	if (err)
 		return err;
 
-	if (re_snprintf(ua->local_uri, sizeof(ua->local_uri),
-			"%H", encode_uri_user, &ua->aor.uri) < 0)
-		return ENOMEM;
+	err = re_sdprintf(&ua->local_uri, "%H", encode_uri_user, &ua->aor.uri);
+	if (err)
+		return err;
 
 	return re_sdprintf(&ua->cuser, "%p", ua);
 }
@@ -924,7 +958,7 @@ static bool request_handler(const struct sip_msg *msg, void *arg)
 
 static int sip_params_decode(struct ua *ua)
 {
-	struct pl regint, ob, sipnat;
+	struct pl regint, ob, sipnat, auth_user;
 	int err = 0;
 
 	ua->regint = REG_INTERVAL + (rand_u32()&0xff);
@@ -938,8 +972,13 @@ static int sip_params_decode(struct ua *ua)
 
 	if (0 == sip_param_decode(&ua->aor.params, "sipnat", &sipnat)) {
 		DEBUG_NOTICE("sipnat: %r\n", &sipnat);
-		err = pl_strdup(&ua->sipnat, &sipnat);
+		err |= pl_strdup(&ua->sipnat, &sipnat);
 	}
+
+	if (0 == sip_param_decode(&ua->aor.params, "auth_user", &auth_user))
+		err |= pl_strdup(&ua->auth_user, &auth_user);
+	else
+		err |= pl_strdup(&ua->auth_user, &ua->aor.uri.user);
 
 	return err;
 }
@@ -998,8 +1037,15 @@ int ua_alloc(struct ua **uap, const char *aor,
 	if (err)
 		goto out;
 
-	if (ua->sipnat || ua->mnat)
+	if (ua->mnat)
 		err = stunsrv_decode(ua);
+
+	/* optional password prompt */
+	if (!pl_isset(&ua->aor.uri.password)) {
+		err = password_prompt(ua);
+		if (err)
+			goto out;
+	}
 
 	/* Set current UA to this */
 	ua_cur_set(ua);
@@ -1030,11 +1076,12 @@ static int ua_start(struct ua *ua)
  * @param uri     SIP uri to connect to
  * @param params  Optional URI parameters
  * @param mnatid  Optional MNAT id to override default settings
+ * @param vmode   Video mode
  *
  * @return 0 if success, otherwise errorcode
  */
 int ua_connect(struct ua *ua, const char *uri, const char *params,
-	       const char *mnatid, enum vidmode vidmode)
+	       const char *mnatid, enum vidmode vmode)
 {
 	const struct mnat *mnat;
 	struct pl pl;
@@ -1104,14 +1151,19 @@ int ua_connect(struct ua *ua, const char *uri, const char *params,
 	else
 		mnat = ua->mnat;
 
-	err = ua_call_alloc(ua, &ua->call, mnat, ua->menc, vidmode, NULL);
+	err = ua_call_alloc(ua, &ua->call, mnat, ua->menc, vmode, NULL);
 	if (err)
 		return err;
 
 	pl.p = (char *)ua->dialbuf.buf;
 	pl.l = ua->dialbuf.end;
 
-	return call_connect(ua->call, &pl);
+	err = call_connect(ua->call, &pl);
+
+	if (err)
+		ua->call = mem_deref(ua->call);
+
+	return err;
 }
 
 
@@ -1559,7 +1611,7 @@ void ua_set_uuid(const char *uuid)
 {
 	uag.uuid[0] = '\0';
 
-	if (str_len(uuid))
+	if (str_isset(uuid))
 		str_ncpy(uag.uuid, uuid, sizeof(uag.uuid));
 }
 

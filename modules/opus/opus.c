@@ -76,7 +76,7 @@ static void destructor(void *arg)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 	const uint32_t srate = aucodec_srate(ac);
@@ -88,7 +88,7 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	int opuserr;
 
 	(void)decp;
-	(void)sdp_fmtp;
+	(void)fmtp;
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
@@ -244,13 +244,13 @@ static int module_init(void)
 #endif
 
 	err |= aucodec_register(&codecv[0], NULL, "opus", 48000, 2, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 
 	err |= aucodec_register(&codecv[1], NULL, "opus", 48000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 #if 0
 	err |= aucodec_register(&codecv[2], NULL, "opus", 32000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 #endif
 
 	return err;

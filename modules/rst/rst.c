@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "rst.h"
 
@@ -163,7 +164,7 @@ static void recv_handler(struct mbuf *mb, void *arg)
 			re_printf("rst: metadata %zu bytes\n", n);
 #endif
 			if (rst->bytec >= rst->metasz) {
-#if 1
+#if 0
 				re_printf("rst: metadata: [%s]\n", rst->meta);
 #endif
 				rst->metasz = 0;

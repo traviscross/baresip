@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "core.h"
 
@@ -147,8 +148,8 @@ static int play_alloc(struct play **playp, struct mbuf *what,
 	if (err)
 		goto out;
 
-	err = auplay_alloc(&play->auplay, NULL, wprm, NULL,
-			   write_handler, play);
+	err = auplay_alloc(&play->auplay, config.audio.play_mod, wprm,
+			   config.audio.play_dev, write_handler, play);
 	if (err)
 		goto out;
 
@@ -162,6 +163,66 @@ static int play_alloc(struct play **playp, struct mbuf *what,
 	else if (playp) {
 		play->playp = playp;
 		*playp = play;
+	}
+
+	return err;
+}
+
+
+static int aufile_load(struct mbuf *mb, const char *filename,
+		       uint32_t *srate, uint8_t *channels)
+{
+	struct aufile_prm prm;
+	struct aufile *af;
+	int err;
+
+	err = aufile_open(&af, &prm, filename, AUFILE_READ);
+	if (err)
+		return err;
+
+	while (!err) {
+		uint8_t buf[4096];
+		size_t i, n;
+
+		n = sizeof(buf);
+
+		err = aufile_read(af, buf, &n);
+		if (err || !n)
+			break;
+
+		switch (prm.fmt) {
+
+		case AUFMT_S16LE:
+			err = mbuf_write_mem(mb, buf, n);
+			break;
+
+		case AUFMT_PCMA:
+			for (i=0; i<n; i++) {
+				err |= mbuf_write_u16(mb,
+						      g711_alaw2pcm(buf[i]));
+			}
+			break;
+
+		case AUFMT_PCMU:
+			for (i=0; i<n; i++) {
+				err |= mbuf_write_u16(mb,
+						      g711_ulaw2pcm(buf[i]));
+			}
+			break;
+
+		default:
+			err = ENOSYS;
+			break;
+		}
+	}
+
+	mem_deref(af);
+
+	if (!err) {
+		mb->pos = 0;
+
+		*srate    = prm.srate;
+		*channels = (uint8_t)prm.channels;
 	}
 
 	return err;
@@ -209,19 +270,29 @@ int play_file(struct play **playp, const char *filename, int repeat)
 {
 	struct auplay_prm wprm;
 	struct mbuf *mb;
+	char path[256];
 	int err;
 
 	if (playp && *playp)
 		return EALREADY;
+
+#ifndef PREFIX
+#define PREFIX "/usr"
+#endif
+	if (re_snprintf(path, sizeof(path), PREFIX "/share/baresip/%s",
+			filename) < 0)
+		return ENOMEM;
 
 	wprm.fmt = AUFMT_S16LE;
 	mb = mbuf_alloc(1024);
 	if (!mb)
 		return ENOMEM;
 
-	err = aufile_load(mb, filename, &wprm.srate, &wprm.ch);
-	if (err)
+	err = aufile_load(mb, path, &wprm.srate, &wprm.ch);
+	if (err) {
+		DEBUG_WARNING("%s: %s\n", path, strerror(err));
 		goto out;
+	}
 
 	wprm.frame_size = calc_nsamp(wprm.srate, wprm.ch, 20);
 

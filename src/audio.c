@@ -14,6 +14,7 @@
 #include <pthread.h>
 #endif
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "core.h"
 
@@ -81,6 +82,7 @@ struct audio {
 	uint8_t pt_tel_tx;            /**< Event payload type - transmit   */
 	uint8_t pt_tel_rx;            /**< Event payload type - receive    */
 	uint32_t ts_tx;               /**< Timestamp for outgoing RTP      */
+	uint32_t ts_tel;              /**< Timestamp for Telephony Events  */
 	bool vu_meter;                /**< Enable VU-meter                 */
 	bool marker;                  /**< Marker bit for outgoing RTP     */
 	bool is_g722;                 /**< Set if encoder is G.722 codec   */
@@ -150,7 +152,7 @@ static int add_audio_codec(struct sdp_media *m, struct aucodec *ac)
 	}
 
 	return sdp_format_add(NULL, m, false, ac->pt, ac->name, ac->srate,
-			      ac->ch, NULL, ac, false, "%s", ac->fmtp);
+			      ac->ch, ac->cmph, ac, true, "%s", ac->fmtp);
 }
 
 
@@ -173,9 +175,14 @@ static void encode_rtp_send(struct audio *a, struct mbuf *mb, uint16_t nsamp)
 		goto out;
 
 	a->mb_rtp->pos = STREAM_PRESZ;
-	err = stream_send(a->strm, a->marker, a->pt_tx, a->ts_tx, a->mb_rtp);
-	if (err)
-		goto out;
+
+	if (mbuf_get_left(a->mb_rtp)) {
+
+		err = stream_send(a->strm, a->marker, a->pt_tx,
+				  a->ts_tx, a->mb_rtp);
+		if (err)
+			goto out;
+	}
 
 	a->ts_tx += nsamp;
 
@@ -242,8 +249,11 @@ static void check_telev(struct audio *a)
 	if (err)
 		return;
 
+	if (marker)
+		a->ts_tel = a->ts_tx;
+
 	a->mb_rtp->pos = STREAM_PRESZ;
-	err = stream_send(a->strm, marker, a->pt_tel_tx, a->ts_tx, a->mb_rtp);
+	err = stream_send(a->strm, marker, a->pt_tel_tx, a->ts_tel, a->mb_rtp);
 	if (err) {
 		DEBUG_WARNING("telev: stream_send %s\n", strerror(err));
 	}
@@ -610,37 +620,9 @@ static int aufilt_setup(struct audio *a, uint32_t *srate_enc,
 }
 
 
-/**
- * Start the audio playback and recording
- *
- * @param a Audio object
- *
- * @return 0 if success, otherwise errorcode
- */
-int audio_start(struct audio *a)
+static int start_player(struct audio *a, uint32_t srate_dec)
 {
-	uint32_t srate_enc = 0, srate_dec = 0;
-	const char *dev = config.audio.device;
 	int err;
-
-	if (!a)
-		return EINVAL;
-
-	if (!str_len(dev))
-		dev = NULL;
-
-	err = stream_start(a->strm);
-	if (err)
-		return err;
-
-	/* Audio filter */
-	if (!a->fc && !list_isempty(aufilt_list())) {
-		err = aufilt_setup(a, &srate_enc, &srate_dec);
-		if (err)
-			return err;
-	}
-
-	/* TODO: configurable order of play/src start */
 
 	/* Start Audio Player */
 	if (!a->auplay && auplay_find(NULL) && a->dec) {
@@ -661,7 +643,8 @@ int audio_start(struct audio *a)
 				return err;
 		}
 
-		err = auplay_alloc(&a->auplay, NULL, &prm, dev,
+		err = auplay_alloc(&a->auplay, config.audio.play_mod,
+				   &prm, config.audio.play_dev,
 				   auplay_write_handler, a);
 		if (err) {
 			DEBUG_WARNING("start: audio player failed: %s\n",
@@ -669,6 +652,14 @@ int audio_start(struct audio *a)
 			return err;
 		}
 	}
+
+	return 0;
+}
+
+
+static int start_source(struct audio *a, uint32_t srate_enc)
+{
+	int err;
 
 	/* Start Audio Source */
 	if (!a->ausrc && ausrc_find(NULL) && a->enc) {
@@ -690,7 +681,8 @@ int audio_start(struct audio *a)
 				return err;
 		}
 
-		err = ausrc_alloc(&a->ausrc, NULL, NULL, &prm, dev,
+		err = ausrc_alloc(&a->ausrc, NULL, config.audio.src_mod,
+				  &prm, config.audio.src_dev,
 				  ausrc_read_handler, ausrc_error_handler, a);
 		if (err) {
 			DEBUG_WARNING("start: audio source failed: %s\n",
@@ -721,6 +713,46 @@ int audio_start(struct audio *a)
 		default:
 			break;
 		}
+	}
+
+	return 0;
+}
+
+
+/**
+ * Start the audio playback and recording
+ *
+ * @param a Audio object
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+int audio_start(struct audio *a)
+{
+	uint32_t srate_enc = 0, srate_dec = 0;
+	int err;
+
+	if (!a)
+		return EINVAL;
+
+	err = stream_start(a->strm);
+	if (err)
+		return err;
+
+	/* Audio filter */
+	if (!a->fc && !list_isempty(aufilt_list())) {
+		err = aufilt_setup(a, &srate_enc, &srate_dec);
+		if (err)
+			return err;
+	}
+
+	/* configurable order of play/src start */
+	if (config.audio.src_first) {
+		err |= start_source(a, srate_enc);
+		err |= start_player(a, srate_dec);
+	}
+	else {
+		err |= start_player(a, srate_dec);
+		err |= start_source(a, srate_enc);
 	}
 
 	return err;
@@ -773,7 +805,6 @@ void audio_stop(struct audio *a)
 int audio_encoder_set(struct audio *a, struct aucodec *ac,
 		      uint8_t pt_tx, const char *params)
 {
-	struct pl fmtp = pl_null;
 	struct aucodec *ac_old;
 	bool reset;
 	int err = 0;
@@ -793,8 +824,6 @@ int audio_encoder_set(struct audio *a, struct aucodec *ac,
 		a->ausrc = mem_deref(a->ausrc);
 	}
 
-	pl_set_str(&fmtp, params);
-
 	a->is_g722 = (0 == str_casecmp(ac->name, "G722"));
 	a->pt_tx = pt_tx;
 	a->enc = mem_deref(a->enc);
@@ -809,7 +838,7 @@ int audio_encoder_set(struct audio *a, struct aucodec *ac,
 		prm.srate = get_srate(ac);
 		prm.ptime = a->ptime_tx;
 
-		err = ac->alloch(&a->enc, ac, &prm, NULL, &fmtp);
+		err = ac->alloch(&a->enc, ac, &prm, NULL, params);
 		if (err) {
 			DEBUG_WARNING("alloc encoder: %s\n", strerror(err));
 			return err;
@@ -832,7 +861,6 @@ int audio_encoder_set(struct audio *a, struct aucodec *ac,
 int audio_decoder_set(struct audio *a, struct aucodec *ac,
 		      uint8_t pt_rx, const char *params)
 {
-	struct pl fmtp = pl_null;
 	struct aucodec *ac_old;
 	int err = 0;
 
@@ -841,8 +869,6 @@ int audio_decoder_set(struct audio *a, struct aucodec *ac,
 
 	(void)re_fprintf(stderr, "Set audio decoder: %s %uHz %dch\n",
 			 ac->name, get_srate(ac), ac->ch);
-
-	pl_set_str(&fmtp, params);
 
 	ac_old = aucodec_get(a->dec);
 	a->pt_rx = pt_rx;
@@ -853,7 +879,7 @@ int audio_decoder_set(struct audio *a, struct aucodec *ac,
 		a->dec = mem_ref(a->enc);
 	}
 	else {
-		err = ac->alloch(&a->dec, ac, NULL, NULL, &fmtp);
+		err = ac->alloch(&a->dec, ac, NULL, NULL, params);
 		if (err) {
 			DEBUG_WARNING("alloc decoder: %s\n", strerror(err));
 			return err;

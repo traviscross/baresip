@@ -28,13 +28,13 @@ static void destructor(void *arg)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 
 	(void)encp;
 	(void)decp;
-	(void)sdp_fmtp;
+	(void)fmtp;
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
@@ -99,7 +99,7 @@ static int module_init(void)
 	for (i=0; i<NR_CODECS; i++) {
 		err |= aucodec_register(&l16v[i], codecv[i].pt, "L16",
 					codecv[i].srate, codecv[i].ch, NULL,
-					alloc, encode, decode);
+					alloc, encode, decode, NULL);
 	}
 
 	return err;

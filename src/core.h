@@ -46,6 +46,7 @@ struct aucodec {
 	aucodec_alloc_h *alloch;
 	aucodec_enc_h   *ench;
 	aucodec_dec_h   *dech;
+	sdp_fmtp_cmp_h  *cmph;
 };
 
 /** Video Source */
@@ -74,7 +75,9 @@ struct vidcodec {
 	const char       *fmtp;
 	vidcodec_alloc_h *alloch;
 	vidcodec_enc_h   *ench;
+	vidcodec_pktize_h *pktizeh;
 	vidcodec_dec_h   *dech;
+	sdp_fmtp_cmp_h   *cmph;
 };
 
 
@@ -88,9 +91,8 @@ int  aucodec_debug(struct re_printf *pf, const struct list *vcl);
 
 /* Video codec */
 int  vidcodec_alloc(struct vidcodec_st **sp, const char *name,
-		   struct vidcodec_prm *encp, struct vidcodec_prm *decp,
-		   const struct pl *sdp_fmtp,
-		   vidcodec_send_h *sendh, void *arg);
+		    struct vidcodec_prm *encp, const char *fmtp,
+		    vidcodec_enq_h *enqh, vidcodec_send_h *sendh, void *arg);
 struct vidcodec *vidcodec_get(const struct vidcodec_st *st);
 int  vidcodec_clone(struct list *l, const struct vidcodec *src);
 bool vidcodec_cmp(const struct vidcodec *l, const struct vidcodec *r);
@@ -159,11 +161,6 @@ void audio_enable_telev(struct audio *a, uint8_t pt_tx, uint8_t pt_rx);
 int  audio_send_digit(struct audio *a, char key);
 void audio_sdp_attr_decode(struct audio *a);
 int  audio_debug(struct re_printf *pf, const struct audio *a);
-
-
-/* aufile - audiofile reader */
-int aufile_load(struct mbuf *mbf, const char *filename,
-		uint32_t *srate, uint8_t *channels);
 
 
 /* call control */
@@ -331,3 +328,6 @@ void rtpkeep_refresh(struct rtpkeep *rk, uint32_t ts);
 int mkpath(const char *path);
 int get_login_name(const char **login);
 int get_homedir(char *path, uint32_t sz);
+
+
+extern struct config config;

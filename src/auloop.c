@@ -5,6 +5,7 @@
  */
 #include <string.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "core.h"
 
@@ -199,10 +200,12 @@ static int auloop_reset(struct audio_loop *al)
 	auplay_prm.srate      = al->srate;
 	auplay_prm.ch         = al->ch;
 	auplay_prm.frame_size = al->fs;
-	err = auplay_alloc(&al->auplay, NULL, &auplay_prm, config.audio.device,
-			   write_handler, al);
+	err = auplay_alloc(&al->auplay, config.audio.play_mod, &auplay_prm,
+			   config.audio.play_dev, write_handler, al);
 	if (err) {
-		DEBUG_WARNING("auplay failed: %s\n", strerror(err));
+		DEBUG_WARNING("auplay %s,%s failed: %s\n",
+			      config.audio.play_mod, config.audio.play_dev,
+			      strerror(err));
 		return err;
 	}
 
@@ -210,11 +213,12 @@ static int auloop_reset(struct audio_loop *al)
 	ausrc_prm.srate      = al->srate;
 	ausrc_prm.ch         = al->ch;
 	ausrc_prm.frame_size = al->fs;
-	err = ausrc_alloc(&al->ausrc, NULL, NULL,
-			  &ausrc_prm, config.audio.device,
+	err = ausrc_alloc(&al->ausrc, NULL, config.audio.src_mod,
+			  &ausrc_prm, config.audio.src_dev,
 			  read_handler, error_handler, al);
 	if (err) {
-		DEBUG_WARNING("ausrc failed: %s\n", strerror(err));
+		DEBUG_WARNING("ausrc %s,%s failed: %s\n", config.audio.src_mod,
+			      config.audio.src_dev, strerror(err));
 		return err;
 	}
 

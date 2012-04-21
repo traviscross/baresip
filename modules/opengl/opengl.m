@@ -7,6 +7,7 @@
 #include <OpenGL/gl.h>
 #include <OpenGL/glext.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 
 
@@ -100,7 +101,7 @@ static int create_window(struct vidisp_st *st)
 }
 
 
-static int opengl_reset(struct vidisp_st *st, const struct vidsz *sz)
+static void opengl_reset(struct vidisp_st *st, const struct vidsz *sz)
 {
 	if (st->PHandle) {
 		glUseProgramObjectARB(0);
@@ -110,8 +111,6 @@ static int opengl_reset(struct vidisp_st *st, const struct vidsz *sz)
 	}
 
 	st->size = *sz;
-
-	return 0;
 }
 
 

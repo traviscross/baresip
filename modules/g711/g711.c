@@ -4,6 +4,7 @@
  * Copyright (C) 2010 Creytiv.com
  */
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 
 
@@ -30,14 +31,14 @@ static void destructor(void *arg)
 
 static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const struct pl *sdp_fmtp)
+		 const char *fmtp)
 {
 	struct aucodec_st *st;
 	int err = 0;
 
 	(void)encp;
 	(void)decp;
-	(void)sdp_fmtp;
+	(void)fmtp;
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
@@ -121,14 +122,14 @@ static int module_init(void)
 #ifdef G711_EXPERIMENTAL
 	/* Non-standard codecs - enable at own risk */
 	err |= aucodec_register(&acv[0], NULL, "PCMA", 16000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 	err |= aucodec_register(&acv[1], NULL, "PCMU", 16000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 #endif
 	err |= aucodec_register(&acv[2], "8", "PCMA", 8000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 	err |= aucodec_register(&acv[3], "0", "PCMU", 8000, 1, NULL,
-				alloc, encode, decode);
+				alloc, encode, decode, NULL);
 
 	return err;
 }

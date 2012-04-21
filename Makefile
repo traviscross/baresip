@@ -13,7 +13,7 @@
 USE_VIDEO := 1
 
 PROJECT	  := baresip
-VERSION   := 0.4.0
+VERSION   := 0.4.1
 
 ifndef LIBRE_MK
 LIBRE_MK  := $(shell [ -f ../re/mk/re.mk ] && \
@@ -47,6 +47,7 @@ CXXFLAGS  += -I. -Iinclude -I$(LIBRE_INC)
 
 ifneq ($(LIBREM_PATH),)
 SPLINT_OPTIONS += -I$(LIBREM_PATH)/include
+CLANG_OPTIONS  += -I$(LIBREM_PATH)/include
 endif
 
 ifeq ($(OS),win32)

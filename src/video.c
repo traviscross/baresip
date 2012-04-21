@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "core.h"
 
@@ -86,6 +87,7 @@ struct vtx {
 	struct video *video;               /**< Parent                    */
 	struct vidcodec_st *enc;           /**< Current video encoder     */
 	struct vidsrc_prm vsrc_prm;        /**< Video source parameters   */
+	struct vidsz vsrc_size;            /**< Video source size         */
 	struct vidsrc_st *vsrc;            /**< Video source              */
 	struct vidisp_st *selfview;        /**< Selfview display          */
 	struct lock *lock;                 /**< Lock selfview resources   */
@@ -179,7 +181,7 @@ static int get_fps(const struct video *v)
  */
 static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
 {
-	int err;
+	int err = 0;
 
 	if (!vtx->enc)
 		return;
@@ -188,13 +190,15 @@ static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
 
 	/* Convert image */
 	if (frame->fmt != VID_FMT_YUV420P ||
-	    !vidsz_cmp(&frame->size, &vtx->vsrc_prm.size) ||
+	    !vidsz_cmp(&frame->size, &vtx->vsrc_size) ||
 	    vtx->video->selfview == SELFVIEW_PIP) {
 
 		if (!vtx->frame) {
 
 			err = vidframe_alloc(&vtx->frame, VID_FMT_YUV420P,
-					     &vtx->vsrc_prm.size);
+					     &vtx->vsrc_size);
+			if (err)
+				goto unlock;
 		}
 
 		vidconv(vtx->frame, frame, 0);
@@ -216,8 +220,11 @@ static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
 		(void)vidisp_display(vtx->selfview, "Selfview", vtx->frame);
 	}
 
+ unlock:
 	lock_rel(vtx->lock);
 
+	if (err)
+		return;
 
 	/* Encode the whole picture frame */
 	err = vidcodec_get(vtx->enc)->ench(vtx->enc, vtx->picup, frame);
@@ -485,7 +492,7 @@ int video_alloc(struct video **vp, struct call *call,
 		struct vidcodec *vc = le->data;
 		err |= sdp_format_add(NULL, stream_sdpmedia(v->strm), false,
 				      vc->pt, vc->name, 90000, 1,
-				      NULL, vc, false, "%s", vc->fmtp);
+				      vc->cmph, vc, true, "%s", vc->fmtp);
 	}
 
  out:
@@ -554,14 +561,15 @@ static int set_encoder_format(struct vtx *vtx, const char *src,
 	if (!vs)
 		return ENOENT;
 
-	vtx->vsrc_prm.size   = *size;
+	vtx->vsrc_size       = *size;
 	vtx->vsrc_prm.fps    = get_fps(vtx->video);
 	vtx->vsrc_prm.orient = VIDORIENT_PORTRAIT;
 
 	vtx->vsrc = mem_deref(vtx->vsrc);
 
 	if (!vtx->video->shuttered) {
-		err = vs->alloch(&vtx->vsrc, vs, NULL, &vtx->vsrc_prm,
+		err = vs->alloch(&vtx->vsrc, vs, NULL,
+				 &vtx->vsrc_prm, &vtx->vsrc_size,
 				 NULL, dev, vidsrc_frame_handler,
 				 vidsrc_error_handler, vtx);
 		if (err) {
@@ -603,6 +611,7 @@ static void tmr_handler(void *arg)
 int video_start(struct video *v, const char *src, const char *dev,
 		const char *peer)
 {
+	struct vidsz size;
 	int err;
 
 	if (!v)
@@ -629,16 +638,18 @@ int video_start(struct video *v, const char *src, const char *dev,
 #endif
 
 #if ENABLE_ENCODER
-	err = set_encoder_format(v->vtx, src, dev, &config.video.size);
+	size.w = config.video.width;
+	size.h = config.video.height;
+	err = set_encoder_format(v->vtx, src, dev, &size);
 	if (err) {
 		DEBUG_WARNING("could not set encoder format to"
 			      " [%u x %u] %s\n",
-			      config.video.size.w, config.video.size.h,
-			      strerror(err));
+			      size.w, size.h, strerror(err));
 	}
 #else
 	(void)src;
 	(void)dev;
+	(void)size;
 #endif
 
 	tmr_start(&v->tmr, TMR_INTERVAL * 1000, tmr_handler, v);
@@ -768,11 +779,11 @@ static void vidsrc_update(struct vtx *vtx, const char *dev)
  * Set the orientation of the Video source and display
  *
  * @param v      Video stream
- * @param orient Video orientation
+ * @param orient Video orientation (enum vidorient)
  *
  * @return 0 if success, otherwise errorcode
  */
-int video_set_orient(struct video *v, enum vidorient orient)
+int video_set_orient(struct video *v, int orient)
 {
 	int err = 0;
 
@@ -804,16 +815,15 @@ static int vidcodec_send_handler(bool marker, struct mbuf *mb, void *arg)
 
 
 static int vc_alloc(struct vidcodec_st **stp, struct vidcodec *vc,
-		    struct video *v, const struct pl *fmtp)
+		    struct video *v, const char *fmtp)
 {
 	struct vidcodec_prm prm;
 
-	prm.size    = config.video.size;
 	prm.fps     = get_fps(v);
 	prm.bitrate = config.video.bitrate;
 
-	return vc->alloch(stp, vc, vc->name, &prm, &prm, fmtp,
-			  vidcodec_send_handler, v);
+	return vc->alloch(stp, vc, vc->name, &prm, fmtp,
+			  NULL, vidcodec_send_handler, v);
 }
 
 
@@ -821,7 +831,6 @@ static int vc_alloc(struct vidcodec_st **stp, struct vidcodec *vc,
 int video_encoder_set(struct video *v, struct vidcodec *vc,
 		      uint8_t pt_tx, const char *params)
 {
-	struct pl fmtp = pl_null;
 	struct vtx *vtx;
 	int err = 0;
 
@@ -830,15 +839,13 @@ int video_encoder_set(struct video *v, struct vidcodec *vc,
 
 	(void)re_fprintf(stderr, "Set video encoder: %s\n", vc->name);
 
-	pl_set_str(&fmtp, params);
-
 	vtx = v->vtx;
 	vtx->pt_tx = pt_tx;
 	vtx->enc = mem_deref(vtx->enc);
 
 	if (!vidcodec_cmp(vc, vidcodec_get(v->vrx->dec))) {
 
-		err = vc_alloc(&vtx->enc, vc, v, &fmtp);
+		err = vc_alloc(&vtx->enc, vc, v, params);
 		if (err) {
 			DEBUG_WARNING("encoder alloc: %s\n", strerror(err));
 		}
@@ -967,8 +974,8 @@ int video_debug(struct re_printf *pf, const struct video *v)
 		const struct vtx *vtx = v->vtx;
 
 		err |= re_hprintf(pf, " tx: pt=%d, %d x %d, fps=%d\n",
-				  vtx->pt_tx, vtx->vsrc_prm.size.w,
-				  vtx->vsrc_prm.size.h, vtx->vsrc_prm.fps);
+				  vtx->pt_tx, vtx->vsrc_size.w,
+				  vtx->vsrc_size.h, vtx->vsrc_prm.fps);
 	}
 
 	if (v->vrx) {
@@ -999,7 +1006,8 @@ int video_set_shuttered(struct video *v, bool shuttered)
 
 	v->shuttered = shuttered;
 
-	return video_start(v, NULL, config.video.device, NULL);
+	return video_start(v, config.video.src_mod,
+			   config.video.src_dev, NULL);
 }
 
 
@@ -1018,6 +1026,7 @@ int video_set_source(struct video *v, const char *name, const char *dev)
 
 	vtx->vsrc = mem_deref(vtx->vsrc);
 
-	return vs->alloch(&vtx->vsrc, vs, NULL, &vtx->vsrc_prm, NULL, dev,
+	return vs->alloch(&vtx->vsrc, vs, NULL, &vtx->vsrc_prm,
+			  &vtx->vsrc_size, NULL, dev,
 			  vidsrc_frame_handler, vidsrc_error_handler, vtx);
 }

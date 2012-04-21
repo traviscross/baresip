@@ -6,6 +6,7 @@
 #include <AudioToolbox/AudioQueue.h>
 #include <pthread.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "coreaudio.h"
 

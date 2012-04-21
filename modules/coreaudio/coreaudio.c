@@ -5,6 +5,7 @@
  */
 #include <AudioToolbox/AudioToolbox.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include "coreaudio.h"
 

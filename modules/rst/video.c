@@ -4,8 +4,11 @@
  * Copyright (C) 2011 Creytiv.com
  */
 
+#define _BSD_SOURCE 1
+#include <pthread.h>
 #include <string.h>
 #include <re.h>
+#include <rem.h>
 #include <baresip.h>
 #include <cairo/cairo.h>
 #include "rst.h"
@@ -13,14 +16,17 @@
 
 struct vidsrc_st {
 	struct vidsrc *vs;
-	struct tmr tmr;
+	pthread_mutex_t mutex;
+	pthread_t thread;
 	struct vidsrc_prm prm;
+	struct vidsz size;
 	struct rst *rst;
 	cairo_surface_t *surface;
 	cairo_t *cairo;
 	struct vidframe *frame;
 	vidsrc_frame_h *frameh;
 	void *arg;
+	bool run;
 };
 
 
@@ -34,7 +40,10 @@ static void destructor(void *arg)
 	rst_set_video(st->rst, NULL);
 	mem_deref(st->rst);
 
-	tmr_cancel(&st->tmr);
+	if (st->run) {
+		st->run = false;
+		pthread_join(st->thread, NULL);
+	}
 
 	if (st->cairo)
 		cairo_destroy(st->cairo);
@@ -47,13 +56,28 @@ static void destructor(void *arg)
 }
 
 
-static void tmr_handler(void *arg)
+static void *video_thread(void *arg)
 {
+	uint64_t now, ts = tmr_jiffies();
 	struct vidsrc_st *st = arg;
 
-	tmr_start(&st->tmr, 1000/st->prm.fps, tmr_handler, st);
+	while (st->run) {
 
-	st->frameh(st->frame, st->arg);
+		(void)usleep(4000);
+
+		now = tmr_jiffies();
+
+		if (ts > now)
+			continue;
+
+		pthread_mutex_lock(&st->mutex);
+		st->frameh(st->frame, st->arg);
+		pthread_mutex_unlock(&st->mutex);
+
+		ts += 1000/st->prm.fps;
+	}
+
+	return NULL;
 }
 
 
@@ -97,46 +121,7 @@ static void icy_printf(cairo_t *cr, int x, int y, double size,
 	cairo_move_to(cr, x, y);
 	cairo_text_path(cr, buf);
 	cairo_set_source_rgb(cr, 1, 1, 1);
-	cairo_fill_preserve(cr);
-}
-
-
-static int utf8_encode(struct re_printf *pf, const char *str)
-{
-	int err = 0;
-
-	if (!str)
-		return 0;
-
-	while (*str && !err) {
-
-		uint8_t ch = *str++;
-
-		if (ch > 0x7e) {
-
-			uint8_t utf8[2];
-
-			switch (ch) {
-
-			case 0xd8: /* Ø */
-				utf8[0] = 0xc3;
-				utf8[1] = 0x98;
-				break;
-
-			/* todo: full utf8 encoding */
-
-			default:
-				continue;
-			}
-
-			err = pf->vph((char *)&utf8, 2, pf->arg);
-		}
-		else {
-			err = pf->vph((char *)&ch, 1, pf->arg);
-		}
-	}
-
-	return err;
+	cairo_fill(cr);
 }
 
 
@@ -166,9 +151,9 @@ void rst_video_update(struct vidsrc_st *st, const char *name, const char *meta)
 	if (!st)
 		return;
 
-	background(st->cairo, st->prm.size.w, st->prm.size.h);
+	background(st->cairo, st->size.w, st->size.h);
 
-	icy_printf(st->cairo, 50, 100, 40.0, "%H", utf8_encode, name);
+	icy_printf(st->cairo, 50, 100, 40.0, "%s", name);
 
 	if (meta) {
 
@@ -194,18 +179,18 @@ void rst_video_update(struct vidsrc_st *st, const char *name, const char *meta)
 		}
 	}
 
-	vidframe_init_buf(&frame, VID_FMT_RGB32, &st->prm.size,
+	vidframe_init_buf(&frame, VID_FMT_RGB32, &st->size,
 			  cairo_image_surface_get_data(st->surface));
 
+	pthread_mutex_lock(&st->mutex);
 	vidconv(st->frame, &frame, NULL);
-
-	tmr_start(&st->tmr, 0, tmr_handler, st);
+	pthread_mutex_unlock(&st->mutex);
 }
 
 
 static int alloc_handler(struct vidsrc_st **stp, struct vidsrc *vs,
-			 struct media_ctx **ctx,
-			 struct vidsrc_prm *prm, const char *fmt,
+			 struct media_ctx **ctx, struct vidsrc_prm *prm,
+			 const struct vidsz *size, const char *fmt,
 			 const char *dev, vidsrc_frame_h *frameh,
 			 vidsrc_error_h *errorh, void *arg)
 {
@@ -215,20 +200,25 @@ static int alloc_handler(struct vidsrc_st **stp, struct vidsrc *vs,
 	(void)fmt;
 	(void)errorh;
 
-	if (!stp || !vs || !prm || !frameh)
+	if (!stp || !vs || !prm || !size || !frameh)
 		return EINVAL;
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
 		return ENOMEM;
 
+	err = pthread_mutex_init(&st->mutex, NULL);
+	if (err)
+		goto out;
+
 	st->vs     = mem_ref(vs);
 	st->prm    = *prm;
+	st->size   = *size;
 	st->frameh = frameh;
 	st->arg    = arg;
 
 	st->surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-						 prm->size.w, prm->size.h);
+						 size->w, size->h);
 	if (!st->surface) {
 		err = ENOMEM;
 		goto out;
@@ -240,9 +230,11 @@ static int alloc_handler(struct vidsrc_st **stp, struct vidsrc *vs,
 		goto out;
 	}
 
-	err = vidframe_alloc(&st->frame, VID_FMT_YUV420P, &prm->size);
+	err = vidframe_alloc(&st->frame, VID_FMT_YUV420P, size);
 	if (err)
 		goto out;
+
+	vidframe_fill(st->frame, 0, 0, 0);
 
 	if (ctx && *ctx && (*ctx)->id && !strcmp((*ctx)->id, "rst")) {
 		st->rst = mem_ref(*ctx);
@@ -257,6 +249,14 @@ static int alloc_handler(struct vidsrc_st **stp, struct vidsrc *vs,
 	}
 
 	rst_set_video(st->rst, st);
+
+	st->run = true;
+
+	err = pthread_create(&st->thread, NULL, video_thread, st);
+	if (err) {
+		st->run = false;
+		goto out;
+	}
 
  out:
 	if (err)

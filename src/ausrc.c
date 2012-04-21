@@ -68,7 +68,7 @@ const struct ausrc *ausrc_find(const char *name)
 
 		struct ausrc *as = le->data;
 
-		if (name && 0 != str_casecmp(name, as->name))
+		if (str_isset(name) && 0 != str_casecmp(name, as->name))
 			continue;
 
 		return as;
