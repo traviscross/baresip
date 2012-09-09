@@ -35,6 +35,7 @@
 #   USE_SPEEX_RESAMP  Speex Resampler
 #   USE_SRTP          Secure RTP module
 #   USE_STDIO         stdio input driver
+#   USE_SYSLOG        Syslog module
 #   USE_UUID          UUID module
 #   USE_V4L           Video4Linux module
 #   USE_V4L2          Video4Linux2 module
@@ -65,7 +66,8 @@ USE_BV32  := $(shell [ -f $(SYSROOT)/include/bv32/bv32.h ] || \
 USE_CAIRO  := $(shell [ -f $(SYSROOT)/include/cairo/cairo.h ] || \
 	[ -f $(SYSROOT_ALT)/include/cairo/cairo.h ] && echo "yes")
 USE_CELT  := $(shell [ -f $(SYSROOT)/include/celt/celt.h ] || \
-	[ -f $(SYSROOT)/local/include/celt/celt.h ] && echo "yes")
+	[ -f $(SYSROOT)/local/include/celt/celt.h ] || \
+	[ -f $(SYSROOT_ALT)/include/celt/celt.h ] && echo "yes")
 USE_FFMPEG := $(shell [ -f $(SYSROOT)/include/libavcodec/avcodec.h ] || \
 	[ -f $(SYSROOT)/local/include/libavcodec/avcodec.h ] || \
 	[ -f $(SYSROOT)/include/ffmpeg/libavcodec/avcodec.h ] || \
@@ -93,6 +95,7 @@ USE_OPUS := $(shell [ -f $(SYSROOT)/include/opus/opus.h ] || \
 	[ -f $(SYSROOT_ALT)/include/opus/opus.h ] || \
 	[ -f $(SYSROOT)/local/include/opus/opus.h ] && echo "yes")
 USE_OSS := $(shell [ -f $(SYSROOT)/include/soundcard.h ] || \
+	[ -f $(SYSROOT)/include/linux/soundcard.h ] || \
 	[ -f $(SYSROOT)/include/sys/soundcard.h ] && echo "yes")
 USE_PLC := $(shell [ -f $(SYSROOT)/include/spandsp/plc.h ] || \
 	[ -f $(SYSROOT_ALT)/include/spandsp/plc.h ] || \
@@ -104,8 +107,8 @@ USE_SDL  := $(shell [ -f $(SYSROOT)/include/SDL/SDL.h ] || \
 	[ -f $(SYSROOT)/local/include/SDL/SDL.h ] || \
 	[ -f $(SYSROOT_ALT)/include/SDL/SDl.h ] && echo "yes")
 USE_SILK := $(shell [ -f $(SYSROOT)/include/silk/SKP_Silk_SDK_API.h ] || \
-       [ -f $(SYSROOT_ALT)/include/silk/SKP_Silk_SDK_API.h ] || \
-       [ -f $(SYSROOT)/local/include/silk/SKP_Silk_SDK_API.h ] && echo "yes")
+	[ -f $(SYSROOT_ALT)/include/silk/SKP_Silk_SDK_API.h ] || \
+	[ -f $(SYSROOT)/local/include/silk/SKP_Silk_SDK_API.h ] && echo "yes")
 USE_SNDFILE := $(shell [ -f $(SYSROOT)/include/sndfile.h ] || \
 	[ -f $(SYSROOT_ALT)/include/sndfile.h ] && echo "yes")
 USE_STDIO := $(shell [ -f $(SYSROOT)/include/termios.h ] && echo "yes")
@@ -113,6 +116,10 @@ HAVE_SPEEXDSP := $(shell \
 	[ -f $(SYSROOT)/local/lib/libspeexdsp$(LIB_SUFFIX) ] || \
 	[ -f $(SYSROOT)/lib/libspeexdsp$(LIB_SUFFIX) ] || \
 	[ -f $(SYSROOT_ALT)/lib/libspeexdsp$(LIB_SUFFIX) ] && echo "yes")
+ifeq ($(HAVE_SPEEXDSP),)
+HAVE_SPEEXDSP := \
+	$(shell find $(SYSROOT)/lib -name libspeexdsp$(LIB_SUFFIX) 2>/dev/null)
+endif
 USE_SPEEX := $(shell [ -f $(SYSROOT)/include/speex.h ] || \
 	[ -f $(SYSROOT)/include/speex/speex.h ] || \
 	[ -f $(SYSROOT)/local/include/speex.h ] || \
@@ -133,6 +140,9 @@ USE_SPEEX_RESAMP := $(shell [ -f $(SYSROOT)/include/speex/speex_resampler.h ] \
 USE_SRTP := $(shell [ -f $(SYSROOT)/include/srtp/srtp.h ] || \
 	[ -f $(SYSROOT_ALT)/include/srtp/srtp.h ] || \
 	[ -f $(SYSROOT)/local/include/srtp/srtp.h ] && echo "yes")
+USE_SYSLOG := $(shell [ -f $(SYSROOT)/include/syslog.h ] || \
+	[ -f $(SYSROOT_ALT)/include/syslog.h ] || \
+	[ -f $(SYSROOT)/local/include/syslog.h ] && echo "yes")
 USE_UUID  := $(shell [ -f $(SYSROOT)/include/uuid/uuid.h ] && echo "yes")
 USE_V4L  := $(shell [ -f $(SYSROOT)/include/linux/videodev.h ] || \
 	[ -f $(SYSROOT)/local/include/linux/videodev.h ] \
@@ -179,7 +189,8 @@ endif
 
 # ------------------------------------------------------------------------- #
 
-MODULES   += $(EXTRA_MODULES) stun turn ice natbd
+MODULES   += $(EXTRA_MODULES) stun turn ice natbd auloop vidloop presence
+MODULES   += menu contact
 
 ifneq ($(USE_ALSA),)
 MODULES   += alsa
@@ -289,6 +300,9 @@ MODULES   += srtp
 endif
 ifneq ($(USE_STDIO),)
 MODULES   += stdio
+endif
+ifneq ($(USE_SYSLOG),)
+MODULES   += syslog
 endif
 ifneq ($(USE_UUID),)
 MODULES   += uuid

@@ -3,7 +3,6 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
-#include <string.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
@@ -200,7 +199,7 @@ static void evdev_fd_handler(int flags, void *arg)
 	n = read(st->fd, evv, sizeof(evv));
 
 	if (n < (int) sizeof(struct input_event)) {
-		DEBUG_WARNING("event: short read (%s)\n", strerror(errno));
+		DEBUG_WARNING("event: short read (%m)\n", errno);
 		return;
 	}
 
@@ -260,8 +259,7 @@ static int evdev_alloc(struct ui_st **stp, struct ui_prm *prm,
 	/* grab the event device to prevent it from propagating
 	   its events to the regular keyboard driver            */
 	if (-1 == ioctl(st->fd, EVIOCGRAB, (void *)1)) {
-		DEBUG_WARNING("ioctl EVIOCGRAB on %s (%s)\n", dev,
-			      strerror(errno));
+		DEBUG_WARNING("ioctl EVIOCGRAB on %s (%m)\n", dev, errno);
 	}
 #endif
 
@@ -298,8 +296,7 @@ static int buzz(const struct ui_st *st, int value)
 
 	n = write(st->fd, &ev, sizeof(ev));
 	if (n < 0) {
-		DEBUG_WARNING("output: write fd=%d (%s)\n", st->fd,
-			      strerror(errno));
+		DEBUG_WARNING("output: write fd=%d (%m)\n", st->fd, errno);
 	}
 
 	return errno;

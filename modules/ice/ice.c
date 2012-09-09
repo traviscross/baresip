@@ -7,7 +7,6 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <SystemConfiguration/SCNetworkReachability.h>
 #endif
-#include <string.h>
 #include <re.h>
 #include <baresip.h>
 
@@ -236,8 +235,7 @@ static bool if_handler(const char *ifname, const struct sa *sa, void *arg)
 		err |= icem_cand_add(m->icem, 2, lprio, ifname, sa);
 
 	if (err) {
-		DEBUG_WARNING("%s:%j: icem_cand_add: %s\n",
-			      ifname, sa, strerror(err));
+		DEBUG_WARNING("%s:%j: icem_cand_add: %m\n", ifname, sa, err);
 	}
 
 	return false;
@@ -448,8 +446,8 @@ static void gather_handler(int err, uint16_t scode, const char *reason,
 	struct mnat_media *m = arg;
 
 	if (err || scode) {
-		DEBUG_WARNING("gather error: %s (%u %s)\n",
-			      strerror(err), scode, reason);
+		DEBUG_WARNING("gather error: %m (%u %s)\n",
+			      err, scode, reason);
 	}
 	else {
 		refresh_laddr(m,
@@ -478,7 +476,7 @@ static void conncheck_handler(int err, bool update, void *arg)
 	DEBUG_NOTICE("%s: Conncheck is complete\n", sdp_media_name(m->sdpm));
 
 	if (err) {
-		DEBUG_WARNING("conncheck failed: %s\n", strerror(err));
+		DEBUG_WARNING("conncheck failed: %m\n", err);
 	}
 	else {
 		bool changed;

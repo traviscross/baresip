@@ -191,7 +191,7 @@ static void *play_thread(void *arg)
 
 		n = write(st->fd, st->buf, st->sz);
 		if (n < 0) {
-			re_printf("write: %s\n", strerror(errno));
+			re_printf("write: %m\n", errno);
 			break;
 		}
 	}

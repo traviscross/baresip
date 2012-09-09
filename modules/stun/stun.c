@@ -1,5 +1,5 @@
 /**
- * @file stun.c STUN Module
+ * @file stun.c STUN Module for Media NAT-traversal
  *
  * Copyright (C) 2010 Creytiv.com
  */

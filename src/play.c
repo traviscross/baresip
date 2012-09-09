@@ -23,7 +23,7 @@ struct play {
 	struct le le;
 	struct play **playp;
 	struct lock *lock;
-	struct mbuf *what;
+	struct mbuf *mb;
 	struct auplay_st *auplay;
 	struct tmr tmr;
 	int repeat;
@@ -50,7 +50,7 @@ static void tmr_repeat(void *arg)
 
 	lock_write_get(play->lock);
 
-	play->what->pos = 0;
+	play->mb->pos = 0;
 	play->eof = false;
 
 	tmr_start(&play->tmr, 1000, tmr_polling, arg);
@@ -93,11 +93,11 @@ static bool write_handler(uint8_t *buf, size_t sz, void *arg)
 	if (play->eof)
 		goto silence;
 
-	if (mbuf_get_left(play->what) < sz) {
+	if (mbuf_get_left(play->mb) < sz) {
 		play->eof = true;
 	}
 	else {
-		(void)mbuf_read_mem(play->what, buf, sz);
+		(void)mbuf_read_mem(play->mb, buf, sz);
 	}
 
  silence:
@@ -122,50 +122,11 @@ static void destructor(void *arg)
 	lock_rel(play->lock);
 
 	mem_deref(play->auplay);
-	mem_deref(play->what);
+	mem_deref(play->mb);
 	mem_deref(play->lock);
 
 	if (play->playp)
 		*play->playp = NULL;
-}
-
-
-static int play_alloc(struct play **playp, struct mbuf *what,
-		      struct auplay_prm *wprm, int repeat)
-{
-	struct play *play;
-	int err;
-
-	play = mem_zalloc(sizeof(*play), destructor);
-	if (!play)
-		return ENOMEM;
-
-	tmr_init(&play->tmr);
-	play->repeat = repeat;
-	play->what = mem_ref(what);
-
-	err = lock_alloc(&play->lock);
-	if (err)
-		goto out;
-
-	err = auplay_alloc(&play->auplay, config.audio.play_mod, wprm,
-			   config.audio.play_dev, write_handler, play);
-	if (err)
-		goto out;
-
-	list_append(&playl, &play->le, play);
-	tmr_start(&play->tmr, 1000, tmr_polling, play);
-
- out:
-	if (err) {
-		mem_deref(play);
-	}
-	else if (playp) {
-		play->playp = playp;
-		*playp = play;
-	}
-
-	return err;
 }
 
 
@@ -222,7 +183,7 @@ static int aufile_load(struct mbuf *mb, const char *filename,
 		mb->pos = 0;
 
 		*srate    = prm.srate;
-		*channels = (uint8_t)prm.channels;
+		*channels = prm.channels;
 	}
 
 	return err;
@@ -244,16 +205,47 @@ int play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
 	      uint8_t ch, int repeat)
 {
 	struct auplay_prm wprm;
+	struct play *play;
+	int err;
 
 	if (playp && *playp)
 		return EALREADY;
 
-	wprm.fmt = AUFMT_S16LE;
-	wprm.ch = ch;
-	wprm.srate = srate;
-	wprm.frame_size = calc_nsamp(wprm.srate, wprm.ch, 20);
+	play = mem_zalloc(sizeof(*play), destructor);
+	if (!play)
+		return ENOMEM;
 
-	return play_alloc(playp, tone, &wprm, repeat);
+	tmr_init(&play->tmr);
+	play->repeat = repeat;
+	play->mb     = mem_ref(tone);
+
+	err = lock_alloc(&play->lock);
+	if (err)
+		goto out;
+
+	wprm.fmt        = AUFMT_S16LE;
+	wprm.ch         = ch;
+	wprm.srate      = srate;
+	wprm.frame_size = srate * ch * 100 / 1000;
+
+	err = auplay_alloc(&play->auplay, config.audio.alert_mod, &wprm,
+			   config.audio.alert_dev, write_handler, play);
+	if (err)
+		goto out;
+
+	list_append(&playl, &play->le, play);
+	tmr_start(&play->tmr, 1000, tmr_polling, play);
+
+ out:
+	if (err) {
+		mem_deref(play);
+	}
+	else if (playp) {
+		play->playp = playp;
+		*playp = play;
+	}
+
+	return err;
 }
 
 
@@ -268,9 +260,10 @@ int play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
  */
 int play_file(struct play **playp, const char *filename, int repeat)
 {
-	struct auplay_prm wprm;
 	struct mbuf *mb;
 	char path[256];
+	uint32_t srate;
+	uint8_t ch;
 	int err;
 
 	if (playp && *playp)
@@ -283,20 +276,17 @@ int play_file(struct play **playp, const char *filename, int repeat)
 			filename) < 0)
 		return ENOMEM;
 
-	wprm.fmt = AUFMT_S16LE;
 	mb = mbuf_alloc(1024);
 	if (!mb)
 		return ENOMEM;
 
-	err = aufile_load(mb, path, &wprm.srate, &wprm.ch);
+	err = aufile_load(mb, path, &srate, &ch);
 	if (err) {
-		DEBUG_WARNING("%s: %s\n", path, strerror(err));
+		DEBUG_WARNING("%s: %m\n", path, err);
 		goto out;
 	}
 
-	wprm.frame_size = calc_nsamp(wprm.srate, wprm.ch, 20);
-
-	err = play_alloc(playp, mb, &wprm, repeat);
+	err = play_tone(playp, mb, srate, ch, repeat);
 
  out:
 	mem_deref(mb);

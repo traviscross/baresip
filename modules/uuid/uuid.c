@@ -1,5 +1,5 @@
 /**
- * @file modules/uuid/uuid.c  Generate UUID
+ * @file modules/uuid/uuid.c  Generate and load UUID
  *
  * Copyright (C) 2010 Creytiv.com
  */
@@ -15,19 +15,12 @@
 #include <re_dbg.h>
 
 
-static int uuid_init(void)
+static int uuid_init(const char *file)
 {
-	char file[256], path[256], uuid[37];
+	char uuid[37];
 	uuid_t uu;
 	FILE *f = NULL;
-	int err;
-
-	err = conf_path_get(path, sizeof(path));
-	if (err)
-		return err;
-
-	if (re_snprintf(file, sizeof(file), "%s/uuid", path) < 0)
-		return ENOMEM;
+	int err = 0;
 
 	f = fopen(file, "r");
 	if (f) {
@@ -38,7 +31,7 @@ static int uuid_init(void)
 	f = fopen(file, "w");
 	if (!f) {
 		err = errno;
-		DEBUG_WARNING("init: fopen() %s (%s)\n", file, strerror(err));
+		DEBUG_WARNING("init: fopen() %s (%m)\n", file, err);
 		goto out;
 	}
 
@@ -58,9 +51,52 @@ static int uuid_init(void)
 }
 
 
+static int uuid_load(const char *file, char *uuid, size_t sz)
+{
+	FILE *f = NULL;
+	int err = 0;
+
+	f = fopen(file, "r");
+	if (!f)
+		return errno;
+
+	if (!fgets(uuid, (int)sz, f))
+		err = errno;
+
+	(void)fclose(f);
+
+	return err;
+}
+
+
+static int module_init(void)
+{
+	char path[256], uuid[64];
+	int err = 0;
+
+	err = conf_path_get(path, sizeof(path));
+	if (err)
+		return err;
+
+	strncat(path, "/uuid", sizeof(path));
+
+	err = uuid_init(path);
+	if (err)
+		return err;
+
+	err = uuid_load(path, uuid, sizeof(uuid));
+	if (err)
+		return err;
+
+	ua_set_uuid(uuid);
+
+	return 0;
+}
+
+
 EXPORT_SYM const struct mod_export DECL_EXPORTS(uuid) = {
 	"uuid",
 	NULL,
-	uuid_init,
+	module_init,
 	NULL
 };

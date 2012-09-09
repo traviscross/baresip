@@ -131,19 +131,16 @@
 				RelativePath="..\..\src\aufilt.c">
 			</File>
 			<File
-				RelativePath="..\..\src\auloop.c">
-			</File>
-			<File
 				RelativePath="..\..\src\auplay.c">
 			</File>
 			<File
 				RelativePath="..\..\src\ausrc.c">
 			</File>
 			<File
-				RelativePath="..\..\src\calc.c">
+				RelativePath="..\..\src\call.c">
 			</File>
 			<File
-				RelativePath="..\..\src\call.c">
+				RelativePath="..\..\src\cmd.c">
 			</File>
 			<File
 				RelativePath="..\..\src\conf.c">
@@ -164,10 +161,10 @@
 				RelativePath="..\..\src\mnat.c">
 			</File>
 			<File
-				RelativePath="..\..\src\net.c">
+				RelativePath="..\..\src\module.c">
 			</File>
 			<File
-				RelativePath="..\..\src\os.c">
+				RelativePath="..\..\src\net.c">
 			</File>
 			<File
 				RelativePath="..\..\src\play.c">
@@ -191,9 +188,6 @@
 				RelativePath="..\..\src\ui.c">
 			</File>
 			<File
-				RelativePath="..\..\src\uuid.c">
-			</File>
-			<File
 				RelativePath="..\..\src\vidcodec.c">
 			</File>
 			<File
@@ -201,9 +195,6 @@
 			</File>
 			<File
 				RelativePath="..\..\src\vidisp.c">
-			</File>
-			<File
-				RelativePath="..\..\src\vidloop.c">
 			</File>
 			<File
 				RelativePath="..\..\src\vidsrc.c">

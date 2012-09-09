@@ -418,6 +418,9 @@ static int mod_srtp_close(void)
 {
 	menc_srtp_opt = mem_deref(menc_srtp_opt);
 	menc_srtp_mand = mem_deref(menc_srtp_mand);
+
+	crypto_kernel_shutdown();
+
 	return 0;
 }
 

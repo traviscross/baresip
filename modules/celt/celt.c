@@ -157,7 +157,7 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	st->low_overhead = celt_low_overhead;
 
 	if (encp && encp->ptime) {
-		st->frame_size = calc_nsamp(srate, ch, encp->ptime);
+		st->frame_size = srate * ch * encp->ptime / 1000;
 		DEBUG_NOTICE("calc ptime=%u  ---> frame_size=%u\n",
 			     encp->ptime, st->frame_size);
 	}

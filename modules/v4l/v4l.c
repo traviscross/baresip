@@ -6,7 +6,6 @@
 #define _BSD_SOURCE 1
 #include <unistd.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -46,7 +45,7 @@ static void v4l_get_caps(struct vidsrc_st *st)
 	struct video_capability caps;
 
 	if (-1 == ioctl(st->fd, VIDIOCGCAP, &caps)) {
-		DEBUG_WARNING("VIDIOCGCAP: %s\n", strerror(errno));
+		DEBUG_WARNING("VIDIOCGCAP: %m\n", errno);
 		return;
 	}
 
@@ -65,7 +64,7 @@ static int v4l_check_palette(struct vidsrc_st *st)
 	struct video_picture pic;
 
 	if (-1 == ioctl(st->fd, VIDIOCGPICT, &pic)) {
-		DEBUG_WARNING("VIDIOCGPICT: %s\n", strerror(errno));
+		DEBUG_WARNING("VIDIOCGPICT: %m\n", errno);
 		return errno;
 	}
 
@@ -84,7 +83,7 @@ static int v4l_get_win(int fd, int width, int height)
 	struct video_window win;
 
 	if (-1 == ioctl(fd, VIDIOCGWIN, &win)) {
-		DEBUG_WARNING("VIDIOCGWIN: %s\n", strerror(errno));
+		DEBUG_WARNING("VIDIOCGWIN: %m\n", errno);
 		return errno;
 	}
 
@@ -95,7 +94,7 @@ static int v4l_get_win(int fd, int width, int height)
 	win.height = height;
 
 	if (-1 == ioctl(fd, VIDIOCSWIN, &win)) {
-		DEBUG_WARNING("VIDIOCSWIN: %s\n", strerror(errno));
+		DEBUG_WARNING("VIDIOCSWIN: %m\n", errno);
 		return errno;
 	}
 
@@ -141,7 +140,7 @@ static int vd_open(struct vidsrc_st *v4l, const char *device)
 	 */
 	v4l->fd = open(device, O_RDWR);
 	if (v4l->fd < 0) {
-		DEBUG_WARNING("open %s: %s\n", device, strerror(errno));
+		DEBUG_WARNING("open %s: %m\n", device, errno);
 		return errno;
 	}
 

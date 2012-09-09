@@ -310,7 +310,7 @@ static int enc(struct vidcodec_st *st, bool update,
 
 		err = open_encoder(st, &st->encprm, &frame->size);
 		if (err) {
-			DEBUG_WARNING("open_encoder: %s\n", strerror(err));
+			DEBUG_WARNING("open_encoder: %m\n", err);
 			return err;
 		}
 	}
@@ -319,11 +319,15 @@ static int enc(struct vidcodec_st *st, bool update,
 		st->enc.pict->data[i]     = frame->data[i];
 		st->enc.pict->linesize[i] = frame->linesize[i];
 	}
-	st->enc.pict->pts = AV_NOPTS_VALUE;
+	st->enc.pict->pts = st->pts++;
 	if (update) {
 		re_printf("avcodec encoder picture update\n");
 		st->enc.pict->key_frame = 1;
+#ifdef FF_I_TYPE
 		st->enc.pict->pict_type = FF_I_TYPE;  /* Infra Frame */
+#else
+		st->enc.pict->pict_type = AV_PICTURE_TYPE_I;
+#endif
 	}
 	else {
 		st->enc.pict->key_frame = 0;
@@ -331,6 +335,26 @@ static int enc(struct vidcodec_st *st, bool update,
 	}
 
 	mbuf_rewind(st->enc.mb);
+
+#if LIBAVCODEC_VERSION_INT >= ((54<<16)+(1<<8)+0)
+	do {
+		AVPacket avpkt;
+		int got_packet;
+
+		avpkt.data = st->enc.mb->buf;
+		avpkt.size = (int)st->enc.mb->size;
+
+		ret = avcodec_encode_video2(st->enc.ctx, &avpkt,
+					    st->enc.pict, &got_packet);
+		if (ret < 0)
+			return EBADMSG;
+		if (!got_packet)
+			return 0;
+
+		mbuf_set_end(st->enc.mb, avpkt.size);
+
+	} while (0);
+#else
 	ret = avcodec_encode_video(st->enc.ctx, st->enc.mb->buf,
 				   (int)st->enc.mb->size, st->enc.pict);
 	if (ret < 0 )
@@ -344,6 +368,7 @@ static int enc(struct vidcodec_st *st, bool update,
 	}
 
 	mbuf_set_end(st->enc.mb, ret);
+#endif
 
 	switch (st->codec_id) {
 

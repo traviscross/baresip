@@ -79,6 +79,7 @@ struct video {
 	char *peer;             /**< Peer URI                             */
 	bool shuttered;         /**< Video source is shuttered            */
 	enum selfview selfview; /**< Selfview method                      */
+	bool nack_pli;          /**< Send NACK/PLI to peer                */
 };
 
 
@@ -229,7 +230,7 @@ static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
 	/* Encode the whole picture frame */
 	err = vidcodec_get(vtx->enc)->ench(vtx->enc, vtx->picup, frame);
 	if (err) {
-		DEBUG_WARNING("encode rtp send: failed %s\n", strerror(err));
+		DEBUG_WARNING("encode: %m\n", err);
 		return;
 	}
 
@@ -266,7 +267,7 @@ static void vidsrc_error_handler(int err, void *arg)
 {
 	struct vtx *vtx = arg;
 
-	DEBUG_WARNING("Video-source error: %s\n", strerror(err));
+	DEBUG_WARNING("Video-source error: %m\n", err);
 
 	vtx->vsrc = mem_deref(vtx->vsrc);
 }
@@ -341,10 +342,10 @@ static int video_stream_decode(struct vrx *vrx, const struct rtp_header *hdr,
 	frame.data[0] = NULL;
 	err = vidcodec_get(vrx->dec)->dech(vrx->dec, &frame, hdr->m, mb);
 	if (err) {
-		DEBUG_WARNING("decode error (%s)\n", strerror(err));
+		DEBUG_WARNING("decode error: %m\n", err);
 
 		/* send RTCP FIR to peer */
-		stream_send_fir(v->strm);
+		stream_send_fir(v->strm, v->nack_pli);
 
 		/* XXX: if RTCP is not enabled, send XML in SIP INFO ? */
 
@@ -429,6 +430,27 @@ static void stream_recv_handler(const struct rtp_header *hdr,
 }
 
 
+static void rtcp_handler(struct rtcp_msg *msg, void *arg)
+{
+	struct video *v = arg;
+
+	switch (msg->hdr.pt) {
+
+	case RTCP_FIR:
+		v->vtx->picup = true;
+		break;
+
+	case RTCP_PSFB:
+		if (msg->hdr.count == RTCP_PSFB_PLI)
+			v->vtx->picup = true;
+		break;
+
+	default:
+		break;
+	}
+}
+
+
 int video_alloc(struct video **vp, struct call *call,
 		struct sdp_session *sdp_sess, int label,
 		const struct mnat *mnat, struct mnat_sess *mnat_sess,
@@ -458,7 +480,7 @@ int video_alloc(struct video **vp, struct call *call,
 
 	err = stream_alloc(&v->strm, call, sdp_sess, "video", label,
 			   mnat, mnat_sess, menc,
-			   stream_recv_handler, v);
+			   stream_recv_handler, rtcp_handler, v);
 	if (err)
 		goto out;
 
@@ -491,7 +513,7 @@ int video_alloc(struct video **vp, struct call *call,
 	     le=le->next) {
 		struct vidcodec *vc = le->data;
 		err |= sdp_format_add(NULL, stream_sdpmedia(v->strm), false,
-				      vc->pt, vc->name, 90000, 1,
+				      vc->pt, vc->name, 90000, 1, NULL,
 				      vc->cmph, vc, true, "%s", vc->fmtp);
 	}
 
@@ -512,7 +534,7 @@ static void vidisp_input_handler(char key, void *arg)
 
 	(void)vrx;
 
-	ui_input(key, NULL);
+	ui_input(key);
 }
 
 
@@ -573,17 +595,15 @@ static int set_encoder_format(struct vtx *vtx, const char *src,
 				 NULL, dev, vidsrc_frame_handler,
 				 vidsrc_error_handler, vtx);
 		if (err) {
-			DEBUG_NOTICE("No video source: %s\n", strerror(err));
+			DEBUG_NOTICE("No video source: %m\n", err);
 			return err;
 		}
 	}
 
 	vtx->mute_frame = mem_deref(vtx->mute_frame);
 	err = vidframe_alloc(&vtx->mute_frame, VID_FMT_YUV420P, size);
-	if (err) {
-		DEBUG_NOTICE("no mute frame: %s\n", strerror(err));
+	if (err)
 		return err;
-	}
 
 	vidframe_fill(vtx->mute_frame, 0xff, 0xff, 0xff);
 
@@ -633,7 +653,7 @@ int video_start(struct video *v, const char *src, const char *dev,
 #if ENABLE_DECODER
 	err = set_vidisp(v->vrx);
 	if (err) {
-		DEBUG_WARNING("could not set vidisp: %s\n", strerror(err));
+		DEBUG_WARNING("could not set vidisp: %m\n", err);
 	}
 #endif
 
@@ -643,8 +663,8 @@ int video_start(struct video *v, const char *src, const char *dev,
 	err = set_encoder_format(v->vtx, src, dev, &size);
 	if (err) {
 		DEBUG_WARNING("could not set encoder format to"
-			      " [%u x %u] %s\n",
-			      size.w, size.h, strerror(err));
+			      " [%u x %u] %m\n",
+			      size.w, size.h, err);
 	}
 #else
 	(void)src;
@@ -678,11 +698,17 @@ void video_stop(struct video *v)
  */
 void video_mute(struct video *v, bool muted)
 {
+	struct vtx *vtx;
+
 	if (!v)
 		return;
 
-	v->vtx->muted = muted;
-	v->vtx->muted_frames = 0;
+	vtx = v->vtx;
+
+	vtx->muted        = muted;
+	vtx->muted_frames = 0;
+	vtx->picup        = true;
+
 	video_update_picture(v);
 }
 
@@ -847,7 +873,7 @@ int video_encoder_set(struct video *v, struct vidcodec *vc,
 
 		err = vc_alloc(&vtx->enc, vc, v, params);
 		if (err) {
-			DEBUG_WARNING("encoder alloc: %s\n", strerror(err));
+			DEBUG_WARNING("encoder alloc: %m\n", err);
 		}
 	}
 #if ENABLE_DECODER
@@ -891,7 +917,7 @@ int video_decoder_set(struct video *v, struct vidcodec *vc, uint8_t pt_rx)
 
 		err = vc_alloc(&vrx->dec, vc, v, NULL);
 		if (err) {
-			DEBUG_WARNING("decoder alloc: %s\n", strerror(err));
+			DEBUG_WARNING("decoder alloc: %m\n", err);
 		}
 	}
 #if ENABLE_ENCODER
@@ -952,12 +978,23 @@ void video_vidsrc_set_device(struct video *v, const char *dev)
 }
 
 
+static bool sdprattr_contains(struct stream *s, const char *name,
+			      const char *str)
+{
+	const char *attr = sdp_media_rattr(stream_sdpmedia(s), name);
+	return attr ? (NULL != strstr(attr, str)) : false;
+}
+
+
 void video_sdp_attr_decode(struct video *v)
 {
 	if (!v)
 		return;
 
 	stream_sdp_attr_decode(v->strm);
+
+	/* RFC 4585 */
+	v->nack_pli = sdprattr_contains(v->strm, "rtcp-fb", "nack");
 }
 
 

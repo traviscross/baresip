@@ -172,9 +172,6 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 		nsamp = g722_1_fillin(&st->dec, (int16_t *)mbuf_buf(dst),
 				      NULL, 0);
 	}
-	if (nsamp <= 0) {
-		re_printf("g722_decode: nsamp=%d\n", nsamp);
-	}
 
 	if (src)
 		mbuf_skip_to_end(src);

@@ -70,7 +70,7 @@ static void destructor(void *arg)
 		avcodec_close(st->ctx);
 
 	if (st->ic) {
-#if LIBAVFORMAT_VERSION_INT >= ((53<<16) + (26<<8) + 0)
+#if LIBAVFORMAT_VERSION_INT >= ((53<<16) + (21<<8) + 0)
 		avformat_close_input(&st->ic);
 #else
 		av_close_input_file(st->ic);
@@ -199,7 +199,9 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 		 const char *dev, vidsrc_frame_h *frameh,
 		 vidsrc_error_h *errorh, void *arg)
 {
+#if LIBAVFORMAT_VERSION_INT < ((52<<16) + (110<<8) + 0)
 	AVFormatParameters prms;
+#endif
 	struct vidsrc_st *st;
 	bool found_stream = false;
 	uint32_t i;
@@ -221,7 +223,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	st->arg    = arg;
 
 	if (prm) {
-		st->fps    = prm->fps;
+		st->fps = prm->fps;
 	}
 	else {
 		st->fps = 25;
@@ -233,7 +235,6 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	 */
 
 #if LIBAVFORMAT_VERSION_INT >= ((52<<16) + (110<<8) + 0)
-	(void)prms;
 	(void)fmt;
 	ret = avformat_open_input(&st->ic, dev, NULL, NULL);
 #else

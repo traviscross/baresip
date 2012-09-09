@@ -52,7 +52,7 @@ void print_events(int fd)
 
 	memset(evtype_bitmask, 0, sizeof(evtype_bitmask));
 	if (ioctl(fd, EVIOCGBIT(0, EV_MAX), evtype_bitmask) < 0) {
-		DEBUG_WARNING("evdev ioctl EVIOCGBIT (%s)\n", strerror(errno));
+		DEBUG_WARNING("evdev ioctl EVIOCGBIT (%m)\n", errno);
 		return;
 	}
 

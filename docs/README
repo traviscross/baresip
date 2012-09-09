@@ -22,6 +22,7 @@ Modular Plugin Architecture:
 alsa          ALSA audio driver
 amr           Adaptive Multi-Rate (AMR) audio codec
 audiounit     AudioUnit audio driver for MacOSX/iOS
+auloop        Audio-loop test module
 avcapture     Video source using iOS AVFoundation video capture
 avcodec       Video codec using FFmpeg
 avformat      Video source using FFmpeg libavformat
@@ -29,6 +30,7 @@ bv32          BroadVoice32 audio codec
 cairo         Cairo video source
 celt          CELT audio codec
 cons          UDP console
+contact       Contacts module
 coreaudio     Apple Coreaudio driver
 evdev         Linux input driver
 g711          G.711 audio codec
@@ -38,15 +40,19 @@ gsm           GSM audio codec
 gst           Gstreamer audio source
 ice           ICE protocol for NAT Traversal
 ilbc          iLBC audio codec
+isac          iSAC audio codec
 l16           L16 audio codec
 mda           Symbian Mediaserver audio driver
+menu          Interactive menu
 natbd         NAT Behavior Discovery Module
 opengl        OpenGL video output
+opengles      OpenGLES video output
 opensles      OpenSLES audio driver
 opus          OPUS Interactive audio codec
 oss           Open Sound System (OSS) audio driver
 plc           Packet Loss Concealment (PLC) using spandsp
 portaudio     Portaudio driver
+presence      Presence module
 qtcapture     Apple QTCapture video source driver
 quicktime     Apple Quicktime video source driver
 rst           Radio streamer using mpg123
@@ -60,10 +66,12 @@ speex_resamp  Audio resampler using libspeexdsp
 srtp          Secure RTP encryption
 stdio         Standard input/output UI driver
 stun          Session Traversal Utilities for NAT (STUN) module
+syslog        Syslog module
 turn          Obtaining Relay Addresses from STUN (TURN) module
-uuid          UUID generator
+uuid          UUID generator and loader
 v4l           Video4Linux video source
 v4l2          Video4Linux2 video source
+vidloop       Video-loop test module
 vpx           VP8/VPX video codec
 winwave       Audio driver for Windows
 x11           X11 video output driver
@@ -76,6 +84,8 @@ IETF RFC/I-Ds:
 * RFC 2429  RTP Payload Format for 1998 ver of ITU-T Rec. H.263 Video (H.263+)
 * RFC 3016  RTP Payload Format for MPEG-4 Audio/Visual Streams
 * RFC 3711  The Secure Real-time Transport Protocol (SRTP)
+* RFC 3856  A Presence Event Package for SIP
+* RFC 3863  Presence Information Data Format (PIDF)
 * RFC 3951  Internet Low Bit Rate Codec (iLBC)
 * RFC 3952  RTP Payload Format for iLBC Speech
 * RFC 3984  RTP Payload Format for H.264 Video

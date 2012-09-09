@@ -6,6 +6,6 @@
 
 MOD		:= x11
 $(MOD)_SRCS	+= x11.c
-$(MOD)_LFLAGS	+= -lX11 -lXext
+$(MOD)_LFLAGS	+= -L$(SYSROOT)/X11/lib -lX11 -lXext
 
 include mk/mod.mk

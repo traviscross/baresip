@@ -83,6 +83,42 @@ const struct vidisp *vidisp_find(const char *name)
 }
 
 
+/**
+ * Allocate a video display state
+ *
+ * @param stp     Pointer to allocated display state
+ * @param name    Name of video display
+ * @param parent  Parent video display state (optional)
+ * @param prm     Video display parameters (optional)
+ * @param dev     Display device
+ * @param inputh  Keyboard input handler
+ * @param resizeh Window resize handler
+ * @param arg     Handler argument
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+int vidisp_alloc(struct vidisp_st **stp, const char *name,
+		 struct vidisp_st *parent,
+		 struct vidisp_prm *prm, const char *dev,
+		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
+{
+	struct vidisp *vd = (struct vidisp *)vidisp_find(name);
+	if (!vd)
+		return ENOENT;
+
+	return vd->alloch(stp, parent, vd, prm, dev, inputh, resizeh, arg);
+}
+
+
+/**
+ * Display a video frame
+ *
+ * @param st    Video display state
+ * @param title Display title
+ * @param frame Video frame
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int vidisp_display(struct vidisp_st *st, const char *title,
 		   const struct vidframe *frame)
 {

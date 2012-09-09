@@ -46,10 +46,10 @@ struct stream {
 	struct menc_st *menc;    /**< Media Encryption                      */
 	uint32_t ssrc_rx;        /**< Incoming syncronizing source          */
 	uint32_t pseq;           /**< Sequence number for incoming RTP      */
-	bool nack_pli;           /**< Send NACK/PLI to peer                 */
 	bool rtcp;               /**< Enable RTCP                           */
 	bool rtcp_mux;           /**< RTP/RTCP multiplex supported by peer  */
-	stream_recv_h *rh;       /**< Stream receive handler                */
+	stream_rtp_h *rtph;      /**< Stream RTP handler                    */
+	stream_rtcp_h *rtcph;    /**< Stream RTCP handler                   */
 	void *arg;               /**< Handler argument                      */
 
 	struct tmr tmr_stats;
@@ -141,26 +141,26 @@ static void rtp_recv(const struct sa *src, const struct rtp_header *hdr,
 
 		err = jbuf_put(s->jbuf, hdr, mb);
 		if (err) {
-			(void)re_printf("%s: dropping %u bytes from %J (%s)\n",
+			(void)re_printf("%s: dropping %u bytes from %J (%m)\n",
 					sdp_media_name(s->sdp), mb->end,
-					src, strerror(err));
+					src, err);
 		}
 
 		if (jbuf_get(s->jbuf, &hdr2, &mb2))
 			memset(&hdr2, 0, sizeof(hdr2));
 
 		if (lostcalc(s, hdr2.seq) > 0)
-			s->rh(hdr, NULL, s->arg);
+			s->rtph(hdr, NULL, s->arg);
 
-		s->rh(&hdr2, mb2, s->arg);
+		s->rtph(&hdr2, mb2, s->arg);
 
 		mem_deref(mb2);
 	}
 	else {
 		if (lostcalc(s, hdr->seq) > 0)
-			s->rh(hdr, NULL, s->arg);
+			s->rtph(hdr, NULL, s->arg);
 
-		s->rh(hdr, mb, s->arg);
+		s->rtph(hdr, mb, s->arg);
 	}
 }
 
@@ -172,30 +172,12 @@ static void rtcp_handler(const struct sa *src, struct rtcp_msg *msg, void *arg)
 	(void)src;
 	(void)s;
 
-	switch (msg->hdr.pt) {
-
-#ifdef USE_VIDEO
-	case RTCP_FIR:
-		DEBUG_NOTICE("got RTCP FIR from %J\n", src);
-		if (s->type == STREAM_VIDEO)
-			video_update_picture((struct video *)s->arg);
-		break;
-
-	case RTCP_PSFB:
-		if (msg->hdr.count == RTCP_PSFB_PLI) {
-			DEBUG_NOTICE("got RTCP PLI from %J\n", src);
-			video_update_picture((struct video *)s->arg);
-		}
-		break;
-#endif
-
-	default:
-		break;
-	}
+	if (s->rtcph)
+		s->rtcph(msg, s->arg);
 }
 
 
-static int stream_sock_alloc(struct stream *s)
+static int stream_sock_alloc(struct stream *s, int af)
 {
 	struct sa laddr;
 	int tos, err;
@@ -204,7 +186,7 @@ static int stream_sock_alloc(struct stream *s)
 		return EINVAL;
 
 	/* we listen on all interfaces */
-	sa_init(&laddr, sa_af(net_laddr()));
+	sa_init(&laddr, sa_af(net_laddr_af(af)));
 
 	err = rtp_listen(&s->rtp, IPPROTO_UDP, &laddr,
 			 config.avt.rtp_ports.min, config.avt.rtp_ports.max,
@@ -213,14 +195,10 @@ static int stream_sock_alloc(struct stream *s)
 		return err;
 
 	tos = config.avt.rtp_tos;
-	err = udp_setsockopt(rtp_sock(s->rtp), IPPROTO_IP, IP_TOS,
+	(void)udp_setsockopt(rtp_sock(s->rtp), IPPROTO_IP, IP_TOS,
 			     &tos, sizeof(tos));
-	err |= udp_setsockopt(rtcp_sock(s->rtp), IPPROTO_IP, IP_TOS,
-			      &tos, sizeof(tos));
-	if (err) {
-		DEBUG_INFO("alloc: udp_setsockopt IP_TOS: %s\n",
-			   strerror(err));
-	}
+	(void)udp_setsockopt(rtcp_sock(s->rtp), IPPROTO_IP, IP_TOS,
+			     &tos, sizeof(tos));
 
 	udp_rxsz_set(rtp_sock(s->rtp), RTP_RECV_SIZE);
 
@@ -257,12 +235,12 @@ int stream_alloc(struct stream **sp, struct call *call,
 		 const char *name, int label,
 		 const struct mnat *mnat, struct mnat_sess *mnat_sess,
 		 const struct menc *menc,
-		 stream_recv_h *rh, void *arg)
+		 stream_rtp_h *rtph, stream_rtcp_h *rtcph, void *arg)
 {
 	struct stream *s;
 	int err;
 
-	if (!sp || !call || !rh)
+	if (!sp || !call || !rtph)
 		return EINVAL;
 
 	s = mem_zalloc(sizeof(*s), stream_destructor);
@@ -282,12 +260,13 @@ int stream_alloc(struct stream **sp, struct call *call,
 	else
 		s->type = STREAM_UNKNOWN;
 
-	s->rh    = rh;
+	s->rtph  = rtph;
+	s->rtcph = rtcph;
 	s->arg   = arg;
 	s->pseq  = -1;
 	s->rtcp  = config.avt.rtcp_enable;
 
-	err = stream_sock_alloc(s);
+	err = stream_sock_alloc(s, call_af(call));
 	if (err)
 		goto out;
 
@@ -378,8 +357,7 @@ void stream_start_keepalive(struct stream *s)
 		err = rtpkeep_alloc(&s->rtpkeep, rtpkeep,
 				    IPPROTO_UDP, s->rtp, s->sdp);
 		if (err) {
-			DEBUG_WARNING("rtpkeep_alloc failed: %s\n",
-				      strerror(err));
+			DEBUG_WARNING("rtpkeep_alloc failed: %m\n", err);
 		}
 	}
 }
@@ -437,7 +415,6 @@ void stream_remote_set(struct stream *s, const char *cname)
 
 void stream_sdp_attr_decode(struct stream *s)
 {
-	const char *attr;
 	int err;
 
 	if (!s)
@@ -446,21 +423,10 @@ void stream_sdp_attr_decode(struct stream *s)
 	if (s->menc && menc_get(s->menc)->updateh) {
 		err = menc_get(s->menc)->updateh(s->menc);
 		if (err) {
-			DEBUG_WARNING("menc update: %s\n", strerror(err));
+			DEBUG_WARNING("menc update: %m\n", err);
 		}
 	}
 
-	/* RFC 4585 */
-	attr = sdp_media_rattr(s->sdp, "rtcp-fb");
-	if (attr) {
-		if (0 == re_regex(attr, strlen(attr), "nack")) {
-			if (!s->nack_pli) {
-				DEBUG_NOTICE("Peer supports NACK PLI (%s)\n",
-					     attr);
-			}
-			s->nack_pli = true;
-		}
-	}
 }
 
 
@@ -506,20 +472,20 @@ void stream_set_srate(struct stream *s, uint32_t srate_tx, uint32_t srate_rx)
 }
 
 
-void stream_send_fir(struct stream *s)
+void stream_send_fir(struct stream *s, bool pli)
 {
 	int err;
 
 	if (!s)
 		return;
 
-	if (s->nack_pli)
+	if (pli)
 		err = rtcp_send_pli(s->rtp, s->ssrc_rx);
 	else
 		err = rtcp_send_fir(s->rtp, rtp_sess_ssrc(s->rtp));
 
 	if (err) {
-		DEBUG_WARNING("Send FIR: %s\n", strerror(err));
+		DEBUG_WARNING("Send FIR: %m\n", err);
 	}
 }
 

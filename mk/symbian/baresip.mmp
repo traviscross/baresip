@@ -29,26 +29,24 @@ SOURCEPATH    ..\..\src
 SOURCE        aucodec.c
 SOURCE        audio.c
 SOURCE        aufilt.c
-SOURCE        auloop.c
 SOURCE        auplay.c
 SOURCE        ausrc.c
-SOURCE        calc.c
 SOURCE        call.c
+SOURCE        cmd.c
 SOURCE        conf.c
 SOURCE        contact.c
 SOURCE        main.c
 SOURCE        mctrl.c
 SOURCE        menc.c
 SOURCE        mnat.c
+SOURCE        module.c
 SOURCE        net.c
-SOURCE        os.c
 SOURCE        play.c
 SOURCE        rtpkeep.c
 SOURCE        sipreq.c
 SOURCE        stream.c
 SOURCE        ua.c
 SOURCE        ui.c
-SOURCE        uuid.c
 SOURCE        vidcodec.c
 
 /* Static modules */
@@ -78,7 +76,7 @@ SYSTEMINCLUDE \epoc32\include\rem
 LIBRARY       estlib.lib euser.lib
 LIBRARY       esock.lib insock.lib
 STATICLIBRARY resdp.lib resipsess.lib resip.lib restun.lib redns.lib re.lib
-STATICLIBRARY rem.lib
+STATICLIBRARY resipevent.lib rem.lib
 #ifndef EKA2
 STATICLIBRARY ecrt0.lib
 STATICLIBRARY libgcc.a

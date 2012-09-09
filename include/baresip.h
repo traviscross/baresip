@@ -4,36 +4,33 @@
  * Copyright (C) 2010 Creytiv.com
  */
 
+#ifndef BARESIP_H__
+#define BARESIP_H__
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 
+/** Defines the Baresip version string */
+#define BARESIP_VERSION "0.4.2"
+
+
 /* forward declarations */
 struct sa;
-struct sip_msg;
 struct sdp_media;
 struct sdp_session;
+struct sip_msg;
+struct ua;
 struct vidframe;
 struct vidrect;
 struct vidsz;
 
 
-/** Defines the exit handler */
-typedef void (exit_h)(int ret);
+/*
+ * Call
+ */
 
-
-/* calc - Interface to calculation routines */
-
-/** Calculate the average of two numeric values */
-#define avg(a, b) ((a)+(b))/2
-
-uint32_t calc_nsamp(uint32_t srate, int channels, uint16_t ptime);
-uint32_t calc_ptime(uint32_t srate, int channels, uint32_t nsamp);
-int16_t  calc_avg_s16(struct mbuf *mb);
-
-
-/* call */
 struct call;
 
 int  call_modify(struct call *call);
@@ -48,10 +45,11 @@ struct video *call_video(const struct call *call);
 struct list *call_streaml(const struct call *call);
 bool call_has_audio(const struct call *call);
 bool call_has_video(const struct call *call);
+int call_transfer(struct call *call, const char *uri);
 
 
 /*
- * conf
+ * Conf
  */
 
 /** A range of numbers */
@@ -82,9 +80,11 @@ struct config {
 	/** Audio */
 	struct {
 		char src_mod[16];      /**< Audio source module            */
-		char src_dev[64];      /**< Audio source device            */
+		char src_dev[128];     /**< Audio source device            */
 		char play_mod[16];     /**< Audio playback module          */
-		char play_dev[64];     /**< Audio playback device          */
+		char play_dev[128];    /**< Audio playback device          */
+		char alert_mod[16];    /**< Audio alert module             */
+		char alert_dev[128];   /**< Audio alert device             */
 		struct range srate;    /**< Audio sampling rate in [Hz]    */
 		struct range channels; /**< Nr. of audio channels (1=mono) */
 		uint32_t aec_len;      /**< AEC Tail length in [ms]        */
@@ -96,7 +96,7 @@ struct config {
 	/** Video */
 	struct {
 		char src_mod[16];      /**< Video source module           */
-		char src_dev[64];      /**< Video source device           */
+		char src_dev[128];     /**< Video source device           */
 		int width, height;     /**< Video resolution              */
 		uint32_t bitrate;      /**< Encoder bitrate in [bit/s]    */
 		uint32_t fps;          /**< Video framerate               */
@@ -115,33 +115,46 @@ struct config {
 	} avt;
 };
 
+extern struct config config;
 
-struct mod;
 
 /** Defines the configuration line handler */
 typedef int (confline_h)(const struct pl *addr);
 
-int  conf_accounts_get(confline_h *ch, uint32_t *n);
-int  conf_contacts_get(confline_h *ch, uint32_t *n);
+int  conf_accounts_get(confline_h *ch);
 int  conf_system_get(const char *path);
 int  conf_system_get_file(const char *path);
 int  conf_system_get_buf(const uint8_t *buf, size_t sz);
 int  configure(void);
+int  conf_modules(void);
 void conf_path_set(const char *path);
-int  conf_path_get(char *path, uint32_t sz);
-const char *conf_modpath(void);
+int  conf_path_get(char *path, size_t sz);
+int  conf_parse(const char *filename, confline_h *ch);
 struct conf *conf_cur(void);
-void conf_set_domain(const char *domain);
-int  conf_load_module(struct mod **mp, const char *name);
+bool conf_fileexist(const char *path);
 
 
 /*
- * contact
+ * Contact
  */
 
-void contact_init(void);
-void contact_close(void);
-int  contact_add(const struct pl *addr);
+enum presence_status {
+	PRESENCE_UNKNOWN,
+	PRESENCE_OPEN,
+	PRESENCE_CLOSED,
+	PRESENCE_BUSY
+};
+
+struct contact;
+
+int contact_add(struct contact **contactp, const struct pl *addr);
+int contacts_print(struct re_printf *pf, void *unused);
+struct sip_addr *contact_addr(const struct contact *c);
+const char      *contact_str(const struct contact *c);
+void             contact_set_presence(struct contact *c,
+				      enum presence_status status);
+const char      *contact_presence_str(enum presence_status status);
+struct list     *contact_list(void);
 
 
 /*
@@ -242,10 +255,11 @@ int aufilt_register(struct aufilt **afp, const char *name,
 		    aufilt_alloc_h *alloch, aufilt_enc_h *ench,
 		    aufilt_dec_h *dech, aufilt_update_h *updh);
 struct list *aufilt_list(void);
+int aufilt_debug(struct re_printf *pf, void *unused);
 
 
 /*
- * menc - Media encryption
+ * Menc - Media encryption
  */
 
 struct menc;
@@ -262,23 +276,24 @@ int menc_register(struct menc **mencp, const char *id, menc_alloc_h *alloch,
 
 
 /*
- * net - Networking
+ * Net - Networking
  */
 
 typedef void (net_change_h)(void *arg);
 
-int  net_init(bool prefer_ipv6);
+int  net_init(void);
 void net_close(void);
 int  net_dnssrv_add(const struct sa *sa);
 void net_change(uint32_t interval, net_change_h *ch, void *arg);
 bool net_check(void);
 int  net_debug(struct re_printf *pf, void *unused);
-const struct sa *net_laddr(void);
+const struct sa *net_laddr_af(int af);
 struct dnsc *net_dnsc(void);
+const char *net_domain(void);
 
 
 /*
- * play - audio file player
+ * Play - audio file player
  */
 
 struct play;
@@ -290,7 +305,7 @@ void play_close(void);
 
 
 /*
- * ua - User Agent
+ * User Agent
  */
 
 struct ua;
@@ -315,7 +330,6 @@ enum ua_event {
 /** Defines the status modes */
 enum statmode {
 	STATMODE_CALL = 0,
-	STATMODE_JBUF,
 	STATMODE_OFF,
 
 	/* marker */
@@ -346,24 +360,28 @@ typedef void (options_resp_h)(int err, const struct sip_msg *msg, void *arg);
 /* Multiple instances */
 int  ua_alloc(struct ua **uap, const char *aor,
 	      ua_event_h *eh, ua_message_h *msgh, void *arg);
+int  ua_add(const struct pl *addr);
 int  ua_connect(struct ua *ua, const char *uri, const char *params,
-		const char *mnatid, enum vidmode vidmode);
+		const char *mnatid, enum vidmode vmode);
 void ua_hangup(struct ua *ua);
 void ua_answer(struct ua *ua);
-int  ua_im_send(struct ua *ua, struct mbuf *peer, struct mbuf *msg);
-void ua_toggle_statmode(struct ua *ua);
+int  ua_im_send(struct ua *ua, const char *peer, const char *msg);
 void ua_set_statmode(struct ua *ua, enum statmode mode);
 int  ua_options_send(struct ua *ua, const char *uri,
 		     options_resp_h *resph, void *arg);
 int  ua_register(struct ua *ua);
 int  ua_sipfd(const struct ua *ua);
+int  ua_auth(struct ua *ua, char **username, char **password,
+	     const char *realm);
 const char *ua_aor(const struct ua *ua);
+const char *ua_cuser(const struct ua *ua);
+const char *ua_outbound(const struct ua *ua);
 struct call *ua_call(const struct ua *ua);
 
 
 /* One instance */
 int  ua_init(const char *software, bool udp, bool tcp, bool tls,
-	     exit_h *exith);
+	     bool prefer_ipv6);
 void ua_set_uuid(const char *uuid);
 void ua_set_aumode(enum audio_mode aumode);
 void ua_close(void);
@@ -378,11 +396,14 @@ int  ua_print_reg_status(struct re_printf *pf, void *unused);
 int  ua_print_call_status(struct re_printf *pf, void *unused);
 struct sip *uag_sip(void);
 struct sipsess_sock *uag_sipsess_sock(void);
+struct sipevent_sock *uag_sipevent_sock(void);
 const char *ua_event_str(enum ua_event ev);
+struct ua *ua_find(const struct pl *cuser);
+struct ua *ua_find_aor(const char *aor);
 
 
 /*
- * ui - User Interface
+ * User Interface
  */
 
 struct ui;
@@ -399,20 +420,46 @@ typedef int  (ui_alloc_h)(struct ui_st **stp, struct ui_prm *prm,
 			  ui_input_h *ih, void *arg);
 typedef int  (ui_output_h)(struct ui_st *st, const char *str);
 
-int  ui_init(exit_h *exith, bool rdaemon);
-void ui_close(void);
-int  ui_start(void);
-void ui_input(char key, struct re_printf *pf);
-void ui_out(const char *str);
-void ui_splash(uint32_t n_uas);
-void ui_set_incall(bool incall);
+void ui_input(char key);
+void ui_input_str(const char *str);
+void ui_output(const char *str);
 int  ui_register(struct ui **uip, const char *name,
 		 ui_alloc_h *alloch, ui_output_h *outh);
-int ui_allocate(const char *name, ui_input_h *inputh, void *arg);
 
 
-void audio_loop_test(bool stop);
-void video_loop_test(bool stop);
+/*
+ * Command interface
+ */
+
+/** Command flags */
+enum {
+	CMD_PRM  = (1<<0),              /**< Command with parameter */
+	CMD_PROG = (1<<1),              /**< Show progress          */
+
+	CMD_IPRM = CMD_PRM | CMD_PROG,  /**< Interactive parameter  */
+};
+
+/** Command arguments */
+struct cmd_arg {
+	char key;         /**< Which key was pressed  */
+	char *prm;        /**< Optional parameter     */
+	bool complete;    /**< True if complete       */
+};
+
+/** Defines a command */
+struct cmd {
+	char key;         /**< Input character        */
+	int flags;        /**< Optional command flags */
+	const char *desc; /**< Description string     */
+	re_printf_h *h;   /**< Command handler        */
+};
+
+struct cmd_ctx;
+
+int  cmd_register(const struct cmd *cmdv, size_t cmdc);
+void cmd_unregister(const struct cmd *cmdv);
+int  cmd_process(struct cmd_ctx **ctxp, char key, struct re_printf *pf);
+int  cmd_print(struct re_printf *pf, void *unused);
 
 
 /*
@@ -445,6 +492,10 @@ int vidsrc_register(struct vidsrc **vp, const char *name,
 		    vidsrc_alloc_h *alloch, vidsrc_update_h *updateh);
 const struct vidsrc *vidsrc_find(const char *name);
 struct list *vidsrc_list(void);
+int vidsrc_alloc(struct vidsrc_st **stp, const char *name,
+		 struct media_ctx **ctx, struct vidsrc_prm *prm,
+		 const struct vidsz *size, const char *fmt, const char *dev,
+		 vidsrc_frame_h *frameh, vidsrc_error_h *errorh, void *arg);
 
 
 /*
@@ -475,9 +526,17 @@ typedef void (vidisp_hide_h)(struct vidisp_st *st);
 int vidisp_register(struct vidisp **vp, const char *name,
 		    vidisp_alloc_h *alloch, vidisp_update_h *updateh,
 		    vidisp_disp_h *disph, vidisp_hide_h *hideh);
+int vidisp_alloc(struct vidisp_st **stp, const char *name,
+		 struct vidisp_st *parent,
+		 struct vidisp_prm *prm, const char *dev,
+		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg);
+int vidisp_display(struct vidisp_st *st, const char *title,
+		   const struct vidframe *frame);
 
 
-/* Audio Codec */
+/*
+ * Audio Codec
+ */
 
 struct aucodec;
 struct aucodec_st;    /* must "inherit" from struct aucodec */
@@ -507,10 +566,11 @@ struct list *aucodec_list(void);
 uint32_t aucodec_srate(const struct aucodec *ac);
 uint8_t  aucodec_ch(const struct aucodec *ac);
 int  aucodec_alloc(struct aucodec_st **sp, const char *name, uint32_t srate,
-		   int channels, struct aucodec_prm *enc_prm,
+		   uint8_t channels, struct aucodec_prm *enc_prm,
 		   struct aucodec_prm *dec_prm, const char *fmtp);
 int aucodec_encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src);
 int aucodec_decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src);
+int aucodec_debug(struct re_printf *pf, const struct list *acl);
 
 
 /*
@@ -548,10 +608,19 @@ int vidcodec_register(struct vidcodec **vp, const char *pt, const char *name,
 		      vidcodec_enc_h *ench, vidcodec_pktize_h *pktizeh,
 		      vidcodec_dec_h *dech, sdp_fmtp_cmp_h *cmph);
 const struct vidcodec *vidcodec_find(const char *name);
+struct vidcodec *vidcodec_get(const struct vidcodec_st *st);
 const char *vidcodec_pt(const struct vidcodec *vc);
 const char *vidcodec_name(const struct vidcodec *vc);
 struct list *vidcodec_list(void);
 void vidcodec_set_fmtp(struct vidcodec *vc, const char *fmtp);
+int  vidcodec_alloc(struct vidcodec_st **sp, const char *name,
+		    struct vidcodec_prm *encp, const char *fmtp,
+		    vidcodec_enq_h *enqh, vidcodec_send_h *sendh, void *arg);
+int  vidcodec_encode(struct vidcodec_st *st, bool update,
+		     const struct vidframe *frame);
+int  vidcodec_decode(struct vidcodec_st *st, struct vidframe *frame,
+		     bool marker, struct mbuf *src);
+int  vidcodec_debug(struct re_printf *pf, const struct list *vcl);
 
 
 /*
@@ -606,17 +675,26 @@ int mnat_register(struct mnat **mnatp, const char *id, const char *ftag,
 		  mnat_update_h *updateh);
 
 
-/* Real-time */
+/*
+ * Real-time
+ */
 int realtime_enable(bool enable, int fps);
 
 
-/* Modules */
+/*
+ * Modules
+ */
+
 #ifdef STATIC
 #define DECL_EXPORTS(name) exports_ ##name
 #else
 #define DECL_EXPORTS(name) exports
 #endif
 
+
 #ifdef __cplusplus
 }
 #endif
+
+
+#endif /* BARESIP_H__ */

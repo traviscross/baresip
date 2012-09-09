@@ -63,12 +63,12 @@ static void get_video_input(struct vidsrc_st *st)
 	memset(&input, 0, sizeof(input));
 
 	if (-1 == v4l2_ioctl(st->fd, VIDIOC_G_INPUT, &input.index)) {
-		DEBUG_WARNING("VIDIOC_G_INPUT: %s\n", strerror(errno));
+		DEBUG_WARNING("VIDIOC_G_INPUT: %m\n", errno);
 		return;
 	}
 
 	if (-1 == v4l2_ioctl(st->fd, VIDIOC_ENUMINPUT, &input)) {
-		DEBUG_WARNING("VIDIOC_ENUMINPUT: %s\n", strerror(errno));
+		DEBUG_WARNING("VIDIOC_ENUMINPUT: %m\n", errno);
 		return;
 	}
 
@@ -181,8 +181,7 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 			return ENODEV;
 		}
 		else {
-			DEBUG_WARNING("VIDIOC_QUERYCAP: %s\n",
-				      strerror(errno));
+			DEBUG_WARNING("VIDIOC_QUERYCAP: %m\n", errno);
 			return errno;
 		}
 	}
@@ -225,7 +224,7 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 	fmt.fmt.pix.field       = V4L2_FIELD_INTERLACED;
 
 	if (-1 == xioctl(st->fd, VIDIOC_S_FMT, &fmt)) {
-		DEBUG_WARNING("VIDIOC_S_FMT: %s\n", strerror(errno));
+		DEBUG_WARNING("VIDIOC_S_FMT: %m\n", errno);
 		return errno;
 	}
 
@@ -396,7 +395,7 @@ static int read_frame(struct vidsrc_st *st)
 				/* fall through */
 
 			default:
-				DEBUG_WARNING("read: %s\n", strerror(errno));
+				DEBUG_WARNING("read: %m\n", errno);
 				BREAKPOINT;
 				return errno;
 			}
@@ -423,8 +422,7 @@ static int read_frame(struct vidsrc_st *st)
 				/* fall through */
 
 			default:
-				DEBUG_WARNING("VIDIOC_DQBUF: %s\n",
-					      strerror(errno));
+				DEBUG_WARNING("VIDIOC_DQBUF: %m\n", errno);
 				return errno;
 			}
 		}
@@ -453,7 +451,7 @@ static int vd_open(struct vidsrc_st *st, const char *device)
 	 */
 	st->fd = v4l2_open(device, O_RDWR);
 	if (st->fd < 0) {
-		DEBUG_WARNING("open %s: %s\n", device, strerror(errno));
+		DEBUG_WARNING("open %s: %m\n", device, errno);
 		return errno;
 	}
 
@@ -489,7 +487,7 @@ static void *read_thread(void *arg)
 	while (st->run) {
 		err = read_frame(st);
 		if (err) {
-			DEBUG_WARNING("read_frame: %s\n", strerror(err));
+			DEBUG_WARNING("read_frame: %m\n", err);
 		}
 	}
 

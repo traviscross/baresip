@@ -3,7 +3,6 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
-#include <string.h>
 #include <re.h>
 #include <baresip.h>
 
@@ -128,7 +127,7 @@ static void nat_mapping_handler(int err, enum nat_type type, void *arg)
 		return;
 
 	if (err) {
-		DEBUG_WARNING("NAT mapping failed (%s)\n", strerror(err));
+		DEBUG_WARNING("NAT mapping failed (%m)\n", err);
 		goto out;
 	}
 
@@ -155,7 +154,7 @@ static void nat_filtering_handler(int err, enum nat_type type, void *arg)
 		return;
 
 	if (err) {
-		DEBUG_WARNING("NAT filtering failed (%s)\n", strerror(err));
+		DEBUG_WARNING("NAT filtering failed (%m)\n", err);
 		goto out;
 	}
 
@@ -183,7 +182,7 @@ static void nat_lifetime_handler(int err,
 	++natbd->n_nl;
 
 	if (err) {
-		DEBUG_WARNING("nat_lifetime_handler: (%s)\n", strerror(err));
+		DEBUG_WARNING("nat_lifetime_handler: (%m)\n", err);
 		return;
 	}
 
@@ -207,11 +206,13 @@ static void nat_genalg_handler(int err, uint16_t scode, const char *reason,
 	if (natbd->terminated)
 		return;
 
-	if (err || scode) {
-		DEBUG_WARNING("Generic ALG detection failed: %s %u %s\n",
-			      err ? strerror(err) : "",
-			      err ? 0 : scode,
-			      err ? "" : reason);
+	if (err) {
+		DEBUG_WARNING("Generic ALG detection failed: %m\n", err);
+		goto out;
+	}
+	else if (scode) {
+		DEBUG_WARNING("Generic ALG detection failed: %u %s\n",
+			      scode, reason);
 		goto out;
 	}
 
@@ -256,19 +257,19 @@ static int natbd_start(struct natbd *natbd)
 					     nat_hairpinning_handler, natbd);
 		err |= nat_hairpinning_start(natbd->nh);
 		if (err) {
-			DEBUG_WARNING("nat_hairpinning_start() failed (%s)\n",
-				      strerror(err));
+			DEBUG_WARNING("nat_hairpinning_start() failed (%m)\n",
+				      err);
 		}
 	}
 
 	if (!natbd->nm) {
-		err |= nat_mapping_alloc(&natbd->nm, net_laddr(),
+		err |= nat_mapping_alloc(&natbd->nm, net_laddr_af(AF_INET),
 					 &natbd->stun_srv, natbd->proto, NULL,
 					 nat_mapping_handler, natbd);
 		err |= nat_mapping_start(natbd->nm);
 		if (err) {
-			DEBUG_WARNING("nat_mapping_start() failed (%s)\n",
-				      strerror(err));
+			DEBUG_WARNING("nat_mapping_start() failed (%m)\n",
+				      err);
 		}
 	}
 
@@ -281,8 +282,8 @@ static int natbd_start(struct natbd *natbd)
 						   natbd);
 			err |= nat_filtering_start(natbd->nf);
 			if (err) {
-				DEBUG_WARNING("nat_filtering_start() (%s)\n",
-					      strerror(err));
+				DEBUG_WARNING("nat_filtering_start() (%m)\n",
+					      err);
 			}
 		}
 	}
@@ -293,12 +294,12 @@ static int natbd_start(struct natbd *natbd)
 					nat_genalg_handler, natbd);
 
 		if (err) {
-			DEBUG_WARNING("natbd_init: %s\n", strerror(err));
+			DEBUG_WARNING("natbd_init: %m\n", err);
 		}
 		err |= nat_genalg_start(natbd->ga);
 		if (err) {
-			DEBUG_WARNING("nat_genalg_start() failed (%s)\n",
-				      strerror(err));
+			DEBUG_WARNING("nat_genalg_start() failed (%m)\n",
+				      err);
 		}
 	}
 
@@ -323,8 +324,8 @@ static void dns_handler(int err, const struct sa *addr, void *arg)
 	struct natbd *natbd = arg;
 
 	if (err) {
-		DEBUG_WARNING("failed to resolve '%s' (%s)\n",
-			      natbd->host, strerror(err));
+		DEBUG_WARNING("failed to resolve '%s' (%m)\n",
+			      natbd->host, err);
 		goto out;
 	}
 
@@ -339,8 +340,8 @@ static void dns_handler(int err, const struct sa *addr, void *arg)
 					  NULL, nat_lifetime_handler, natbd);
 		err |= nat_lifetime_start(natbd->nl);
 		if (err) {
-			DEBUG_WARNING("nat_lifetime_start() failed (%s)\n",
-				      strerror(err));
+			DEBUG_WARNING("nat_lifetime_start() failed (%m)\n",
+				      err);
 		}
 	}
 
@@ -373,7 +374,7 @@ static void timeout_init(void *arg)
 
 	err = stun_server_discover(&natbd->dns, net_dnsc(),
 				   stun_usage_binding,
-				   proto_str, sa_af(net_laddr()),
+				   proto_str, sa_af(net_laddr_af(AF_INET)),
 				   natbd->host, natbd->port,
 				   dns_handler, natbd);
 	if (err)
@@ -381,7 +382,7 @@ static void timeout_init(void *arg)
 
  out:
 	if (err) {
-		DEBUG_WARNING("timeout_init: %s\n", strerror(err));
+		DEBUG_WARNING("timeout_init: %m\n", err);
 	}
 }
 
@@ -404,10 +405,10 @@ static int natbd_alloc(struct natbd **natbdp, uint32_t interval,
 	natbd->proto = proto;
 	natbd->res_hp = -1;
 
-	if (0 == sa_decode(&natbd->stun_srv, server, strlen(server))) {
+	if (0 == sa_decode(&natbd->stun_srv, server, str_len(server))) {
 		;
 	}
-	else if (0 == re_regex(server, strlen(server), "[^:]+[:]*[^]*",
+	else if (0 == re_regex(server, str_len(server), "[^:]+[:]*[^]*",
 			       &host, NULL, &port)) {
 
 		pl_strcpy(&host, natbd->host, sizeof(natbd->host));
@@ -432,11 +433,35 @@ static int natbd_alloc(struct natbd **natbdp, uint32_t interval,
 }
 
 
+static int status(struct re_printf *pf, void *unused)
+{
+	size_t i;
+	int err = 0;
+
+	(void)unused;
+
+	for (i=0; i<ARRAY_SIZE(natbdv); i++) {
+		err |= natbd_status(pf, natbdv[i]);
+	}
+
+	return err;
+}
+
+
+static const struct cmd cmdv[] = {
+	{'z', 0, "NAT status", status}
+};
+
+
 static int module_init(void)
 {
 	char server[256] = "";
 	uint32_t interval = 600;
-	int err = 0;
+	int err;
+
+	err = cmd_register(cmdv, ARRAY_SIZE(cmdv));
+	if (err)
+		return err;
 
 	(void)conf_get_u32(conf_cur(), "natbd_interval", &interval);
 	(void)conf_get_str(conf_cur(), "natbd_server", server, sizeof(server));
@@ -462,6 +487,8 @@ static int module_close(void)
 
 	for (i=0; i<ARRAY_SIZE(natbdv); i++)
 		natbdv[i] = mem_deref(natbdv[i]);
+
+	cmd_unregister(cmdv);
 
 	return 0;
 }

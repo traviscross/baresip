@@ -27,8 +27,8 @@ struct vidcodec_st {
 	} enc, dec;
 #ifdef USE_X264
 	x264_t *x264;
-	int64_t pts;
 #endif
+	int64_t pts;
 	struct mbuf *mb_frag;
 	bool got_keyframe;
 

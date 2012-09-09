@@ -392,8 +392,7 @@ static int dec(struct vidcodec_st *st, struct vidframe *frame,
 
 	err = vp8desc_dec(&desc, src);
 	if (err) {
-		re_printf("VP8: decode description failed: %s\n",
-			  strerror(err));
+		re_printf("VP8: decode description failed: %m\n", err);
 		return err;
 	}
 

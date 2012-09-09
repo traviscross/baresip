@@ -51,14 +51,11 @@ static void ui_destructor(void *arg)
 }
 
 
-static int stderr_handler(const char *p, size_t size, void *arg)
+static int print_handler(const char *p, size_t size, void *arg)
 {
 	(void)arg;
 
-	if (write(STDERR_FILENO, p, size) < 0)
-		return errno;
-
-	return 0;
+	return 1 == fwrite(p, size, 1, stderr) ? 0 : ENOMEM;
 }
 
 
@@ -66,7 +63,7 @@ static void report_key(struct ui_st *ui, char key)
 {
 	struct re_printf pf;
 
-	pf.vph = stderr_handler;
+	pf.vph = print_handler;
 
 	if (ui->h)
 		ui->h(key, &pf, ui->arg);
@@ -156,7 +153,7 @@ static int ui_alloc(struct ui_st **stp, struct ui_prm *prm,
 
 	err = term_setup(st);
 	if (err) {
-		DEBUG_NOTICE("could not setup terminal: %s\n", strerror(err));
+		DEBUG_NOTICE("could not setup terminal: %m\n", err);
 		err = 0;
 	}
 

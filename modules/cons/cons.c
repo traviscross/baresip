@@ -3,7 +3,6 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
-#include <string.h>
 #include <re.h>
 #include <baresip.h>
 
@@ -20,8 +19,6 @@ struct ui_st {
 	struct udp_sock *us;
 	struct tcp_sock *ts;
 	struct tcp_conn *tc;
-	struct mbuf mb;
-	struct mbuf mbr;
 	ui_input_h *h;
 	void *arg;
 };
@@ -31,48 +28,28 @@ static struct ui *cons;
 static struct ui_st *cons_cur = NULL;  /* allow only one instance */
 
 
-static int stderr_handler(const char *p, size_t size, void *arg)
+static int print_handler(const char *p, size_t size, void *arg)
 {
-	struct ui_st *st = arg;
-	return mbuf_write_mem(&st->mbr, (uint8_t *)p, size);
+	return mbuf_write_mem(arg, (uint8_t *)p, size);
 }
 
 
 static void udp_recv(const struct sa *src, struct mbuf *mb, void *arg)
 {
 	struct ui_st *st = arg;
+	struct mbuf *mbr = mbuf_alloc(64);
 	struct re_printf pf;
 
-	pf.vph = stderr_handler;
-	pf.arg = st;
+	pf.vph = print_handler;
+	pf.arg = mbr;
 
-	if (!mbuf_get_left(mb))
-		return;
+	while (mbuf_get_left(mb))
+		st->h(mbuf_read_u8(mb), &pf, st->arg);
 
-	if (!st->h)
-		return;
+	mbr->pos = 0;
+	(void)udp_send(st->us, src, mbr);
 
-	/* Save command */
-	if (mb->end > 1) {
-		mbuf_reset(&st->mb);
-		(void)mbuf_write_mem(&st->mb, mb->buf, mb->end);
-	}
-
-	mbuf_rewind(&st->mbr);
-
-	for (st->mb.pos = 0; mbuf_get_left(&st->mb); ) {
-		const char key = mbuf_read_u8(&st->mb);
-
-		st->h(key, &pf, st->arg);
-
-		if ('\n' == key && mb->end > 1)
-			break;
-	}
-
-	if (st->mbr.end > 0) {
-		st->mbr.pos = 0;
-		(void)udp_send(st->us, src, &st->mbr);
-	}
+	mem_deref(mbr);
 }
 
 
@@ -80,8 +57,6 @@ static void cons_destructor(void *arg)
 {
 	struct ui_st *st = arg;
 
-	mbuf_reset(&st->mb);
-	mbuf_reset(&st->mbr);
 	mem_deref(st->us);
 	mem_deref(st->tc);
 	mem_deref(st->ts);
@@ -94,14 +69,13 @@ static void cons_destructor(void *arg)
 
 static int tcp_write_handler(const char *p, size_t size, void *arg)
 {
-	struct ui_st *st = arg;
 	struct mbuf mb;
 
 	mb.buf = (uint8_t *)p;
 	mb.pos = 0;
 	mb.end = mb.size = size;
 
-	return tcp_send(st->tc, &mb);
+	return tcp_send(arg, &mb);
 }
 
 
@@ -111,7 +85,7 @@ static void tcp_recv_handler(struct mbuf *mb, void *arg)
 	struct re_printf pf;
 
 	pf.vph = tcp_write_handler;
-	pf.arg = st;
+	pf.arg = st->tc;
 
 	while (mbuf_get_left(mb) > 0) {
 
@@ -164,10 +138,7 @@ static int cons_alloc(struct ui_st **stp, struct ui_prm *prm,
 	if (!st)
 		return ENOMEM;
 
-	mbuf_init(&st->mb);
-	mbuf_init(&st->mbr);
-
-	st->ui = mem_ref(cons);
+	st->ui  = mem_ref(cons);
 	st->h   = h;
 	st->arg = arg;
 
@@ -175,12 +146,18 @@ static int cons_alloc(struct ui_st **stp, struct ui_prm *prm,
 	if (err)
 		goto out;
 	err = udp_listen(&st->us, &local, udp_recv, st);
-	if (err)
+	if (err) {
+		DEBUG_WARNING("failed to listen on UDP port %d (%m)\n",
+			      sa_port(&local), err);
 		goto out;
+	}
 
 	err = tcp_listen(&st->ts, &local, tcp_conn_handler, st);
-	if (err)
+	if (err) {
+		DEBUG_WARNING("failed to listen on TCP port %d (%m)\n",
+			      sa_port(&local), err);
 		goto out;
+	}
 
  out:
 	if (err)

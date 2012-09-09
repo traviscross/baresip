@@ -13,7 +13,7 @@
 USE_VIDEO := 1
 
 PROJECT	  := baresip
-VERSION   := 0.4.1
+VERSION   := 0.4.2
 
 ifndef LIBRE_MK
 LIBRE_MK  := $(shell [ -f ../re/mk/re.mk ] && \
@@ -41,7 +41,8 @@ endif
 
 
 CFLAGS    += -I. -Iinclude -I$(LIBRE_INC) -I$(SYSROOT)/include
-CFLAGS    += -I$(LIBREM_PATH)/include -I$(SYSROOT)/local/include/rem
+CFLAGS    += -I$(LIBREM_PATH)/include
+CFLAGS    += -I$(SYSROOT)/local/include/rem -I$(SYSROOT)/include/rem
 
 CXXFLAGS  += -I. -Iinclude -I$(LIBRE_INC)
 
@@ -200,7 +201,7 @@ uninstall:
 
 .PHONY: clean
 clean:
-	@rm -rf $(BIN) $(MOD_BINS) $(SHARED) $(BUILD)/
+	@rm -rf $(BIN) $(MOD_BINS) $(SHARED) $(BUILD)
 	@rm -f *stamp \
 	`find . -name "*.[od]"` \
 	`find . -name "*~"` \
@@ -211,8 +212,8 @@ ccheck:
 	@ccheck.pl > /dev/null
 
 version:
-	@perl -pi -e 's/\#define VERSION.*/\#define VERSION \"$(VERSION)"/' \
-		src/version.h
+	@perl -pi -e 's/BARESIP_VERSION.*/BARESIP_VERSION \"$(VERSION)"/' \
+		include/baresip.h
 	@perl -pi -e "s/PROJECT_NUMBER         = .*/\
 PROJECT_NUMBER         = $(VERSION)/" \
 		mk/Doxyfile

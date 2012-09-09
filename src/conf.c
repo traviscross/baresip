@@ -3,12 +3,13 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
+#define _BSD_SOURCE 1
 #include <fcntl.h>
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
 #include <stdio.h>
-#include <string.h>
+#include <sys/stat.h>
 #ifdef HAVE_IO_H
 #include <io.h>
 #endif
@@ -36,11 +37,8 @@
 
 static const char *conf_path = NULL;
 static const char file_accounts[] = "accounts";
-static const char file_contacts[] = "contacts";
 static const char file_config[]   = "config";
-static char modpath[256] = ".";
 static struct conf *conf_obj;
-static char dns_domain[64] = "domain";
 
 
 /** Core Run-time Configuration - populated from config file */
@@ -59,6 +57,7 @@ struct config config = {
 
 	/** Audio */
 	{
+		"","",
 		"","",
 		"","",
 		{8000, 48000},
@@ -91,7 +90,45 @@ struct config config = {
 };
 
 
-static int conf_parse(const char *filename, confline_h *ch, uint32_t *num)
+/**
+ * Check if a file exists
+ *
+ * @param path Filename
+ *
+ * @return True if exist, False if not
+ */
+bool conf_fileexist(const char *path)
+{
+	struct stat st;
+
+	if (!path)
+		 return false;
+
+	if (stat(path, &st) < 0)
+		 return false;
+
+	if ((st.st_mode & S_IFMT) != S_IFREG)
+		 return false;
+
+	return st.st_size > 0;
+}
+
+
+static void print_populated(const char *what, uint32_t n)
+{
+	(void)re_printf("Populated %u %s%s\n", n, what, 1==n ? "" : "s");
+}
+
+
+/**
+ * Parse a config file, calling handler for each line
+ *
+ * @param filename Config file
+ * @param ch       Line handler
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+int conf_parse(const char *filename, confline_h *ch)
 {
 	struct pl pl, val;
 	struct mbuf *mb;
@@ -132,7 +169,6 @@ static int conf_parse(const char *filename, confline_h *ch, uint32_t *num)
 		if (!val.l || val.p[0] == '#')
 			continue;
 
-		if (num) ++*num;
 		err = ch(&val);
 	}
 
@@ -147,23 +183,25 @@ static int conf_parse(const char *filename, confline_h *ch, uint32_t *num)
 static int conf_write_template(const char *file)
 {
 	FILE *f = NULL;
-	const char *login, *pass;
+	const char *login, *pass, *domain;
 
 	DEBUG_NOTICE("creating configuration template %s\n", file);
 
 	f = fopen(file, "w");
 	if (!f) {
-		DEBUG_WARNING("writing %s: %s\n", file, strerror(errno));
+		DEBUG_WARNING("writing %s: %m\n", file, errno);
 		return errno;
 	}
 
-	if (0 != get_login_name(&login)) {
+	login = pass = sys_username();
+	if (!login) {
 		login = "user";
 		pass = "pass";
 	}
-	else {
-		pass = login;
-	}
+
+	domain = net_domain();
+	if (!domain)
+		domain = "domain";
 
 	(void)re_fprintf(f, "#\n");
 	(void)re_fprintf(f, "# SIP accounts - one account per line\n");
@@ -175,18 +213,18 @@ static int conf_write_template(const char *file)
 	(void)re_fprintf(f, "#    ;transport={udp,tcp,tls}\n");
 	(void)re_fprintf(f, "#\n");
 	(void)re_fprintf(f, "#  addr-params:\n");
-	(void)re_fprintf(f, "#    ;outbound=sip:primary.example.com\n");
-	(void)re_fprintf(f, "#    ;regint=3600\n");
-	(void)re_fprintf(f, "#    ;sipnat={outbound}\n");
-	(void)re_fprintf(f, "#    ;auth_user=username\n");
-	(void)re_fprintf(f, "#    ;medianat={stun,turn,ice}\n");
-	(void)re_fprintf(f, "#    ;rtpkeep={zero,stun,dyna,rtcp}\n");
-	(void)re_fprintf(f, "#    ;stunserver="
-			 "stun:[user:pass]@host[:port]\n");
-	(void)re_fprintf(f, "#    ;mediaenc={srtp,srtp-mand}\n");
 	(void)re_fprintf(f, "#    ;answermode={manual,early,auto}\n");
-	(void)re_fprintf(f, "#    ;ptime={10,20,30,40,...}\n");
 	(void)re_fprintf(f, "#    ;audio_codecs=speex/16000,pcma,...\n");
+	(void)re_fprintf(f, "#    ;auth_user=username\n");
+	(void)re_fprintf(f, "#    ;mediaenc={srtp,srtp-mand}\n");
+	(void)re_fprintf(f, "#    ;medianat={stun,turn,ice}\n");
+	(void)re_fprintf(f, "#    ;outbound=sip:primary.example.com\n");
+	(void)re_fprintf(f, "#    ;outbound2=sip:secondary.example.com\n");
+	(void)re_fprintf(f, "#    ;ptime={10,20,30,40,...}\n");
+	(void)re_fprintf(f, "#    ;regint=3600\n");
+	(void)re_fprintf(f, "#    ;rtpkeep={zero,stun,dyna,rtcp}\n");
+	(void)re_fprintf(f, "#    ;sipnat={outbound}\n");
+	(void)re_fprintf(f, "#    ;stunserver=stun:[user:pass]@host[:port]\n");
 	(void)re_fprintf(f, "#    ;video_codecs=h264,h263,...\n");
 	(void)re_fprintf(f, "#\n");
 	(void)re_fprintf(f, "# Examples:\n");
@@ -197,38 +235,7 @@ static int conf_write_template(const char *file)
 			 "[2001:df8:0:16:216:6fff:fe91:614c]:5070"
 			 ";transport=tcp>\n");
 	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "<sip:%s:%s@%s>\n", login, pass, dns_domain);
-
-	if (f)
-		(void)fclose(f);
-
-	return 0;
-}
-
-
-static int conf_write_contacts_template(const char *file)
-{
-	FILE *f = NULL;
-	const char *login = NULL;
-
-	DEBUG_NOTICE("creating contacts template %s\n", file);
-
-	f = fopen(file, "w");
-	if (!f) {
-		DEBUG_WARNING("writing %s: %s\n", file, strerror(errno));
-		return errno;
-	}
-
-	if (0 != get_login_name(&login)) {
-		login = "user";
-	}
-
-	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "# SIP contacts\n");
-	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "# Jane Smith <sip:jane@smith.co.uk>\n");
-	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "<sip:%s@%s>\n", login, dns_domain);
+	(void)re_fprintf(f, "<sip:%s:%s@%s>\n", login, pass, domain);
 
 	if (f)
 		(void)fclose(f);
@@ -246,7 +253,7 @@ static int conf_write_config_template(const char *file)
 
 	f = fopen(file, "w");
 	if (!f) {
-		DEBUG_WARNING("writing %s: %s\n", file, strerror(errno));
+		DEBUG_WARNING("writing %s: %m\n", file, errno);
 		return errno;
 	}
 
@@ -271,6 +278,7 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "\n# Audio\n");
 	(void)re_fprintf(f, "#audio_player\t\talsa,default\n");
 	(void)re_fprintf(f, "#audio_source\t\talsa,default\n");
+	(void)re_fprintf(f, "#audio_alert\t\talsa,default\n");
 	(void)re_fprintf(f, "audio_srate\t\t%u-%u\n", config.audio.srate.min,
 			 config.audio.srate.max);
 	(void)re_fprintf(f, "audio_channels\t\t%u-%u\n",
@@ -318,6 +326,9 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "evdev" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Audio codec Modules (in order)\n");
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "opus" MOD_EXT "\n");
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "silk" MOD_EXT "\n");
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "amr" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "g7221" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "g722" MOD_EXT "\n");
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "g711" MOD_EXT "\n");
@@ -359,18 +370,17 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "vpx" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Video source modules\n");
-#ifdef USE_FFMPEG
-	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "avformat" MOD_EXT "\n");
-#else
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "avformat" MOD_EXT "\n");
-#endif
 #if defined (DARWIN)
+	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "qtcapture" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "quicktime" MOD_EXT "\n");
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "qtcapture" MOD_EXT "\n");
 #else
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "v4l" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "v4l2" MOD_EXT "\n");
 #endif
+#ifdef USE_FFMPEG
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "avformat" MOD_EXT "\n");
+#endif
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "x11grab" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Video display modules\n");
 #ifdef USE_SDL
@@ -390,9 +400,27 @@ static int conf_write_config_template(const char *file)
 
 	(void)re_fprintf(f, "\n# Media encoding modules\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "srtp" MOD_EXT "\n");
+	(void)re_fprintf(f, "\n");
 
-	(void)re_fprintf(f, "\n# Other modules\n");
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "natbd" MOD_EXT "\n");
+	(void)re_fprintf(f, "\n#------------------------------------"
+			 "------------------------------------------\n");
+	(void)re_fprintf(f, "# Temporary Modules (loaded then unloaded)\n");
+	(void)re_fprintf(f, "\n");
+	(void)re_fprintf(f, "#module_tmp\t\t" MOD_PRE "uuid" MOD_EXT "\n");
+	(void)re_fprintf(f, "\n");
+
+	(void)re_fprintf(f, "\n#------------------------------------"
+			 "------------------------------------------\n");
+	(void)re_fprintf(f, "# Application Modules\n");
+	(void)re_fprintf(f, "\n");
+	(void)re_fprintf(f, "#module_app\t\t" MOD_PRE "auloop"MOD_EXT"\n");
+	(void)re_fprintf(f, "module_app\t\t"  MOD_PRE "contact"MOD_EXT"\n");
+	(void)re_fprintf(f, "module_app\t\t"  MOD_PRE "menu"MOD_EXT"\n");
+	(void)re_fprintf(f, "#module_app\t\t" MOD_PRE "natbd"MOD_EXT"\n");
+	(void)re_fprintf(f, "#module_app\t\t" MOD_PRE "presence"MOD_EXT"\n");
+	(void)re_fprintf(f, "#module_app\t\t" MOD_PRE "syslog"MOD_EXT"\n");
+	(void)re_fprintf(f, "#module_app\t\t" MOD_PRE "vidloop"MOD_EXT"\n");
+	(void)re_fprintf(f, "\n");
 
 	(void)re_fprintf(f, "\n#------------------------------------"
 			 "------------------------------------------\n");
@@ -429,6 +457,13 @@ void conf_path_set(const char *path)
 }
 
 
+#if defined (WIN32) || defined (__SYMBIAN32__)
+#define DIR_SEP "\\"
+#else
+#define DIR_SEP "/"
+#endif
+
+
 /**
  * Get the path to configuration files
  *
@@ -437,8 +472,11 @@ void conf_path_set(const char *path)
  *
  * @return 0 if success, otherwise errorcode
  */
-int conf_path_get(char *path, uint32_t sz)
+int conf_path_get(char *path, size_t sz)
 {
+	char buf[256];
+	int err;
+
 	/* Use explicit conf path */
 	if (conf_path) {
 		if (re_snprintf(path, sz, "%s", conf_path) < 0)
@@ -446,7 +484,14 @@ int conf_path_get(char *path, uint32_t sz)
 		return 0;
 	}
 
-	return get_homedir(path, sz);
+	err = fs_gethome(buf, sizeof(buf));
+	if (err)
+		return err;
+
+	if (re_snprintf(path, sz, "%s" DIR_SEP ".baresip", buf) < 0)
+		return ENOMEM;
+
+	return 0;
 }
 
 
@@ -454,73 +499,44 @@ int conf_path_get(char *path, uint32_t sz)
  * Get the SIP accounts
  *
  * @param ch Account handler
- * @param n  On return, contains number of accounts
  *
  * @return 0 if success, otherwise errorcode
  */
-int conf_accounts_get(confline_h *ch, uint32_t *n)
+int conf_accounts_get(confline_h *ch)
 {
 	char path[256] = "", file[256] = "";
 	int err;
 
 	err = conf_path_get(path, sizeof(path));
 	if (err) {
-		DEBUG_WARNING("accounts: conf_path_get (%s)\n", strerror(err));
+		DEBUG_WARNING("accounts: conf_path_get (%m)\n", err);
 		return err;
 	}
 
 	if (re_snprintf(file, sizeof(file), "%s/%s", path, file_accounts) < 0)
 		return ENOMEM;
 
-	err = mkpath(path);
+	if (!conf_fileexist(file)) {
+
+		(void)fs_mkdir(path, 0755);
+
+		err = conf_write_template(file);
+		if (err)
+			return err;
+	}
+
+	err = conf_parse(file, ch);
 	if (err)
 		return err;
 
-	err = conf_parse(file, ch, n);
-	if (ENOENT != err)
-		return err;
+	print_populated("account", list_count(uag_list()));
 
-	err = conf_write_template(file);
-	if (err)
-		return err;
+	if (list_isempty(uag_list())) {
+		DEBUG_WARNING("No SIP accounts found - check your config\n");
+		return ENOENT;
+	}
 
-	return conf_parse(file, ch, n);
-}
-
-
-/**
- * Get the SIP contacts
- *
- * @param ch Contact handler
- * @param n  On return, contains number of contacts
- *
- * @return 0 if success, otherwise errorcode
- */
-int conf_contacts_get(confline_h *ch, uint32_t *n)
-{
-	char path[256] = "", file[256] = "";
-	int err;
-
-	err = conf_path_get(path, sizeof(path));
-	if (err)
-		return err;
-
-	if (re_snprintf(file, sizeof(file), "%s/%s", path, file_contacts) < 0)
-		return ENOMEM;
-
-	err = mkpath(path);
-	if (err)
-		return err;
-
-	err = conf_parse(file, ch, n);
-	if (ENOENT != err)
-		return err;
-
-	err = conf_write_contacts_template(file);
-	if (err)
-		return err;
-
-	return conf_parse(file, ch, n);
+	return 0;
 }
 
 
@@ -625,8 +641,7 @@ static int dns_server_handler(const struct pl *pl, void *arg)
 
 	err = net_dnssrv_add(&sa);
 	if (err) {
-		DEBUG_WARNING("failed to add nameserver %r: %s\n", pl,
-			      strerror(err));
+		DEBUG_WARNING("failed to add nameserver %r: %m\n", pl, err);
 	}
 
 	return err;
@@ -635,7 +650,7 @@ static int dns_server_handler(const struct pl *pl, void *arg)
 
 static int config_parse(struct conf *conf)
 {
-	struct pl pollm, audev = pl_null, as, ap;
+	struct pl pollm, as, ap;
 	enum poll_method method;
 	struct vidsz size = {0, 0};
 	uint32_t v;
@@ -646,8 +661,8 @@ static int config_parse(struct conf *conf)
 		if (0 == poll_method_type(&method, &pollm)) {
 			err = poll_method_set(method);
 			if (err) {
-				DEBUG_WARNING("poll method (%r) set: %s\n",
-					      &pollm, strerror(err));
+				DEBUG_WARNING("poll method (%r) set: %m\n",
+					      &pollm, err);
 			}
 		}
 		else {
@@ -666,22 +681,21 @@ static int config_parse(struct conf *conf)
 			   sizeof(config.sip.local));
 
 	/* Audio */
-	(void)conf_get(conf, "audio_dev", &audev);
+	(void)conf_get_csv(conf, "audio_player",
+			   config.audio.play_mod,
+			   sizeof(config.audio.play_mod),
+			   config.audio.play_dev,
+			   sizeof(config.audio.play_dev));
 
-	if (conf_get_csv(conf, "audio_player",
-			 config.audio.play_mod, sizeof(config.audio.play_mod),
-			 config.audio.play_dev,
-			 sizeof(config.audio.play_dev))) {
-		(void)pl_strcpy(&audev, config.audio.play_dev,
-				sizeof(config.audio.play_dev));
-	}
+	(void)conf_get_csv(conf, "audio_source",
+			   config.audio.src_mod, sizeof(config.audio.src_mod),
+			   config.audio.src_dev, sizeof(config.audio.src_dev));
 
-	if (conf_get_csv(conf, "audio_source",
-			 config.audio.src_mod, sizeof(config.audio.src_mod),
-			 config.audio.src_dev, sizeof(config.audio.src_dev))) {
-		(void)pl_strcpy(&audev, config.audio.src_dev,
-				sizeof(config.audio.src_dev));
-	}
+	(void)conf_get_csv(conf, "audio_alert",
+			   config.audio.alert_mod,
+			   sizeof(config.audio.alert_mod),
+			   config.audio.alert_dev,
+			   sizeof(config.audio.alert_dev));
 
 	(void)conf_get_range(conf, "audio_srate", &config.audio.srate);
 	(void)conf_get_range(conf, "audio_channels", &config.audio.channels);
@@ -723,7 +737,7 @@ static int config_parse(struct conf *conf)
 			     &config.avt.jbuf_del);
 
 	if (err) {
-		DEBUG_WARNING("configure parse error (%s)\n", strerror(err));
+		DEBUG_WARNING("configure parse error (%m)\n", err);
 	}
 
 	(void)conf_apply(conf, "dns_server", dns_server_handler, NULL);
@@ -732,115 +746,13 @@ static int config_parse(struct conf *conf)
 }
 
 
-#ifdef STATIC
-
-/* Declared in static.c */
-extern const struct mod_export *mod_table[];
-
-static const struct mod_export *find_module(const struct pl *pl)
-{
-	struct pl name;
-	uint32_t i;
-
-	if (re_regex(pl->p, pl->l, "[^.]+.[^]*", &name, NULL))
-		name = *pl;
-
-	for (i=0; ; i++) {
-		const struct mod_export *me = mod_table[i];
-		if (!me)
-			return NULL;
-		if (0 == pl_strcasecmp(&name, me->name))
-			return me;
-	}
-	return NULL;
-}
-#endif
-
-
-static int load_module(struct mod **mp, const struct pl *name)
-{
-	char file[256];
-	struct mod *m;
-	int err = 0;
-
-	if (!name)
-		return EINVAL;
-
-#ifdef STATIC
-	/* Try static first */
-	err = mod_add(&m, find_module(name));
-	if (!err)
-		goto out;
-#endif
-
-	/* Then dynamic */
-	if (re_snprintf(file, sizeof(file), "%s/%r", modpath, name) < 0) {
-		err = ENOMEM;
-		goto out;
-	}
-	err = mod_load(&m, file);
-	if (err)
-		goto out;
-
- out:
-	if (err) {
-		DEBUG_WARNING("module %r: %s\n", name, strerror(err));
-	}
-	else if (mp)
-		*mp = m;
-
-	return err;
-}
-
-
-/**
- * Load a module by name
- *
- * @param mp   Pointer to allocate module object
- * @param name Name of module to load
- *
- * @return 0 if success, otherwise errorcode
- */
-int conf_load_module(struct mod **mp, const char *name)
-{
-	char buf[64];
-	struct pl pl;
-
-	if (re_snprintf(buf, sizeof(buf), MOD_PRE "%s" MOD_EXT, name) < 0)
-		return ENOMEM;
-
-	pl_set_str(&pl, buf);
-
-	return load_module(mp, &pl);
-}
-
-
-static int module_handler(const struct pl *pl, void *arg)
-{
-	(void)arg;
-
-	(void)load_module(NULL, pl);
-
-	return 0;
-}
-
-
-static int config_mod_parse(struct conf *conf)
+static int config_mod_parse(const struct conf *conf)
 {
 	int err;
 
-	/* Modules */
-	if (conf_get_str(conf, "module_path", modpath, sizeof(modpath)))
-		str_ncpy(modpath, ".", sizeof(modpath));
-
-	err = conf_apply(conf, "module", module_handler, NULL);
-	if (err)
-		goto out;
-
- out:
+	err = module_init(conf);
 	if (err) {
-		DEBUG_WARNING("configure module parse error (%s)\n",
-			      strerror(err));
+		DEBUG_WARNING("configure module parse error (%m)\n", err);
 	}
 
 	return err;
@@ -857,39 +769,70 @@ int configure(void)
 	char path[256], file[256];
 	int err;
 
+#if defined (WIN32) || defined (__SYMBIAN32__)
+	dbg_init(DBG_INFO, DBG_NONE);
+#endif
+
 	err = conf_path_get(path, sizeof(path));
 	if (err) {
-		DEBUG_WARNING("could not get config path: %s\n",
-			      strerror(err));
+		DEBUG_WARNING("could not get config path: %m\n", err);
 		return err;
 	}
 
 	if (re_snprintf(file, sizeof(file), "%s/%s", path, &file_config) < 0)
 		return ENOMEM;
 
-	err = mkpath(path);
-	if (err)
-		return err;
+	if (!conf_fileexist(file)) {
 
-	err = conf_alloc(&conf_obj, file);
-	if (err) {
-		if (ENOENT == err) {
-			err = conf_write_config_template(file);
-			if (err)
-				goto out;
-			err = conf_alloc(&conf_obj, file);
-			if (err)
-				goto out;
-		}
-		else
+		(void)fs_mkdir(path, 0755);
+
+		err = conf_write_config_template(file);
+		if (err)
 			goto out;
 	}
+
+	err = conf_alloc(&conf_obj, file);
+	if (err)
+		goto out;
 
 	err = config_parse(conf_obj);
 	if (err)
 		goto out;
 
+ out:
+	conf_obj = mem_deref(conf_obj);
+	return err;
+}
+
+
+/**
+ * Load all modules from config file
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+int conf_modules(void)
+{
+	char path[256], file[256];
+	int err;
+
+	err = conf_path_get(path, sizeof(path));
+	if (err)
+		return err;
+
+	if (re_snprintf(file, sizeof(file), "%s/%s", path, &file_config) < 0)
+		return ENOMEM;
+
+	err = conf_alloc(&conf_obj, file);
+	if (err)
+		goto out;
+
 	err = config_mod_parse(conf_obj);
+	if (err)
+		goto out;
+
+	print_populated("audio codec",  list_count(aucodec_list()));
+	print_populated("audio filter", list_count(aufilt_list()));
+	print_populated("video codec",  list_count(vidcodec_list()));
 
  out:
 	conf_obj = mem_deref(conf_obj);
@@ -971,17 +914,6 @@ int conf_system_get_buf(const uint8_t *buf, size_t sz)
 
 
 /**
- * Get the path to plugin-modules
- *
- * @return Path to modules
- */
-const char *conf_modpath(void)
-{
-	return modpath;
-}
-
-
-/**
  * Get the current configuration object
  *
  * @return Config object
@@ -991,15 +923,4 @@ const char *conf_modpath(void)
 struct conf *conf_cur(void)
 {
 	return conf_obj;
-}
-
-
-/**
- * Set the DNS domain for config templates
- *
- * @param domain DNS domain
- */
-void conf_set_domain(const char *domain)
-{
-	str_ncpy(dns_domain, domain, sizeof(dns_domain));
 }

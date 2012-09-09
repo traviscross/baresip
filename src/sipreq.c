@@ -3,7 +3,6 @@
  *
  * Copyright (C) 2011 Creytiv.com
  */
-#include <string.h>
 #include <re.h>
 #include <baresip.h>
 #include "core.h"

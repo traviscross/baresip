@@ -18,6 +18,7 @@
 struct aufilt_st {
 	struct aufilt *af;    /* base class */
 	uint32_t psize;
+	int16_t *out;
 	SpeexEchoState *state;
 };
 
@@ -32,6 +33,8 @@ static void speex_aec_destructor(void *arg)
 
 	if (st->state)
 		speex_echo_state_destroy(st->state);
+
+	mem_deref(st->out);
 
 	mem_deref(st->af);
 }
@@ -61,6 +64,12 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 	st->af = mem_ref(af);
 
 	st->psize = 2 * encprm->ch * encprm->frame_size;
+
+	st->out = mem_alloc(st->psize, NULL);
+	if (!st->out) {
+		err = ENOMEM;
+		goto out;
+	}
 
 	/* Echo canceller with 200 ms tail length */
 	if (encprm->aec_len)
@@ -93,7 +102,6 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 
 static int enc(struct aufilt_st *st, struct mbuf *mb)
 {
-	int16_t out[mbuf_get_left(mb)/2];
 	size_t pos = mb->pos;
 	int err;
 
@@ -103,8 +111,8 @@ static int enc(struct aufilt_st *st, struct mbuf *mb)
 		return ENOMEM;
 	}
 
-	speex_echo_capture(st->state, (int16_t *)mbuf_buf(mb), out);
-	err = mbuf_write_mem(mb, (uint8_t *)out, st->psize);
+	speex_echo_capture(st->state, (int16_t *)mbuf_buf(mb), st->out);
+	err = mbuf_write_mem(mb, (uint8_t *)st->out, st->psize);
 	mb->pos = pos;
 	mb->end = st->psize;
 

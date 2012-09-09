@@ -115,6 +115,22 @@ static void audio_destructor(void *arg)
 
 
 /**
+ * Calculate number of samples from sample rate, channels and packet time
+ *
+ * @param srate    Sample rate in [Hz]
+ * @param channels Number of channels
+ * @param ptime    Packet time in [ms]
+ *
+ * @return Number of samples
+ */
+static inline uint32_t calc_nsamp(uint32_t srate, uint8_t channels,
+				  uint16_t ptime)
+{
+	return srate * channels * ptime / 1000;
+}
+
+
+/**
  * Get the DSP samplerate for an audio-codec (exception for G.722)
  */
 static inline uint32_t get_srate(const struct aucodec *ac)
@@ -152,7 +168,8 @@ static int add_audio_codec(struct sdp_media *m, struct aucodec *ac)
 	}
 
 	return sdp_format_add(NULL, m, false, ac->pt, ac->name, ac->srate,
-			      ac->ch, ac->cmph, ac, true, "%s", ac->fmtp);
+			      ac->ch, NULL, ac->cmph, ac, true,
+			      "%s", ac->fmtp);
 }
 
 
@@ -188,9 +205,6 @@ static void encode_rtp_send(struct audio *a, struct mbuf *mb, uint16_t nsamp)
 
  out:
 	a->marker = false;
-	if (err) {
-		DEBUG_WARNING("encode rtp send: failed (%s)\n", strerror(err));
-	}
 }
 
 
@@ -201,18 +215,12 @@ static void encode_rtp_send(struct audio *a, struct mbuf *mb, uint16_t nsamp)
  */
 static void process_audio_encode(struct audio *a, struct mbuf *mb)
 {
-	int err;
-
 	if (!mb)
 		return;
 
 	/* Audio filters */
 	if (a->fc) {
-		err = aufilt_chain_encode(a->fc, mb);
-		if (err) {
-			DEBUG_WARNING("aufilt_chain_encode %s\n",
-				      strerror(err));
-		}
+		(void)aufilt_chain_encode(a->fc, mb);
 	}
 
 	/* Encode and send */
@@ -255,7 +263,7 @@ static void check_telev(struct audio *a)
 	a->mb_rtp->pos = STREAM_PRESZ;
 	err = stream_send(a->strm, marker, a->pt_tel_tx, a->ts_tel, a->mb_rtp);
 	if (err) {
-		DEBUG_WARNING("telev: stream_send %s\n", strerror(err));
+		DEBUG_WARNING("telev: stream_send %m\n", err);
 	}
 }
 
@@ -361,6 +369,21 @@ static void handle_telev(struct audio *a, struct mbuf *mb)
 }
 
 
+static int16_t calc_avg_s16(const int16_t *sampv, size_t sampc)
+{
+	int32_t v = 0;
+	size_t i;
+
+	if (!sampv || !sampc)
+		return 0;
+
+	for (i=0; i<sampc; i++)
+		v += abs(sampv[i]);
+
+	return v/sampc;
+}
+
+
 /**
  * Decode incoming packets using the Audio decoder
  *
@@ -385,18 +408,11 @@ static int audio_stream_decode(struct audio *a, struct mbuf *mb)
 		err = aucodec_get(a->dec)->dech(a->dec, a->mb_dec, mb);
 	} while (n-- && mbuf_get_left(mb) && !err);
 
-	if (!n) {
-		DEBUG_WARNING("codec_decode fault (%s)\n",
-			      strerror(err));
-	}
 	if (err) {
-		DEBUG_WARNING("codec_decode: %s\n", strerror(err));
+		DEBUG_WARNING("codec_decode: %m\n", err);
 		goto out;
 	}
-	if (!a->mb_dec->end) {
-		DEBUG_INFO("stream decode: no data decoded (%s)\n",
-			   strerror(err));
-	}
+
 	a->mb_dec->pos = 0;
 
 	/* Perform operations on the PCM samples */
@@ -404,8 +420,10 @@ static int audio_stream_decode(struct audio *a, struct mbuf *mb)
 		err |= aufilt_chain_decode(a->fc, a->mb_dec);
 	}
 
-	if (a->vu_meter)
-		a->avg = calc_avg_s16(a->mb_dec);
+	if (a->vu_meter) {
+		a->avg = calc_avg_s16((void *)mbuf_buf(a->mb_dec),
+				      mbuf_get_left(a->mb_dec)/2);
+	}
 
 	if (a->aubuf_rx) {
 
@@ -448,11 +466,7 @@ static void stream_recv_handler(const struct rtp_header *hdr,
 	}
 
  out:
-	err = audio_stream_decode(a, mb);
-	if (err) {
-		DEBUG_WARNING("audio_stream_decode failed (%s)\n",
-			      strerror(err));
-	}
+	(void)audio_stream_decode(a, mb);
 }
 
 
@@ -478,7 +492,8 @@ int audio_alloc(struct audio **ap, struct call *call,
 	tmr_init(&a->tmr_tx);
 
 	err = stream_alloc(&a->strm, call, sdp_sess, "audio", label,
-			   mnat, mnat_sess, menc, stream_recv_handler, a);
+			   mnat, mnat_sess, menc,
+			   stream_recv_handler, NULL, a);
 	if (err)
 		goto out;
 
@@ -647,8 +662,7 @@ static int start_player(struct audio *a, uint32_t srate_dec)
 				   &prm, config.audio.play_dev,
 				   auplay_write_handler, a);
 		if (err) {
-			DEBUG_WARNING("start: audio player failed: %s\n",
-				      strerror(err));
+			DEBUG_WARNING("start_player failed: %m\n", err);
 			return err;
 		}
 	}
@@ -685,8 +699,7 @@ static int start_source(struct audio *a, uint32_t srate_enc)
 				  &prm, config.audio.src_dev,
 				  ausrc_read_handler, ausrc_error_handler, a);
 		if (err) {
-			DEBUG_WARNING("start: audio source failed: %s\n",
-				      strerror(err));
+			DEBUG_WARNING("start_source failed: %m\n", err);
 			return err;
 		}
 
@@ -840,7 +853,7 @@ int audio_encoder_set(struct audio *a, struct aucodec *ac,
 
 		err = ac->alloch(&a->enc, ac, &prm, NULL, params);
 		if (err) {
-			DEBUG_WARNING("alloc encoder: %s\n", strerror(err));
+			DEBUG_WARNING("alloc encoder: %m\n", err);
 			return err;
 		}
 
@@ -881,7 +894,7 @@ int audio_decoder_set(struct audio *a, struct aucodec *ac,
 	else {
 		err = ac->alloch(&a->dec, ac, NULL, NULL, params);
 		if (err) {
-			DEBUG_WARNING("alloc decoder: %s\n", strerror(err));
+			DEBUG_WARNING("alloc decoder: %m\n", err);
 			return err;
 		}
 	}

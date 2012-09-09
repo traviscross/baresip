@@ -1,3 +1,41 @@
+2012-09-09 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.2
+
+	* new modules:
+	  - auloop    Audio-loop test module
+	  - contact   Contacts module
+	  - isac      iSAC audio codec
+	  - menu      Interactive menu
+	  - opengles  OpenGLES video output
+	  - presence  Presence module
+	  - syslog    Syslog module
+	  - vidloop   Video-loop test module
+
+	* baresip:
+	  - added support for call transfer
+	  - added support for call waiting
+	  - added multiple calls per user-agent
+	  - added multiple registrations per user-agent
+	  - cmd: added new command interface
+	  - ua:  handle SIP Require header for incoming calls
+	  - ui:  cleanup, use dynamic interactive menu
+	
+	* config:
+	  - added 'audio_alert' for ringtones etc.
+	  - added 'outboundX=proxy' for multiple outbound proxies
+	  - added 'module_tmp' for temporary module loading
+	  - added 'module_app' for application modules
+	
+	* avcodec: upgrade to latest FFmpeg and fix pts bug
+
+	* natbd: register command 'z' for status
+
+	* srtp: fix memleak on close
+
+	* uuid: added UUID loader
+
+
 2012-04-21 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.4.1

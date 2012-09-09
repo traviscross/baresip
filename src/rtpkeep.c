@@ -3,7 +3,6 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
-#include <string.h>
 #include <re.h>
 #include <baresip.h>
 #include "core.h"
@@ -144,7 +143,7 @@ static void timeout(void *arg)
 
 	err = send_keepalive(rk);
 	if (err) {
-		DEBUG_WARNING("keepalive: %s\n", strerror(err));
+		DEBUG_WARNING("keepalive: %m\n", err);
 	}
 }
 

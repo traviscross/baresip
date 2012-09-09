@@ -104,8 +104,8 @@ static gboolean bus_watch_handler(GstBus *bus, GstMessage *msg, gpointer data)
 	case GST_MESSAGE_ERROR:
 		gst_message_parse_error(msg, &err, &d);
 
-		DEBUG_WARNING("Error: %d(%s) message=%s\n", err->code,
-			      strerror(err->code), err->message);
+		DEBUG_WARNING("Error: %d(%m) message=%s\n", err->code,
+			      err->code, err->message);
 		DEBUG_WARNING("Debug: %s\n", d);
 
 		g_free(d);
@@ -196,7 +196,7 @@ static void packet_handler(struct ausrc_st *st, GstBuffer *buffer)
 	err = aubuf_write(st->aubuf, GST_BUFFER_DATA(buffer),
 			  GST_BUFFER_SIZE(buffer));
 	if (err) {
-		DEBUG_WARNING("aubuf_write: %s\n", strerror(err));
+		DEBUG_WARNING("aubuf_write: %m\n", err);
 	}
 
 	/* Empty buffer now */
@@ -382,10 +382,9 @@ static int gst_alloc(struct ausrc_st **stp, struct ausrc *as,
 	if (err)
 		goto out;
 
-	st->prm = *prm;
-
-	st->ptime = calc_ptime(st->prm.srate, st->prm.ch, st->prm.frame_size);
-	st->psize = 2 * st->prm.frame_size;
+	st->prm   = *prm;
+	st->ptime = prm->frame_size * 1000 / (prm->srate * prm->ch);
+	st->psize = 2 * prm->frame_size;
 
 	err = aubuf_alloc(&st->aubuf, st->psize, 0);
 	if (err)

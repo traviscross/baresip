@@ -127,7 +127,7 @@ static void icy_printf(cairo_t *cr, int x, int y, double size,
 
 static size_t linelen(const struct pl *pl)
 {
-	size_t len = 74, i;
+	size_t len = 72, i;
 
 	if (pl->l <= len)
 		return pl->l;
@@ -270,7 +270,7 @@ static int alloc_handler(struct vidsrc_st **stp, struct vidsrc *vs,
 
 int rst_video_init(void)
 {
-       return vidsrc_register(&vidsrc, "rst", alloc_handler, NULL);
+	return vidsrc_register(&vidsrc, "rst", alloc_handler, NULL);
 }
 
 

@@ -144,6 +144,45 @@ int vidcodec_alloc(struct vidcodec_st **sp, const char *name,
 
 
 /**
+ * Video Codec encoder
+ *
+ * @param st     Video Codec state
+ * @param update True for full-frame
+ * @param frame  Video frame
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+int vidcodec_encode(struct vidcodec_st *st, bool update,
+		    const struct vidframe *frame)
+{
+	if (!st || !st->vc)
+		return EINVAL;
+
+	return st->vc->ench ? st->vc->ench(st, update, frame) : 0;
+}
+
+
+/**
+ * Video Codec decoder
+ *
+ * @param st     Video Codec state
+ * @param frame  Decoded video frame (output)
+ * @param marker RTP marker bit
+ * @param src    RTP Source buffer
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+int vidcodec_decode(struct vidcodec_st *st, struct vidframe *frame,
+		    bool marker, struct mbuf *src)
+{
+	if (!st || !st->vc)
+		return EINVAL;
+
+	return st->vc->dech ? st->vc->dech(st, frame, marker, src) : 0;
+}
+
+
+/**
  * Get the list of Video Codecs
  *
  * @return List of Video Codecs

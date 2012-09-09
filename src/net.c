@@ -3,7 +3,6 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
-#include <string.h>
 #include <re.h>
 #include <baresip.h>
 #include "core.h"
@@ -21,12 +20,12 @@ static struct {
 	struct sa laddr6;
 	char if6_def[16];
 #endif
-	int af;
 	struct tmr tmr;
 	struct dnsc *dnsc;
 	struct sa nsv[4];    /**< Configured name servers           */
 	uint32_t nsn;        /**< Number of configured name servers */
 	uint32_t interval;
+	char domain[64];     /**< DNS domain from network           */
 	net_change_h *ch;
 	void *arg;
 } net;
@@ -95,6 +94,9 @@ bool net_check(void)
 		change = true;
 	}
 
+	/* Get default routes */
+	(void)net_rt_default_get(AF_INET, net.if_def, sizeof(net.if_def));
+
 #ifdef HAVE_INET6
 	if (0 == net_default_source_addr_get(AF_INET6, &la)
 	    && !sa_cmp(&net.laddr6, &la, SA_ADDR)) {
@@ -105,12 +107,6 @@ bool net_check(void)
 		sa_cpy(&net.laddr6, &la);
 		change = true;
 	}
-#endif
-
-	/* Get default routes */
-	(void)net_rt_default_get(AF_INET, net.if_def, sizeof(net.if_def));
-
-#ifdef HAVE_INET6
 	(void)net_rt_default_get(AF_INET6, net.if6_def, sizeof(net.if6_def));
 #endif
 
@@ -122,12 +118,11 @@ static int dns_init(void)
 {
 	struct sa nsv[8];
 	uint32_t i, nsn;
-	char domain[64] = "";
 	int err;
 
 	nsn = ARRAY_SIZE(nsv);
 
-	err = dns_srv_get(domain, sizeof(domain), nsv, &nsn);
+	err = dns_srv_get(net.domain, sizeof(net.domain), nsv, &nsn);
 	if (err) {
 		nsn = 0;
 	}
@@ -136,9 +131,6 @@ static int dns_init(void)
 	for (i=0; i<net.nsn && nsn < ARRAY_SIZE(nsv); i++)
 		sa_cpy(&nsv[nsn++], &net.nsv[i]);
 
-	if (domain[0])
-		conf_set_domain(domain);
-
 	return dnsc_alloc(&net.dnsc, NULL, nsv, nsn);
 }
 
@@ -146,63 +138,46 @@ static int dns_init(void)
 /**
  * Initialise networking
  *
- * @param prefer_ipv6 Prefer IPv6 flag
- *
  * @return 0 if success, otherwise errorcode
  */
-int net_init(bool prefer_ipv6)
+int net_init(void)
 {
 	int err;
 
 	/* Initialise DNS resolver */
 	err = dns_init();
 	if (err) {
-		DEBUG_WARNING("dns_init: %s\n", strerror(err));
+		DEBUG_WARNING("dns_init: %m\n", err);
 		return err;
 	}
 
-	net.af = AF_INET;
-
+	sa_init(&net.laddr, AF_INET);
 	(void)sa_set_str(&net.laddr, "127.0.0.1", 0);
 
 	/* Get default source addresses */
 	err = net_default_source_addr_get(AF_INET, &net.laddr);
 	if (err) {
-		DEBUG_WARNING("net_default_source_addr_get: AF_INET (%s)\n",
-			      strerror(err));
+		DEBUG_WARNING("net_default_source_addr_get: AF_INET (%m)\n",
+			      err);
 	}
-
-#ifdef HAVE_INET6
-	(void)sa_set_str(&net.laddr6, "::1", 0);
-
-	err = net_default_source_addr_get(AF_INET6, &net.laddr6);
-	if (err) {
-		if (prefer_ipv6)
-			return err;
-		else
-			err = 0;
-	}
-
-	if (prefer_ipv6)
-		net.af = AF_INET6;
-#else
-	if (prefer_ipv6) {
-		DEBUG_WARNING("IPv6 support is disabled\n");
-		return EAFNOSUPPORT;
-	}
-#endif
 
 	/* Get default routes */
 	(void)net_rt_default_get(AF_INET, net.if_def, sizeof(net.if_def));
 
 #ifdef HAVE_INET6
+	sa_init(&net.laddr6, AF_INET6);
+
+	(void)net_default_source_addr_get(AF_INET6, &net.laddr6);
 	(void)net_rt_default_get(AF_INET6, net.if6_def, sizeof(net.if6_def));
 #endif
 
-	(void)re_fprintf(stderr, "Local IP address: IPv4=%s:%j",
+	(void)re_fprintf(stderr, "Local network address: IPv4=%s:%j",
 			 net.if_def, &net.laddr);
 #ifdef HAVE_INET6
-	(void)re_fprintf(stderr, " IPv6=%s:%j", net.if6_def, &net.laddr6);
+	if (sa_isset(&net.laddr6, SA_ADDR)) {
+		(void)re_fprintf(stderr, " IPv6=%s:%j",
+				 net.if6_def, &net.laddr6);
+	}
 #endif
 	(void)re_fprintf(stderr, "\n");
 
@@ -330,13 +305,15 @@ int net_debug(struct re_printf *pf, void *unused)
 
 
 /**
- * Get the local IP Address
+ * Get the local IP Address for a specific Address Family (AF)
+ *
+ * @param af Address Family
  *
  * @return Local IP Address
  */
-const struct sa *net_laddr(void)
+const struct sa *net_laddr_af(int af)
 {
-	switch (net.af) {
+	switch (af) {
 
 	case AF_INET:  return &net.laddr;
 #ifdef HAVE_INET6
@@ -355,4 +332,15 @@ const struct sa *net_laddr(void)
 struct dnsc *net_dnsc(void)
 {
 	return net.dnsc;
+}
+
+
+/**
+ * Get the network domain name
+ *
+ * @return Network domain
+ */
+const char *net_domain(void)
+{
+	return net.domain[0] ? net.domain : NULL;
 }

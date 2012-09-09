@@ -8,26 +8,13 @@
 #include "core.h"
 
 
-#ifndef RELEASE
-#define AUFILT_DEBUG 1
-#endif
-
-
 /*
  * \page AudioFilter Audio Filter
 
  - operate on linear PCM samples
  - both encode and decode directions
  - list of preproc's for each dir
- - latency calculations
  - some orthogonal enc/dec, some not
-
-  Module        type  encode   decode  ch    config
-
-o sndfile       orth  in       in      1,2   srate,ch, file names
-o speex_aec     comb  in->out  in      1,2?  srate, Tail length etc.
-o speex_pp      orth  in->out  -       1,2?  srate, ch, preproc denoise,agc,vad
-o speex_resamp  orth  in->out  in->out 1,2   srate in/out, q
 
 RTP <--- [Audio Encoder] <--- [PROC Encode] <--- [Audio input]
 
@@ -64,19 +51,6 @@ struct aufilt_chain {
 
 static struct list aufiltl = LIST_INIT;  /* struct aufilt */
 
-#if AUFILT_DEBUG
-static struct {
-	uint32_t enc_min;
-	uint32_t enc_avg;
-	uint32_t enc_max;
-	uint32_t dec_min;
-	uint32_t dec_avg;
-	uint32_t dec_max;
-} stat = {
-	~0, 0, 0, ~0, 0, 0
-};
-#endif
-
 
 static inline struct aufilt *aufilt_get(struct aufilt_st *st)
 {
@@ -108,7 +82,7 @@ static void aufilt_chain_destructor(void *arg)
 
 
 /**
- * Allocate a filter-chain
+ * Allocate an audio filter-chain
  */
 int aufilt_chain_alloc(struct aufilt_chain **fcp,
 		       const struct aufilt_prm *encprm,
@@ -175,10 +149,6 @@ int aufilt_chain_encode(struct aufilt_chain *fc, struct mbuf *mb)
 {
 	struct le *le;
 	int err = 0;
-#if AUFILT_DEBUG
-	uint64_t t = tmr_jiffies();
-	uint32_t diff;
-#endif
 
 	if (!fc)
 		return EINVAL;
@@ -190,13 +160,6 @@ int aufilt_chain_encode(struct aufilt_chain *fc, struct mbuf *mb)
 		if (af->ench)
 			err = af->ench(f->st, mb);
 	}
-
-#if AUFILT_DEBUG
-	diff = (uint32_t) (tmr_jiffies() - t);
-	stat.enc_min = min(stat.enc_min, diff);
-	stat.enc_avg = avg(stat.enc_avg, diff);
-	stat.enc_max = max(stat.enc_max, diff);
-#endif
 
 	return err;
 }
@@ -214,10 +177,6 @@ int aufilt_chain_decode(struct aufilt_chain *fc, struct mbuf *mb)
 {
 	struct le *le;
 	int err = 0;
-#if AUFILT_DEBUG
-	uint64_t t = tmr_jiffies();
-	uint32_t diff;
-#endif
 
 	if (!fc)
 		return EINVAL;
@@ -229,13 +188,6 @@ int aufilt_chain_decode(struct aufilt_chain *fc, struct mbuf *mb)
 		if (af->dech)
 			err = af->dech(f->st, mb);
 	}
-
-#if AUFILT_DEBUG
-	diff = (uint32_t) (tmr_jiffies() - t);
-	stat.dec_min = min(stat.dec_min, diff);
-	stat.dec_avg = avg(stat.dec_avg, diff);
-	stat.dec_max = max(stat.dec_max, diff);
-#endif
 
 	return err;
 }
@@ -320,6 +272,14 @@ struct list *aufilt_list(void)
 }
 
 
+/**
+ * Print debug information about the audio filter chain
+ *
+ * @param pf     Print handler for debug output
+ * @param unused Unused parameter
+ *
+ * @return 0 if success, otherwise errorcode
+ */
 int aufilt_debug(struct re_printf *pf, void *unused)
 {
 	struct le *le;
@@ -329,18 +289,11 @@ int aufilt_debug(struct re_printf *pf, void *unused)
 	(void)unused;
 
 	err = re_hprintf(pf, "Audio filter chain:\n");
-	for (le = aufiltl.head; !err && le; le = le->next, i++) {
+	for (le = aufiltl.head; le; le = le->next, i++) {
 		const struct aufilt *af = le->data;
 
-		err = re_hprintf(pf, " %u: %s\n", i, af->name);
+		err |= re_hprintf(pf, " %u: %s\n", i, af->name);
 	}
-
-#if AUFILT_DEBUG
-	err |= re_hprintf(pf, " Encoder min/avg/max = %u/%u/%u [ms]\n",
-			  stat.enc_min, stat.enc_avg, stat.enc_max);
-	err |= re_hprintf(pf, " Decoder min/avg/max = %u/%u/%u [ms]\n",
-			  stat.dec_min, stat.dec_avg, stat.dec_max);
-#endif
 
 	return err;
 }

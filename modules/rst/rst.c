@@ -94,8 +94,8 @@ static void recv_handler(struct mbuf *mb, void *arg)
 			err = mbuf_write_mem(rst->mb, mbuf_buf(mb),
 					     mbuf_get_left(mb));
 			if (err) {
-				re_printf("rst: buffer write error: %s\n",
-					  strerror(err));
+				re_printf("rst: buffer write error: %m\n",
+					  err);
 				rst->tc = mem_deref(rst->tc);
 				tmr_start(&rst->tmr, RETRY_WAIT,
 					  reconnect, rst);
@@ -230,8 +230,8 @@ static void estab_handler(void *arg)
 
  out:
 	if (err) {
-		re_printf("rst: error sending HTTP request: %s\n",
-			  strerror(err));
+		re_printf("rst: error sending HTTP request: %m\n",
+			  err);
 	}
 
 	mem_deref(mb);
@@ -274,7 +274,7 @@ static void dns_handler(int err, const struct dnshdr *hdr, struct list *ansl,
 	err = tcp_connect(&rst->tc, &srv, estab_handler, recv_handler,
 			  close_handler, rst);
 	if (err) {
-		re_printf("rst: tcp connect error: %s\n", strerror(err));
+		re_printf("rst: tcp connect error: %m\n", err);
 		tmr_start(&rst->tmr, RETRY_WAIT, reconnect, rst);
 		return;
 	}
@@ -291,15 +291,14 @@ static int rst_connect(struct rst *rst)
 		err = tcp_connect(&rst->tc, &srv, estab_handler, recv_handler,
 				  close_handler, rst);
 		if (err) {
-			re_printf("rst: tcp connect error: %s\n",
-				  strerror(err));
+			re_printf("rst: tcp connect error: %m\n", err);
 		}
 	}
 	else {
 		err = dnsc_query(&rst->dnsq, net_dnsc(), rst->host, DNS_TYPE_A,
 				 DNS_CLASS_IN, true, dns_handler, rst);
 		if (err) {
-			re_printf("rst: dns query error: %s\n", strerror(err));
+			re_printf("rst: dns query error: %m\n", err);
 		}
 	}
 

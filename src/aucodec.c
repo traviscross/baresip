@@ -95,7 +95,8 @@ int aucodec_clone(struct list *l, const struct aucodec *src)
 }
 
 
-const struct aucodec *aucodec_find(const char *name, uint32_t srate, int ch)
+const struct aucodec *aucodec_find(const char *name, uint32_t srate,
+				   uint8_t ch)
 {
 	struct le *le;
 
@@ -142,7 +143,7 @@ struct list *aucodec_list(void)
  * @return 0 if success, otherwise errorcode
  */
 int aucodec_alloc(struct aucodec_st **sp, const char *name, uint32_t srate,
-		  int channels, struct aucodec_prm *encp,
+		  uint8_t channels, struct aucodec_prm *encp,
 		  struct aucodec_prm *decp, const char *fmtp)
 {
 	struct aucodec *ac;
@@ -166,6 +167,9 @@ int aucodec_alloc(struct aucodec_st **sp, const char *name, uint32_t srate,
  */
 int aucodec_encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
+	if (!st || !st->ac)
+		return EINVAL;
+
 	return st->ac->ench ? st->ac->ench(st, dst, src) : 0;
 }
 
@@ -181,6 +185,9 @@ int aucodec_encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
  */
 int aucodec_decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 {
+	if (!st || !st->ac)
+		return EINVAL;
+
 	return st->ac->dech ? st->ac->dech(st, dst, src) : 0;
 }
 

@@ -9,7 +9,6 @@
 #include <re.h>
 #include <rem.h>
 #include <baresip.h>
-#include "core.h"
 
 
 #define DEBUG_MODULE "vidloop"
@@ -37,6 +36,9 @@ struct video_loop {
 };
 
 
+static struct video_loop *gvl;
+
+
 static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
 {
 	struct video_loop *vl = arg;
@@ -55,9 +57,9 @@ static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
 	}
 
 	if (vl->codec)
-		(void)vidcodec_get(vl->codec)->ench(vl->codec, false, frame);
+		(void)vidcodec_encode(vl->codec, false, frame);
 	else {
-		vl->stat.bytes += vidframe_size(frame);
+		vl->stat.bytes += vidframe_size(frame->fmt, &frame->size);
 		(void)vidisp_display(vl->vidisp, "Video Loop", frame);
 	}
 
@@ -79,7 +81,7 @@ static void vidloop_destructor(void *arg)
 static void vidisp_input_handler(char key, void *arg)
 {
 	(void)arg;
-	ui_input(key, NULL);
+	ui_input(key);
 }
 
 
@@ -93,9 +95,9 @@ static int vidcodec_send_handler(bool marker, struct mbuf *mb, void *arg)
 
 	/* decode */
 	frame.data[0] = NULL;
-	err = vidcodec_get(vl->codec)->dech(vl->codec, &frame, marker, mb);
+	err = vidcodec_decode(vl->codec, &frame, marker, mb);
 	if (err) {
-		DEBUG_WARNING("codec_decode: %s\n", strerror(err));
+		DEBUG_WARNING("codec_decode: %m\n", err);
 		return err;
 	}
 
@@ -119,7 +121,7 @@ static int enable_codec(struct video_loop *vl)
 	err = vidcodec_alloc(&vl->codec, vidcodec_name(vidcodec_find(NULL)),
 			     &prm, NULL, NULL, vidcodec_send_handler, vl);
 	if (err) {
-		DEBUG_WARNING("alloc encoder: %s\n", strerror(err));
+		DEBUG_WARNING("alloc encoder: %m\n", err);
 		return err;
 	}
 
@@ -167,28 +169,23 @@ static void timeout_bw(void *arg)
 
 static int vsrc_reopen(struct video_loop *vl, const struct vidsz *sz)
 {
-	struct vidsrc *vs;
 	struct vidsrc_prm prm;
 	int err;
 
-	vs = (struct vidsrc *)vidsrc_find(config.video.src_mod);
-	if (!vs)
-		return ENOENT;
-
 	(void)re_printf("%s,%s: open video source: %u x %u\n",
-			vs->name, config.video.src_dev, sz->w, sz->h);
+			config.video.src_mod, config.video.src_dev,
+			sz->w, sz->h);
 
 	prm.orient = VIDORIENT_PORTRAIT;
 	prm.fps    = config.video.fps;
 
 	vl->vsrc = mem_deref(vl->vsrc);
-
-	err = vs->alloch(&vl->vsrc, vs, NULL, &prm, sz, NULL,
-			  config.video.src_dev, vidsrc_frame_handler,
-			  NULL, vl);
+	err = vidsrc_alloc(&vl->vsrc, config.video.src_mod, NULL, &prm, sz,
+			   NULL, config.video.src_dev, vidsrc_frame_handler,
+			   NULL, vl);
 	if (err) {
-		DEBUG_WARNING("vidsrc %s failed: %s\n",
-			      vs->name, strerror(err));
+		DEBUG_WARNING("vidsrc %s failed: %m\n",
+			      config.video.src_dev, err);
 	}
 
 	return err;
@@ -198,12 +195,7 @@ static int vsrc_reopen(struct video_loop *vl, const struct vidsz *sz)
 static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 {
 	struct video_loop *vl;
-	struct vidisp *vd;
 	int err;
-
-	vd = (struct vidisp *)vidisp_find(NULL);
-	if (!vd)
-		return ENOENT;
 
 	vl = mem_zalloc(sizeof(*vl), vidloop_destructor);
 	if (!vl)
@@ -215,10 +207,10 @@ static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 	if (err)
 		goto out;
 
-	err = vd->alloch(&vl->vidisp, NULL, vd, NULL, NULL,
-			 vidisp_input_handler, NULL, vl);
+	err = vidisp_alloc(&vl->vidisp, NULL, NULL, NULL, NULL,
+			   vidisp_input_handler, NULL, vl);
 	if (err) {
-		DEBUG_WARNING("video display failed: %s\n", strerror(err));
+		DEBUG_WARNING("video display failed: %m\n", err);
 		goto out;
 	}
 
@@ -236,43 +228,76 @@ static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 
 /**
  * Start the video loop (for testing)
- *
- * @param stop True to force stopping, otherwise false
  */
-void video_loop_test(bool stop)
+static int vidloop_start(struct re_printf *pf, void *arg)
 {
-	static struct video_loop *vl = NULL;
 	struct vidsz size;
-	int err;
+	int err = 0;
 
-	if (stop) {
-		if (vl)
-			(void)re_printf("Disable video-loop\n");
-		vl = mem_deref(vl);
-		return;
-	}
+	(void)arg;
 
 	size.w = config.video.width;
 	size.h = config.video.height;
 
-	if (vl) {
-		if (vl->codec)
-			vl->codec = mem_deref(vl->codec);
+	if (gvl) {
+		if (gvl->codec)
+			gvl->codec = mem_deref(gvl->codec);
 		else
-			(void)enable_codec(vl);
+			(void)enable_codec(gvl);
 
-		(void)re_printf("%sabled codec: %s\n",
-				vl->codec ? "En" : "Dis",
-				vidcodec_name(vidcodec_get(vl->codec)));
+		(void)re_hprintf(pf, "%sabled codec: %s\n",
+				 gvl->codec ? "En" : "Dis",
+				 vidcodec_name(vidcodec_get(gvl->codec)));
 	}
 	else {
-		(void)re_printf("Enable video-loop on %s,%s: %u x %u\n",
-				config.video.src_mod, config.video.src_dev,
-				size.w, size.h);
+		(void)re_hprintf(pf, "Enable video-loop on %s,%s: %u x %u\n",
+				 config.video.src_mod, config.video.src_dev,
+				 size.w, size.h);
 
-		err = video_loop_alloc(&vl, &size);
+		err = video_loop_alloc(&gvl, &size);
 		if (err) {
-			DEBUG_WARNING("vidloop alloc: %s\n", strerror(err));
+			DEBUG_WARNING("vidloop alloc: %m\n", err);
 		}
 	}
+
+	return err;
 }
+
+
+static int vidloop_stop(struct re_printf *pf, void *arg)
+{
+	(void)arg;
+
+	if (gvl)
+		(void)re_hprintf(pf, "Disable video-loop\n");
+	gvl = mem_deref(gvl);
+	return 0;
+}
+
+
+static const struct cmd cmdv[] = {
+	{'v', 0, "Start video-loop", vidloop_start },
+	{'V', 0, "Stop video-loop",  vidloop_stop  },
+};
+
+
+static int module_init(void)
+{
+	return cmd_register(cmdv, ARRAY_SIZE(cmdv));
+}
+
+
+static int module_close(void)
+{
+	vidloop_stop(NULL, NULL);
+	cmd_unregister(cmdv);
+	return 0;
+}
+
+
+EXPORT_SYM const struct mod_export DECL_EXPORTS(vidloop) = {
+	"vidloop",
+	"application",
+	module_init,
+	module_close,
+};
