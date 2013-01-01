@@ -68,7 +68,6 @@ struct call {
 	time_t time_start;        /**< Time when call started               */
 	time_t time_stop;         /**< Time when call stopped               */
 	bool got_offer;           /**< Got SDP Offer from Peer              */
-	uint8_t pt_telev_rx;      /**< Payload type for incoming tel-events */
 	struct mnat_sess *mnats;  /**< Media NAT session                    */
 	const struct mnat *mnat;  /**< Media NAT object                     */
 	bool mnat_wait;           /**< Waiting for MNAT to establish        */
@@ -105,46 +104,6 @@ static void set_state(struct call *call, enum state st)
 }
 
 
-static int add_telev_codec(struct call *call, struct sdp_media *m)
-{
-	struct sdp_format *sf;
-	int err;
-
-	/* Use payload-type 101 if available, for CiscoGW interop */
-	err = sdp_format_add(&sf, m, false,
-			     (!sdp_media_lformat(m, 101)) ? "101" : NULL,
-			     telev_rtpfmt, TELEV_SRATE, 1, NULL,
-			     NULL, NULL, false, "0-15");
-	if (err)
-		return err;
-
-	call->pt_telev_rx = sf->pt;
-
-	return err;
-}
-
-
-static void set_telev_pt(struct call *call, struct sdp_media *sdpm)
-{
-	const struct sdp_format *sc;
-
-	sc = sdp_media_rformat(sdpm, telev_rtpfmt);
-	if (!sc) {
-
-		/* NOTE: we force telephone-event if other peer
-		         does not support it */
-		(void)re_printf("no remote pt found for telev -- forcing\n");
-		sc = sdp_media_lformat(sdpm, call->pt_telev_rx);
-	}
-	if (!sc) {
-		(void)re_printf("no remote pt found for telev - disabling\n");
-		return;
-	}
-
-	audio_enable_telev(call->audio, sc->pt, call->pt_telev_rx);
-}
-
-
 static void call_stream_start(struct call *call, bool active)
 {
 	const struct sdp_format *sc;
@@ -154,8 +113,6 @@ static void call_stream_start(struct call *call, bool active)
 	sc = sdp_media_rformat(stream_sdpmedia(audio_strm(call->audio)), NULL);
 	if (sc) {
 		struct aucodec *ac = sc->data;
-
-		stream_remote_set(audio_strm(call->audio), call->local_uri);
 
 		if (ac) {
 			err  = audio_encoder_set(call->audio, sc->data,
@@ -172,8 +129,6 @@ static void call_stream_start(struct call *call, bool active)
 		else {
 			(void)re_printf("no common audio-codecs..\n");
 		}
-
-		set_telev_pt(call, stream_sdpmedia(audio_strm(call->audio)));
 	}
 	else {
 		(void)re_printf("audio stream is disabled..\n");
@@ -184,8 +139,6 @@ static void call_stream_start(struct call *call, bool active)
 	sc = sdp_media_rformat(stream_sdpmedia(video_strm(call->video)), NULL);
 	if (sc) {
 		(void)re_printf("enable video stream [%s]\n", sc->params);
-
-		stream_remote_set(video_strm(call->video), call->local_uri);
 
 		err  = video_encoder_set(call->video, sc->data, sc->pt,
 					 sc->params);
@@ -321,17 +274,15 @@ static int update_media(struct call *call)
 
 	/* media attributes */
 	audio_sdp_attr_decode(call->audio);
+
 #ifdef USE_VIDEO
 	if (call->video)
 		video_sdp_attr_decode(call->video);
 #endif
 
-	/* Update remote address on each stream */
+	/* Update each stream */
 	FOREACH_STREAM {
-		struct stream *s = le->data;
-
-		if (stream_has_media(s))
-			stream_remote_set(s, call->local_uri);
+		stream_update(le->data, call->local_uri);
 	}
 
 	if (call->mnat && call->mnat->updateh && call->mnats)
@@ -401,36 +352,6 @@ static void audio_error_handler(int err, const char *str, void *arg)
 }
 
 
-#ifdef USE_VIDEO
-static void video_exclude(const struct stream *strm, const char *excl)
-{
-	const struct sdp_media *m = stream_sdpmedia(strm);
-	struct pl pl;
-
-	pl_set_str(&pl, excl);
-
-	while (pl.l > 0) {
-
-		struct sdp_format *sf;
-		struct pl val, comm;
-		char cname[64];
-
-		comm.l = 0;
-		if (re_regex(pl.p, pl.l, "[^,]+[,]*", &val, &comm))
-			break;
-
-		pl_advance(&pl, val.l + comm.l);
-
-		pl_strcpy(&val, cname, sizeof(cname));
-
-		sf = sdp_media_format(m, true, NULL, -1, cname, -1, -1);
-		if (sf)
-			mem_deref(sf);
-	}
-}
-#endif
-
-
 /**
  * Allocate a new Call state object
  *
@@ -487,8 +408,7 @@ int call_alloc(struct call **callp, struct list *lst,
 	call->state  = STATE_IDLE;
 	call->eh     = eh;
 	call->arg    = arg;
-	call->pt_telev_rx = PT_NONE;
-	call->af     = prm->af;
+	call->af     = prm ? prm->af : AF_INET;
 
 	err |= str_dup(&call->local_name, local_name);
 	err |= str_dup(&call->local_uri, local_uri);
@@ -496,7 +416,7 @@ int call_alloc(struct call **callp, struct list *lst,
 		goto out;
 
 	/* Init SDP info */
-	err = sdp_session_alloc(&call->sdp, net_laddr_af(prm->af));
+	err = sdp_session_alloc(&call->sdp, net_laddr_af(call->af));
 	if (err)
 		goto out;
 
@@ -527,6 +447,7 @@ int call_alloc(struct call **callp, struct list *lst,
 	err = audio_alloc(&call->audio, call, call->sdp, ++label,
 			  mnat, call->mnats, menc,
 			  ptime ? ptime : PTIME, aumode,
+			  ua_aucodecl(ua),
 			  audio_event_handler, audio_error_handler, call);
 	if (err)
 		goto out;
@@ -541,27 +462,15 @@ int call_alloc(struct call **callp, struct list *lst,
 	/* Video stream */
 	if (use_video) {
  		err = video_alloc(&call->video, call, call->sdp, ++label,
-				  mnat, call->mnats, menc, "main");
- 		if (err)
+				  mnat, call->mnats, menc, "main",
+				  ua_vidcodecl(ua));
+		if (err)
 			goto out;
-
-		if (vidmode == VIDMODE_SHUTTERED)
-			video_set_shuttered(call->video, true);
-
-		/* exclude some codecs for video-calls */
-		if (!msg) {
-			video_exclude(audio_strm(call->audio),
-				      config.video.exclude);
-		}
  	}
 #else
 	(void)use_video;
 	(void)vidmode;
 #endif
-
-	err = add_telev_codec(call, stream_sdpmedia(audio_strm(call->audio)));
-	if (err)
-		goto out;
 
 	/* Bandwidth management [bit/s] */
 
@@ -701,7 +610,7 @@ int call_progress(struct call *call)
 		return err;
 
 	err = sipsess_progress(call->sess, 183, "Session Progress",
-			       desc, NULL);
+			       desc, "Allow: %s\r\n", ua_allowed_methods());
 
 	if (!err)
 		call_stream_start(call, false);
@@ -742,7 +651,8 @@ int call_answer(struct call *call, uint16_t scode)
 	if (err)
 		return err;
 
-	err = sipsess_answer(call->sess, scode, "Answering", desc, NULL);
+	err = sipsess_answer(call->sess, scode, "Answering", desc,
+                             "Allow: %s\r\n", ua_allowed_methods());
 
 	mem_deref(desc);
 
@@ -977,8 +887,6 @@ int call_status(struct re_printf *pf, const struct call *call)
 		err |= video_print(pf, call->video);
 #endif
 
-	err |= audio_print_vu(pf, call->audio);
-
 	return err;
 }
 
@@ -1005,15 +913,6 @@ int call_info(struct re_printf *pf, const struct call *call)
 
 	return re_hprintf(pf, "%H  %8s  %s", print_duration, call,
 			  state_name(call->state), call->peer_uri);
-}
-
-
-void call_enable_vumeter(struct call *call, bool en)
-{
-	if (!call)
-		return;
-
-	audio_enable_vumeter(call->audio, en);
 }
 
 
@@ -1257,8 +1156,9 @@ static void sipsess_refer_handler(struct sip *sip, const struct sip_msg *msg,
 			      sipsess_dialog(call->sess), NULL,
 			      202, "Accepted", 60, 60, 60,
 			      ua_cuser(call->ua), "message/sipfrag",
-			      auth_handler, call->ua, false,
-			      sipnot_close_handler, call, NULL);
+			      auth_handler, ua_prm(call->ua), true,
+			      sipnot_close_handler, call,
+	                      "Allow: %s\r\n", ua_allowed_methods());
 	if (err) {
 		DEBUG_WARNING("refer: sipevent_accept failed: %m\n", err);
 		return;
@@ -1344,11 +1244,11 @@ int call_accept(struct call *call, struct sipsess_sock *sess_sock,
 
 	err = sipsess_accept(&call->sess, sess_sock, msg, 180, "Ringing",
 			     ua_cuser(call->ua), "application/sdp", NULL,
-			     auth_handler, call->ua, false,
+			     auth_handler, ua_prm(call->ua), true,
 			     sipsess_offer_handler, sipsess_answer_handler,
 			     sipsess_estab_handler, sipsess_info_handler,
 			     sipsess_refer_handler, sipsess_close_handler,
-			     call, NULL);
+			     call, "Allow: %s\r\n", ua_allowed_methods());
 	if (err) {
 		DEBUG_WARNING("sipsess_accept: %m\n", err);
 		return err;
@@ -1445,11 +1345,12 @@ static int send_invite(struct call *call)
 			      routev[0] ? routev : NULL,
 			      routev[0] ? 1 : 0,
 			      "application/sdp", desc,
-			      auth_handler, call->ua, false,
+			      auth_handler, ua_prm(call->ua), true,
 			      sipsess_offer_handler, sipsess_answer_handler,
 			      sipsess_progr_handler, sipsess_estab_handler,
 			      sipsess_info_handler, sipsess_refer_handler,
-			      sipsess_close_handler, call, NULL);
+			      sipsess_close_handler, call,
+			      "Allow: %s\r\n", ua_allowed_methods());
 	if (err) {
 		DEBUG_WARNING("sipsess_connect: %m\n", err);
 	}
@@ -1629,7 +1530,7 @@ int call_transfer(struct call *call, const char *uri)
 	call->sub = mem_deref(call->sub);
 	err = sipevent_drefer(&call->sub, uag_sipevent_sock(),
 			      sipsess_dialog(call->sess), ua_cuser(call->ua),
-			      auth_handler, call->ua, false,
+			      auth_handler, ua_prm(call->ua), true,
 			      sipsub_notify_handler, sipsub_close_handler,
 			      call,
 			      "Refer-To: %s\r\n", uri);

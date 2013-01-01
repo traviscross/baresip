@@ -52,6 +52,9 @@ struct stream {
 	stream_rtcp_h *rtcph;    /**< Stream RTCP handler                   */
 	void *arg;               /**< Handler argument                      */
 
+	int pt_enc;
+	/*int pt_dec; todo: enable this */
+
 	struct tmr tmr_stats;
 	struct {
 		uint32_t n_tx;
@@ -312,6 +315,8 @@ int stream_alloc(struct stream **sp, struct call *call,
 	if (err)
 		goto out;
 
+	s->pt_enc = -1;
+
 	list_append(call_streaml(call), &s->le, s);
 
  out:
@@ -363,10 +368,10 @@ void stream_start_keepalive(struct stream *s)
 }
 
 
-int stream_send(struct stream *s, bool marker, uint8_t pt, uint32_t ts,
+int stream_send(struct stream *s, bool marker, int pt, uint32_t ts,
 		struct mbuf *mb)
 {
-	int err;
+	int err = 0;
 
 	if (!s)
 		return EINVAL;
@@ -378,7 +383,13 @@ int stream_send(struct stream *s, bool marker, uint8_t pt, uint32_t ts,
 
 	s->stats.b_tx += mbuf_get_left(mb);
 
-	err = rtp_send(s->rtp, sdp_media_raddr(s->sdp), marker, pt, ts, mb);
+	if (pt < 0)
+		pt = s->pt_enc;
+
+	if (pt >= 0) {
+		err = rtp_send(s->rtp, sdp_media_raddr(s->sdp),
+			       marker, pt, ts, mb);
+	}
 
 	rtpkeep_refresh(s->rtpkeep, ts);
 
@@ -388,7 +399,7 @@ int stream_send(struct stream *s, bool marker, uint8_t pt, uint32_t ts,
 }
 
 
-void stream_remote_set(struct stream *s, const char *cname)
+static void stream_remote_set(struct stream *s, const char *cname)
 {
 	struct sa rtcp;
 
@@ -413,20 +424,33 @@ void stream_remote_set(struct stream *s, const char *cname)
 }
 
 
-void stream_sdp_attr_decode(struct stream *s)
+void stream_update(struct stream *s, const char *cname)
 {
-	int err;
+	const struct sdp_format *fmt;
 
 	if (!s)
 		return;
 
+	fmt = sdp_media_rformat(s->sdp, NULL);
+
+	s->pt_enc = fmt ? fmt->pt : -1;
+
+	if (stream_has_media(s))
+		stream_remote_set(s, cname);
+
 	if (s->menc && menc_get(s->menc)->updateh) {
-		err = menc_get(s->menc)->updateh(s->menc);
+		int err = menc_get(s->menc)->updateh(s->menc);
 		if (err) {
 			DEBUG_WARNING("menc update: %m\n", err);
 		}
 	}
+}
 
+
+void stream_update_encoder(struct stream *s, int pt_enc)
+{
+	if (pt_enc >= 0)
+		s->pt_enc = pt_enc;
 }
 
 
@@ -531,8 +555,9 @@ int stream_debug(struct re_printf *pf, const struct stream *s)
 	if (!s)
 		return 0;
 
-	err  = re_hprintf(pf, " %s dir=%s\n", sdp_media_name(s->sdp),
-			  sdp_dir_name(sdp_media_dir(s->sdp)));
+	err  = re_hprintf(pf, " %s dir=%s pt_enc=%d\n", sdp_media_name(s->sdp),
+			  sdp_dir_name(sdp_media_dir(s->sdp)),
+			  s->pt_enc);
 
 	sdp_media_raddr_rtcp(s->sdp, &rrtcp);
 	err |= re_hprintf(pf, " remote: %J/%J\n",

@@ -72,10 +72,7 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 	}
 
 	/* Echo canceller with 200 ms tail length */
-	if (encprm->aec_len)
-		fl = encprm->srate * encprm->aec_len / 1000;
-	else
-		fl = 10 * encprm->frame_size;
+	fl = 10 * encprm->frame_size;
 	st->state = speex_echo_state_init(encprm->frame_size, fl);
 	if (!st->state) {
 		err = ENOMEM;

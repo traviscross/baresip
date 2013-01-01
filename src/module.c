@@ -118,8 +118,10 @@ static int module_app_handler(const struct pl *val, void *arg)
 	if (!modapp)
 		return ENOMEM;
 
-	if (load_module(&modapp->mod, arg, val))
+	if (load_module(&modapp->mod, arg, val)) {
+		mem_deref(modapp);
 		return 0;
+	}
 
 	list_prepend(&modappl, &modapp->le, modapp);
 

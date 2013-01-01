@@ -26,6 +26,7 @@ SRCS	+= sipreq.c
 SRCS	+= ua.c
 SRCS	+= ui.c
 SRCS	+= vidcodec.c
+SRCS	+= vidfilt.c
 SRCS	+= vidisp.c
 SRCS	+= vidsrc.c
 

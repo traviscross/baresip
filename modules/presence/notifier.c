@@ -136,7 +136,7 @@ static int notifier_alloc(struct notifier **notp, struct sipevent_sock *sock,
 	err = sipevent_accept(&not->not, sock, msg, NULL, se, 200, "OK",
 			      600, 600, 600,
 			      ua_cuser(not->ua), "application/pidf+xml",
-			      auth_handler, not->ua, false,
+			      auth_handler, ua_prm(not->ua), true,
 			      sipnot_close_handler, not, NULL);
 	if (err) {
 		(void)re_fprintf(stderr,

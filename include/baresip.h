@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.2"
+#define BARESIP_VERSION "0.4.3"
 
 
 /* forward declarations */
@@ -87,7 +87,6 @@ struct config {
 		char alert_dev[128];   /**< Audio alert device             */
 		struct range srate;    /**< Audio sampling rate in [Hz]    */
 		struct range channels; /**< Nr. of audio channels (1=mono) */
-		uint32_t aec_len;      /**< AEC Tail length in [ms]        */
 		struct range srate_play;/**< Sampling rates for player     */
 		struct range srate_src; /**< Sampling rates for source     */
 		bool src_first;        /**< Audio source opened first      */
@@ -100,8 +99,6 @@ struct config {
 		int width, height;     /**< Video resolution              */
 		uint32_t bitrate;      /**< Encoder bitrate in [bit/s]    */
 		uint32_t fps;          /**< Video framerate               */
-		char exclude[64];      /**< CSV-list of codecs to exclude */
-		char selfview[16];     /**< Selfview: 'pip' or 'window'   */
 	} video;
 
 	/** Audio/Video Transport */
@@ -113,6 +110,11 @@ struct config {
 		bool rtcp_mux;         /**< RTP/RTCP multiplexing            */
 		struct range jbuf_del; /**< Delay, number of frames          */
 	} avt;
+
+	/* Network */
+	struct {
+		char ifname[16];       /**< Bind to interface (optional)     */
+	} net;
 };
 
 extern struct config config;
@@ -241,7 +243,6 @@ struct aufilt_prm {
 	uint32_t srate_out;   /**< Output sampling rate in [Hz] */
 	uint8_t  ch;          /**< Number of channels           */
 	uint32_t frame_size;  /**< Number of samples per frame  */
-	uint32_t aec_len;     /**< AEC tail length in [ms]      */
 };
 
 typedef int (aufilt_alloc_h)(struct aufilt_st **stp, struct aufilt *af,
@@ -309,6 +310,7 @@ void play_close(void);
  */
 
 struct ua;
+struct ua_prm;
 
 /** Events from User-Agent */
 enum ua_event {
@@ -348,7 +350,6 @@ enum audio_mode {
 enum vidmode {
 	VIDMODE_OFF = 0,    /**< Video disabled                */
 	VIDMODE_ON,         /**< Video enabled                 */
-	VIDMODE_SHUTTERED   /**< Video offered but not sending */
 };
 
 /** Defines the User-Agent event handler */
@@ -371,12 +372,13 @@ int  ua_options_send(struct ua *ua, const char *uri,
 		     options_resp_h *resph, void *arg);
 int  ua_register(struct ua *ua);
 int  ua_sipfd(const struct ua *ua);
-int  ua_auth(struct ua *ua, char **username, char **password,
+int  ua_auth(struct ua_prm *prm, char **username, char **password,
 	     const char *realm);
 const char *ua_aor(const struct ua *ua);
 const char *ua_cuser(const struct ua *ua);
 const char *ua_outbound(const struct ua *ua);
 struct call *ua_call(const struct ua *ua);
+struct ua_prm *ua_prm(const struct ua *ua);
 
 
 /* One instance */
@@ -532,6 +534,7 @@ int vidisp_alloc(struct vidisp_st **stp, const char *name,
 		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg);
 int vidisp_display(struct vidisp_st *st, const char *title,
 		   const struct vidframe *frame);
+const struct vidisp *vidisp_find(const char *name);
 
 
 /*
@@ -624,6 +627,35 @@ int  vidcodec_debug(struct re_printf *pf, const struct list *vcl);
 
 
 /*
+ * Video Filter
+ */
+
+struct vidfilt;
+
+/* Base class */
+struct vidfilt_st {
+	struct vidfilt *vf;
+	struct le le;
+};
+
+typedef int (vidfilt_update_h)(struct vidfilt_st **stp, struct vidfilt *vf);
+typedef int (vidfilt_encode_h)(struct vidfilt_st *st, struct vidframe *frame);
+typedef int (vidfilt_decode_h)(struct vidfilt_st *st, struct vidframe *frame);
+
+struct vidfilt {
+	struct le le;
+	const char *name;
+	vidfilt_update_h *updh;
+	vidfilt_encode_h *ench;
+	vidfilt_decode_h *dech;
+};
+
+void vidfilt_register(struct vidfilt *vf);
+void vidfilt_unregister(struct vidfilt *vf);
+struct list *vidfilt_list(void);
+
+
+/*
  * Audio stream
  */
 
@@ -640,7 +672,6 @@ struct video;
 
 void  video_mute(struct video *v, bool muted);
 void *video_view(const struct video *v);
-int   video_pip(struct video *v, const struct vidrect *rect);
 int   video_set_fullscreen(struct video *v, bool fs);
 int   video_set_orient(struct video *v, int orient);
 void  video_vidsrc_set_device(struct video *v, const char *dev);

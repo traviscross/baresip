@@ -191,6 +191,9 @@
 				RelativePath="..\..\src\vidcodec.c">
 			</File>
 			<File
+				RelativePath="..\..\src\vidfilt.c">
+			</File>
+			<File
 				RelativePath="..\..\src\video.c">
 			</File>
 			<File

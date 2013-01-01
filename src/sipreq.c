@@ -83,9 +83,9 @@ static void resp_handler(int err, const struct sip_msg *msg, void *arg)
 static int auth_handler(char **username, char **password,
 			const char *realm, void *arg)
 {
-	struct ua *ua = arg;
+	struct ua_prm *prm = arg;
 
-	return ua_auth(ua, username, password, realm);
+	return ua_auth(prm, username, password, realm);
 }
 
 
@@ -130,7 +130,7 @@ int sip_req_send(struct ua *ua, const char *method, const char *uri,
 	if (err)
 		goto out;
 
-	err = sip_auth_alloc(&sr->auth, auth_handler, ua, true);
+	err = sip_auth_alloc(&sr->auth, auth_handler, ua_prm(ua), true);
 	if (err)
 		goto out;
 

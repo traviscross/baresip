@@ -1,3 +1,27 @@
+2013-01-01 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.3
+
+	* new modules:
+	  - selfview    Video selfview as video-filter module
+	  - vumeter	Audio-filter module to display recording/playback level
+
+	* config:
+	  - added 'net_interface" to bind to a specific network interface
+	  - added accounts 'regq' parameter for SIP Register client
+
+	* baresip:
+	  - added video-filter plugin API (vidfilt)
+	  - audio.c: cleanups, split into transmit/receive part
+	  - ua: added SIP Allow-header (thanks Juha Heinanen)
+	  - ua: added Register q-value (thanks Juha Heinanen)
+	  - ua: fix DTMF end event bug
+
+	* avcodec: fix x264 fps bug (thanks Trevor Jim)
+
+	* ice: only include ufrag/pwd in session SDP (thanks Juha Heinanen)
+
+	
 2012-09-09 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.4.2

@@ -203,7 +203,7 @@ static int subscribe(struct presence *pres)
 	err = sipevent_subscribe(&pres->sub, uag_sipevent_sock(), uri, NULL,
 				 ua_aor(ua), "presence", NULL, 600,
 				 ua_cuser(ua), routev, routev[0] ? 1 : 0,
-				 auth_handler, ua, false, NULL,
+				 auth_handler, ua_prm(ua), true, NULL,
 				 notify_handler, close_handler, pres, NULL);
 	if (err) {
 		(void)re_fprintf(stderr,

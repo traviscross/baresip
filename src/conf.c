@@ -62,7 +62,6 @@ struct config config = {
 		"","",
 		{8000, 48000},
 		{1, 2},
-		0,
 		{0, 0},
 		{0, 0},
 		false,
@@ -74,8 +73,6 @@ struct config config = {
 		352, 288,
 		384000,
 		25,
-		"",
-		""
 	},
 
 	/** Audio/Video Transport */
@@ -86,6 +83,10 @@ struct config config = {
 		true,
 		false,
 		{5, 10}
+	},
+
+	{
+		""
 	},
 };
 
@@ -203,39 +204,41 @@ static int conf_write_template(const char *file)
 	if (!domain)
 		domain = "domain";
 
-	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "# SIP accounts - one account per line\n");
-	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "# Displayname <sip:user:password@domain"
-			 ";uri-params>;addr-params\n");
-	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "#  uri-params:\n");
-	(void)re_fprintf(f, "#    ;transport={udp,tcp,tls}\n");
-	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "#  addr-params:\n");
-	(void)re_fprintf(f, "#    ;answermode={manual,early,auto}\n");
-	(void)re_fprintf(f, "#    ;audio_codecs=speex/16000,pcma,...\n");
-	(void)re_fprintf(f, "#    ;auth_user=username\n");
-	(void)re_fprintf(f, "#    ;mediaenc={srtp,srtp-mand}\n");
-	(void)re_fprintf(f, "#    ;medianat={stun,turn,ice}\n");
-	(void)re_fprintf(f, "#    ;outbound=sip:primary.example.com\n");
-	(void)re_fprintf(f, "#    ;outbound2=sip:secondary.example.com\n");
-	(void)re_fprintf(f, "#    ;ptime={10,20,30,40,...}\n");
-	(void)re_fprintf(f, "#    ;regint=3600\n");
-	(void)re_fprintf(f, "#    ;rtpkeep={zero,stun,dyna,rtcp}\n");
-	(void)re_fprintf(f, "#    ;sipnat={outbound}\n");
-	(void)re_fprintf(f, "#    ;stunserver=stun:[user:pass]@host[:port]\n");
-	(void)re_fprintf(f, "#    ;video_codecs=h264,h263,...\n");
-	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "# Examples:\n");
-	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "#  <sip:user:secret@domain.com;transport=tcp>\n");
-	(void)re_fprintf(f, "#  <sip:user:secret@1.2.3.4;transport=tcp>\n");
-	(void)re_fprintf(f, "#  <sip:user:secret@"
+	(void)re_fprintf(f,
+			 "#\n"
+			 "# SIP accounts - one account per line\n"
+			 "#\n"
+			 "# Displayname <sip:user:password@domain"
+			 ";uri-params>;addr-params\n"
+			 "#\n"
+			 "#  uri-params:\n"
+			 "#    ;transport={udp,tcp,tls}\n"
+			 "#\n"
+			 "#  addr-params:\n"
+			 "#    ;answermode={manual,early,auto}\n"
+			 "#    ;audio_codecs=speex/16000,pcma,...\n"
+			 "#    ;auth_user=username\n"
+			 "#    ;mediaenc={srtp,srtp-mand}\n"
+			 "#    ;medianat={stun,turn,ice}\n"
+			 "#    ;outbound=sip:primary.example.com\n"
+			 "#    ;outbound2=sip:secondary.example.com\n"
+			 "#    ;ptime={10,20,30,40,...}\n"
+			 "#    ;regint=3600\n"
+			 "#    ;regq=0.5\n"
+			 "#    ;rtpkeep={zero,stun,dyna,rtcp}\n"
+			 "#    ;sipnat={outbound}\n"
+			 "#    ;stunserver=stun:[user:pass]@host[:port]\n"
+			 "#    ;video_codecs=h264,h263,...\n"
+			 "#\n"
+			 "# Examples:\n"
+			 "#\n"
+			 "#  <sip:user:secret@domain.com;transport=tcp>\n"
+			 "#  <sip:user:secret@1.2.3.4;transport=tcp>\n"
+			 "#  <sip:user:secret@"
 			 "[2001:df8:0:16:216:6fff:fe91:614c]:5070"
-			 ";transport=tcp>\n");
-	(void)re_fprintf(f, "#\n");
-	(void)re_fprintf(f, "<sip:%s:%s@%s>\n", login, pass, domain);
+			 ";transport=tcp>\n"
+			 "#\n"
+			 "<sip:%s:%s@%s>\n", login, pass, domain);
 
 	if (f)
 		(void)fclose(f);
@@ -283,7 +286,6 @@ static int conf_write_config_template(const char *file)
 			 config.audio.srate.max);
 	(void)re_fprintf(f, "audio_channels\t\t%u-%u\n",
 			 config.audio.channels.min, config.audio.channels.max);
-	(void)re_fprintf(f, "#audio_aec_length\t\t128 # [ms]\n");
 
 #ifdef USE_VIDEO
 	(void)re_fprintf(f, "\n# Video\n");
@@ -306,6 +308,7 @@ static int conf_write_config_template(const char *file)
 
 	(void)re_fprintf(f, "\n# Network\n");
 	(void)re_fprintf(f, "#dns_server\t\t10.0.0.1:53\n");
+	(void)re_fprintf(f, "#net_interface\t\teth0\n");
 
 	(void)re_fprintf(f, "\n#------------------------------------"
 			 "------------------------------------------\n");
@@ -346,6 +349,7 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "speex_resamp"
 			 MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "plc" MOD_EXT "\n");
+	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "vumeter" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Audio driver Modules\n");
 #if defined (WIN32)
@@ -368,6 +372,9 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "avcodec" MOD_EXT "\n");
 #endif
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "vpx" MOD_EXT "\n");
+
+	(void)re_fprintf(f, "\n# Video filter Modules (in order)\n");
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "selfview" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Video source modules\n");
 #if defined (DARWIN)
@@ -699,7 +706,6 @@ static int config_parse(struct conf *conf)
 
 	(void)conf_get_range(conf, "audio_srate", &config.audio.srate);
 	(void)conf_get_range(conf, "audio_channels", &config.audio.channels);
-	(void)conf_get_u32(conf, "audio_aec_length", &config.audio.aec_len);
 	(void)conf_get_range(conf, "ausrc_srate", &config.audio.srate_src);
 	(void)conf_get_range(conf, "auplay_srate", &config.audio.srate_play);
 
@@ -717,10 +723,6 @@ static int config_parse(struct conf *conf)
 	}
 	(void)conf_get_u32(conf, "video_bitrate", &config.video.bitrate);
 	(void)conf_get_u32(conf, "video_fps", &config.video.fps);
-	(void)conf_get_str(conf, "video_exclude", config.video.exclude,
-			   sizeof(config.video.exclude));
-	(void)conf_get_str(conf, "video_selfview", config.video.selfview,
-			   sizeof(config.video.selfview));
 
 	/* AVT - Audio/Video Transport */
 	if (0 == conf_get_u32(conf, "rtp_tos", &v))
@@ -741,6 +743,9 @@ static int config_parse(struct conf *conf)
 	}
 
 	(void)conf_apply(conf, "dns_server", dns_server_handler, NULL);
+
+	(void)conf_get_str(conf, "net_interface",
+			   config.net.ifname, sizeof(config.net.ifname));
 
 	return err;
 }

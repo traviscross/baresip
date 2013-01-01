@@ -2,7 +2,7 @@ README
 ------
 
 Baresip is a portable and modular SIP User-Agent with audio and video support
-Copyright (c) 2010 - 2012 Creytiv.com
+Copyright (c) 2010 - 2013 Creytiv.com
 
 Distributed under BSD license
 
@@ -57,6 +57,7 @@ qtcapture     Apple QTCapture video source driver
 quicktime     Apple Quicktime video source driver
 rst           Radio streamer using mpg123
 sdl           Simple DirectMedia Layer (SDL) video output driver
+selfview      Video selfview module
 silk          SILK audio codec
 sndfile       Audio dumper using libsndfile
 speex         Speex audio codec
@@ -73,6 +74,7 @@ v4l           Video4Linux video source
 v4l2          Video4Linux2 video source
 vidloop       Video-loop test module
 vpx           VP8/VPX video codec
+vumeter       Display audio levels in console
 winwave       Audio driver for Windows
 x11           X11 video output driver
 x11grab       X11 grabber video source
@@ -105,10 +107,10 @@ IETF RFC/I-Ds:
 * RFC 5626  Managing Client-Initiated Connections in SIP
 * RFC 5761  Multiplexing RTP Data and Control Packets on a Single Port
 * RFC 6263  App. Mechanism for Keeping Alive NAT Associated with RTP / RTCP
+* RFC 6716  Definition of the Opus Audio Codec
 
 * draft-valin-celt-rtp-profile-02
 * draft-westin-payload-vp8-02
-* draft-ietf-codec-opus-10
 * draft-spittka-payload-rtp-opus-00
 
 

@@ -346,8 +346,8 @@ static int open_encoder_x264(struct vidcodec_st *st, struct vidcodec_prm *prm,
 	xprm.i_width = size->w;
 	xprm.i_height = size->h;
 	xprm.i_csp = X264_CSP_I420;
-	xprm.i_fps_num = 1;
-	xprm.i_fps_den = prm->fps;
+	xprm.i_fps_num = prm->fps;
+	xprm.i_fps_den = 1;
 	xprm.rc.i_bitrate = prm->bitrate / 1024; /* kbit/s */
 	xprm.rc.i_rc_method = X264_RC_CQP;
 	xprm.i_log_level = X264_LOG_WARNING;
@@ -444,10 +444,8 @@ int enc_x264(struct vidcodec_st *st, bool update,
 	if (ret < 0) {
 		fprintf(stderr, "x264 [error]: x264_encoder_encode failed\n");
 	}
-	if (i_nal == 0) {
-		re_printf("x264 buffering ..\n");
+	if (i_nal == 0)
 		return 0;
-	}
 
 	err = 0;
 	for (i=0; i<i_nal && !err; i++) {

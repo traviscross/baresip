@@ -16,8 +16,7 @@ enum {
 	PT_STAT_MIN = 0,
 	PT_STAT_MAX = 95,
 	PT_DYN_MIN  = 96,
-	PT_DYN_MAX  = 127,
-	PT_NONE     = 255
+	PT_DYN_MAX  = 127
 };
 
 
@@ -93,17 +92,15 @@ int  audio_alloc(struct audio **ap, struct call *call,
 		 struct sdp_session *sdp_sess, int label,
 		 const struct mnat *mnat, struct mnat_sess *mnat_sess,
 		 const struct menc *menc, uint32_t ptime, enum audio_mode mode,
+		 const struct list *aucodecl,
 		 audio_event_h *eventh, audio_err_h *errh, void *arg);
 int  audio_start(struct audio *a);
 void audio_stop(struct audio *a);
 int  audio_encoder_set(struct audio *a, struct aucodec *ac,
-		       uint8_t pt_tx, const char *params);
+		       int pt_tx, const char *params);
 int  audio_decoder_set(struct audio *a, struct aucodec *ac,
-		       uint8_t pt_rx, const char *params);
-void audio_enable_vumeter(struct audio *a, bool en);
+		       int pt_rx, const char *params);
 struct stream *audio_strm(const struct audio *a);
-int  audio_print_vu(struct re_printf *pf, const struct audio *a);
-void audio_enable_telev(struct audio *a, uint8_t pt_tx, uint8_t pt_rx);
 int  audio_send_digit(struct audio *a, char key);
 void audio_sdp_attr_decode(struct audio *a);
 int  audio_debug(struct re_printf *pf, const struct audio *a);
@@ -157,7 +154,6 @@ int  call_debug(struct re_printf *pf, const struct call *call);
 int  call_status(struct re_printf *pf, const struct call *call);
 int  call_jbuf_stat(struct re_printf *pf, const struct call *call);
 int  call_info(struct re_printf *pf, const struct call *call);
-void call_enable_vumeter(struct call *call, bool en);
 struct ua *call_get_ua(const struct call *call);
 int call_reset_transp(struct call *call);
 int call_notify_sipfrag(struct call *call, uint16_t scode,
@@ -260,10 +256,10 @@ int  stream_alloc(struct stream **sp, struct call *call,
 struct sdp_media *stream_sdpmedia(const struct stream *s);
 int  stream_start(struct stream *s);
 void stream_start_keepalive(struct stream *s);
-int  stream_send(struct stream *s, bool marker, uint8_t pt, uint32_t ts,
+int  stream_send(struct stream *s, bool marker, int pt, uint32_t ts,
 		 struct mbuf *mb);
-void stream_remote_set(struct stream *s, const char *cname);
-void stream_sdp_attr_decode(struct stream *s);
+void stream_update(struct stream *s, const char *cname);
+void stream_update_encoder(struct stream *s, int pt_enc);
 int  stream_jbuf_stat(struct re_printf *pf, const struct stream *s);
 void stream_hold(struct stream *s, bool hold);
 void stream_set_srate(struct stream *s, uint32_t srate_tx, uint32_t srate_rx);
@@ -290,6 +286,7 @@ int          ua_print_calls(struct re_printf *pf, const struct ua *ua);
 void         ua_next(void);
 struct tls  *uag_tls(void);
 struct list *uag_list(void);
+const char  *ua_allowed_methods(void);
 
 
 /*
@@ -325,7 +322,6 @@ struct vidisp {
 	vidisp_hide_h   *hideh;
 };
 
-const struct vidisp *vidisp_find(const char *name);
 struct vidisp *vidisp_get(struct vidisp_st *st);
 
 
@@ -352,16 +348,16 @@ struct video;
 int  video_alloc(struct video **vp, struct call *call,
 		 struct sdp_session *sdp_sess, int label,
 		 const struct mnat *mnat, struct mnat_sess *mnat_sess,
-		 const struct menc *menc, const char *content);
+		 const struct menc *menc, const char *content,
+		 const struct list *vidcodecl);
 int  video_start(struct video *v, const char *src, const char *dev,
 		 const char *peer);
 void video_stop(struct video *v);
 int  video_encoder_set(struct video *v, struct vidcodec *vc,
-		       uint8_t pt_tx, const char *params);
-int  video_decoder_set(struct video *v, struct vidcodec *vc, uint8_t pt_rx);
+		       int pt_tx, const char *params);
+int  video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx);
 struct stream *video_strm(const struct video *v);
 void video_update_picture(struct video *v);
 void video_sdp_attr_decode(struct video *v);
 int  video_debug(struct re_printf *pf, const struct video *v);
 int  video_print(struct re_printf *pf, const struct video *v);
-int  video_set_shuttered(struct video *v, bool shuttered);

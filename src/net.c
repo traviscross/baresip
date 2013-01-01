@@ -15,10 +15,10 @@
 
 static struct {
 	struct sa laddr;
-	char if_def[16];
+	char ifname[16];
 #ifdef HAVE_INET6
 	struct sa laddr6;
-	char if6_def[16];
+	char ifname6[16];
 #endif
 	struct tmr tmr;
 	struct dnsc *dnsc;
@@ -81,7 +81,7 @@ bool net_check(void)
 	bool change = false;
 
 	DEBUG_INFO("checking for IPv4 change, current: %s:%j\n",
-		   net.if_def, &net.laddr);
+		   net.ifname, &net.laddr);
 
 	dns_refresh();
 
@@ -95,7 +95,7 @@ bool net_check(void)
 	}
 
 	/* Get default routes */
-	(void)net_rt_default_get(AF_INET, net.if_def, sizeof(net.if_def));
+	(void)net_rt_default_get(AF_INET, net.ifname, sizeof(net.ifname));
 
 #ifdef HAVE_INET6
 	if (0 == net_default_source_addr_get(AF_INET6, &la)
@@ -107,7 +107,7 @@ bool net_check(void)
 		sa_cpy(&net.laddr6, &la);
 		change = true;
 	}
-	(void)net_rt_default_get(AF_INET6, net.if6_def, sizeof(net.if6_def));
+	(void)net_rt_default_get(AF_INET6, net.ifname6, sizeof(net.ifname6));
 #endif
 
 	return change;
@@ -144,6 +144,8 @@ int net_init(void)
 {
 	int err;
 
+	tmr_init(&net.tmr);
+
 	/* Initialise DNS resolver */
 	err = dns_init();
 	if (err) {
@@ -154,34 +156,59 @@ int net_init(void)
 	sa_init(&net.laddr, AF_INET);
 	(void)sa_set_str(&net.laddr, "127.0.0.1", 0);
 
-	/* Get default source addresses */
-	err = net_default_source_addr_get(AF_INET, &net.laddr);
-	if (err) {
-		DEBUG_WARNING("net_default_source_addr_get: AF_INET (%m)\n",
-			      err);
-	}
+	if (str_isset(config.net.ifname)) {
 
-	/* Get default routes */
-	(void)net_rt_default_get(AF_INET, net.if_def, sizeof(net.if_def));
+		(void)re_printf("Binding to interface '%s'\n",
+				config.net.ifname);
+
+		str_ncpy(net.ifname, config.net.ifname, sizeof(net.ifname));
+
+		err = net_if_getaddr(config.net.ifname,
+				     AF_INET, &net.laddr);
+		if (err) {
+			DEBUG_WARNING("%s: could not get IPv4 address (%m)\n",
+				      config.net.ifname, err);
+		}
 
 #ifdef HAVE_INET6
-	sa_init(&net.laddr6, AF_INET6);
+		str_ncpy(net.ifname6, config.net.ifname,
+			 sizeof(net.ifname6));
 
-	(void)net_default_source_addr_get(AF_INET6, &net.laddr6);
-	(void)net_rt_default_get(AF_INET6, net.if6_def, sizeof(net.if6_def));
+		err = net_if_getaddr(config.net.ifname,
+				     AF_INET6, &net.laddr6);
+		if (err) {
+			DEBUG_WARNING("%s: could not get IPv6 address (%m)\n",
+				      config.net.ifname, err);
+		}
 #endif
+	}
+	else {
+		(void)net_default_source_addr_get(AF_INET, &net.laddr);
+		(void)net_rt_default_get(AF_INET, net.ifname,
+					 sizeof(net.ifname));
 
-	(void)re_fprintf(stderr, "Local network address: IPv4=%s:%j",
-			 net.if_def, &net.laddr);
+#ifdef HAVE_INET6
+		sa_init(&net.laddr6, AF_INET6);
+
+		(void)net_default_source_addr_get(AF_INET6, &net.laddr6);
+		(void)net_rt_default_get(AF_INET6, net.ifname6,
+					 sizeof(net.ifname6));
+#endif
+	}
+
+	(void)re_fprintf(stderr, "Local network address:");
+
+	if (sa_isset(&net.laddr, SA_ADDR)) {
+		(void)re_fprintf(stderr, " IPv4=%s:%j",
+				 net.ifname, &net.laddr);
+	}
 #ifdef HAVE_INET6
 	if (sa_isset(&net.laddr6, SA_ADDR)) {
 		(void)re_fprintf(stderr, " IPv6=%s:%j",
-				 net.if6_def, &net.laddr6);
+				 net.ifname6, &net.laddr6);
 	}
 #endif
 	(void)re_fprintf(stderr, "\n");
-
-	tmr_init(&net.tmr);
 
 	return err;
 }
@@ -288,10 +315,10 @@ int net_debug(struct re_printf *pf, void *unused)
 
 	err  = re_hprintf(pf, "--- Network debug ---\n");
 	err |= re_hprintf(pf, " Local IPv4: %9s - %j\n",
-			  net.if_def, &net.laddr);
+			  net.ifname, &net.laddr);
 #ifdef HAVE_INET6
 	err |= re_hprintf(pf, " Local IPv6: %9s - %j\n",
-			  net.if6_def, &net.laddr6);
+			  net.ifname6, &net.laddr6);
 #endif
 
 	err |= net_if_debug(pf, NULL);

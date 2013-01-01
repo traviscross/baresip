@@ -173,7 +173,6 @@ static bool candidate_handler(struct le *le, void *arg)
  */
 static int set_media_attributes(struct mnat_media *m)
 {
-	struct mnat_sess *s = m->sess;
 	int err = 0;
 
 	if (icem_mismatch(m->icem)) {
@@ -195,11 +194,6 @@ static int set_media_attributes(struct mnat_media *m)
 					   ice_attr_remote_cand, "%H",
 					   ice_remotecands_encode, m->icem);
 	}
-
-	err |= sdp_media_set_lattr(m->sdpm, true,
-				   ice_attr_ufrag, ice_ufrag(s->ice));
-	err |= sdp_media_set_lattr(m->sdpm, true,
-				   ice_attr_pwd, ice_pwd(s->ice));
 
 	return err;
 }
@@ -477,6 +471,8 @@ static void conncheck_handler(int err, bool update, void *arg)
 
 	if (err) {
 		DEBUG_WARNING("conncheck failed: %m\n", err);
+
+		(void)re_printf("Dumping state: %H\n", ice_debug, sess->ice);
 	}
 	else {
 		bool changed;

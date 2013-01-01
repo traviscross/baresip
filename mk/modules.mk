@@ -190,7 +190,7 @@ endif
 # ------------------------------------------------------------------------- #
 
 MODULES   += $(EXTRA_MODULES) stun turn ice natbd auloop vidloop presence
-MODULES   += menu contact
+MODULES   += menu contact vumeter selfview
 
 ifneq ($(USE_ALSA),)
 MODULES   += alsa

@@ -48,6 +48,7 @@ SOURCE        stream.c
 SOURCE        ua.c
 SOURCE        ui.c
 SOURCE        vidcodec.c
+SOURCE        vidfilt.c
 
 /* Static modules */
 MACRO         STATIC
