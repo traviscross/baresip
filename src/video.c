@@ -65,13 +65,15 @@ enum {
 /** Video stream - transmitter/encoder direction */
 struct vtx {
 	struct video *video;               /**< Parent                    */
-	struct vidcodec_st *enc;           /**< Current video encoder     */
+	const struct vidcodec *vc;         /**< Current Video encoder     */
+	struct videnc_state *enc;          /**< Video encoder state       */
 	struct vidsrc_prm vsrc_prm;        /**< Video source parameters   */
 	struct vidsz vsrc_size;            /**< Video source size         */
 	struct vidsrc_st *vsrc;            /**< Video source              */
 	struct lock *lock;                 /**< Lock for encoder          */
 	struct vidframe *frame;            /**< Source frame              */
 	struct vidframe *mute_frame;       /**< Frame with muted video    */
+	struct mbuf *mb;
 	int muted_frames;                  /**< # of muted frames sent    */
 	uint32_t ts_tx;                    /**< Outgoing RTP timestamp    */
 	bool picup;                        /**< Send picture update       */
@@ -84,7 +86,8 @@ struct vtx {
 /** Video stream - receiver/decoder direction */
 struct vrx {
 	struct video *video;               /**< Parent                    */
-	struct vidcodec_st *dec;           /**< Current video decoder     */
+	const struct vidcodec *vc;         /**< Current video decoder     */
+	struct viddec_state *dec;          /**< Video decoder state       */
 	struct vidisp_prm vidisp_prm;      /**< Video display parameters  */
 	struct vidisp_st *vidisp;          /**< Video display             */
 	struct lock *lock;                 /**< Lock for decoder          */
@@ -122,6 +125,7 @@ static void video_destructor(void *arg)
 	mem_deref(vtx->frame);
 	mem_deref(vtx->mute_frame);
 	mem_deref(vtx->enc);
+	mem_deref(vtx->mb);
 	lock_rel(vtx->lock);
 	mem_deref(vtx->lock);
 
@@ -139,6 +143,7 @@ static void video_destructor(void *arg)
 }
 
 
+#if ENABLE_ENCODER
 static int get_fps(const struct video *v)
 {
 	const char *attr;
@@ -155,7 +160,28 @@ static int get_fps(const struct video *v)
 }
 
 
-#if ENABLE_ENCODER
+static int packet_handler(bool marker, const uint8_t *hdr, size_t hdr_len,
+			  const uint8_t *pld, size_t pld_len, void *arg)
+{
+	struct vtx *tx = arg;
+	int err = 0;
+
+	tx->mb->pos = tx->mb->end = STREAM_PRESZ;
+
+	if (hdr_len) err |= mbuf_write_mem(tx->mb, hdr, hdr_len);
+	if (pld_len) err |= mbuf_write_mem(tx->mb, pld, pld_len);
+
+	tx->mb->pos = STREAM_PRESZ;
+
+	if (!err) {
+		err = stream_send(tx->video->strm, marker, -1,
+				  tx->ts_tx, tx->mb);
+	}
+
+	return err;
+}
+
+
 /**
  * Encode video and send via RTP stream
  *
@@ -203,7 +229,7 @@ static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
 		return;
 
 	/* Encode the whole picture frame */
-	err = vidcodec_get(vtx->enc)->ench(vtx->enc, vtx->picup, frame);
+	err = vtx->vc->ench(vtx->enc, vtx->picup, frame, packet_handler, vtx);
 	if (err) {
 		DEBUG_WARNING("encode: %m\n", err);
 		return;
@@ -255,12 +281,15 @@ static int vtx_alloc(struct vtx *vtx, struct video *video)
 
 	err = lock_alloc(&vtx->lock);
 	if (err)
-		goto out;
+		return err;
+
+	vtx->mb = mbuf_alloc(STREAM_PRESZ + 512);
+	if (!vtx->mb)
+		return ENOMEM;
 
 	vtx->video = video;
 	vtx->ts_tx = 160;
 
- out:
 	return err;
 }
 
@@ -296,6 +325,9 @@ static int video_stream_decode(struct vrx *vrx, const struct rtp_header *hdr,
 	struct le *le;
 	int err = 0;
 
+	if (!hdr || !mbuf_get_left(mb))
+		return 0;
+
 	lock_write_get(vrx->lock);
 
 	/* No decoder set */
@@ -305,9 +337,15 @@ static int video_stream_decode(struct vrx *vrx, const struct rtp_header *hdr,
 	}
 
 	frame.data[0] = NULL;
-	err = vidcodec_get(vrx->dec)->dech(vrx->dec, &frame, hdr->m, mb);
+	err = vrx->vc->dech(vrx->dec, &frame, hdr->m, hdr->seq, mb);
 	if (err) {
-		DEBUG_WARNING("decode error: %m\n", err);
+
+		if (err != EPROTO) {
+			DEBUG_WARNING("%s decode error"
+				      " (seq=%u, %u bytes): %m\n",
+				      vrx->vc->name, hdr->seq,
+				      mbuf_get_left(mb), err);
+		}
 
 		/* send RTCP FIR to peer */
 		stream_send_fir(v->strm, v->nack_pli);
@@ -362,7 +400,9 @@ static int pt_handler(struct video *v, uint8_t pt_old, uint8_t pt_new)
 	(void)re_fprintf(stderr, "Video decoder changed payload %u -> %u\n",
 			 pt_old, pt_new);
 
-	return video_decoder_set(v, lc->data, lc->pt);
+	v->vrx.pt_rx = pt_new;
+
+	return video_decoder_set(v, lc->data, lc->pt, lc->rparams);
 }
 
 
@@ -413,7 +453,8 @@ static void rtcp_handler(struct rtcp_msg *msg, void *arg)
 int video_alloc(struct video **vp, struct call *call,
 		struct sdp_session *sdp_sess, int label,
 		const struct mnat *mnat, struct mnat_sess *mnat_sess,
-		const struct menc *menc, const char *content,
+		const struct menc *menc, struct menc_sess *menc_sess,
+		const char *content,
 		const struct list *vidcodecl)
 {
 	struct video *v;
@@ -432,7 +473,7 @@ int video_alloc(struct video **vp, struct call *call,
 	tmr_init(&v->tmr);
 
 	err = stream_alloc(&v->strm, call, sdp_sess, "video", label,
-			   mnat, mnat_sess, menc,
+			   mnat, mnat_sess, menc, menc_sess,
 			   stream_recv_handler, rtcp_handler, v);
 	if (err)
 		goto out;
@@ -464,14 +505,18 @@ int video_alloc(struct video **vp, struct call *call,
 	for (le = list_head(vidcodecl); le; le = le->next) {
 		struct vidcodec *vc = le->data;
 		err |= sdp_format_add(NULL, stream_sdpmedia(v->strm), false,
-				      vc->pt, vc->name, 90000, 1, NULL,
-				      vc->cmph, vc, true, "%s", vc->fmtp);
+				      vc->pt, vc->name, 90000, 1,
+				      vc->fmtp_ench, vc->fmtp_cmph, vc, false,
+				      "%s", vc->fmtp);
 	}
 
 	/* Video filters */
 	for (le = list_head(vidfilt_list()); le; le = le->next) {
 		struct vidfilt *vf = le->data;
 		struct vidfilt_st *st = NULL;
+
+		if (!vf->updh)
+			continue;
 
 		err = vf->updh(&st, vf);
 		if (err) {
@@ -730,27 +775,6 @@ int video_set_orient(struct video *v, int orient)
 }
 
 
-static int vidcodec_send_handler(bool marker, struct mbuf *mb, void *arg)
-{
-	struct video *v = arg;
-
-	return stream_send(v->strm, marker, -1, v->vtx.ts_tx, mb);
-}
-
-
-static int vc_alloc(struct vidcodec_st **stp, struct vidcodec *vc,
-		    struct video *v, const char *fmtp)
-{
-	struct vidcodec_prm prm;
-
-	prm.fps     = get_fps(v);
-	prm.bitrate = config.video.bitrate;
-
-	return vc->alloch(stp, vc, vc->name, &prm, fmtp,
-			  NULL, vidcodec_send_handler, v);
-}
-
-
 #if ENABLE_ENCODER
 int video_encoder_set(struct video *v, struct vidcodec *vc,
 		      int pt_tx, const char *params)
@@ -761,23 +785,31 @@ int video_encoder_set(struct video *v, struct vidcodec *vc,
 	if (!v)
 		return EINVAL;
 
-	(void)re_fprintf(stderr, "Set video encoder: %s\n", vc->name);
-
 	vtx = &v->vtx;
 
-	vtx->enc = mem_deref(vtx->enc);
+	if (vc != vtx->vc) {
 
-	if (!vidcodec_cmp(vc, vidcodec_get(v->vrx.dec))) {
+		struct videnc_param prm;
 
-		err = vc_alloc(&vtx->enc, vc, v, params);
+		prm.bitrate = config.video.bitrate;
+		prm.pktsize = 1300;
+		prm.fps     = get_fps(v);
+		prm.max_fs  = -1;
+
+		(void)re_fprintf(stderr, "Set video encoder: %s %s"
+				 " (%u bit/s, %u fps)\n",
+				 vc->name, vc->variant,
+				 prm.bitrate, prm.fps);
+
+		vtx->enc = mem_deref(vtx->enc);
+		err = vc->encupdh(&vtx->enc, vc, &prm, params);
 		if (err) {
 			DEBUG_WARNING("encoder alloc: %m\n", err);
+			return err;
 		}
+
+		vtx->vc = vc;
 	}
-#if ENABLE_DECODER
-	else
-		vtx->enc = mem_ref(v->vrx.dec);
-#endif
 
 	stream_update_encoder(v->strm, pt_tx);
 
@@ -797,7 +829,8 @@ int video_encoder_set(struct video *v, struct vidcodec *vc,
 #endif
 
 
-int video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx)
+int video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx,
+		      const char *fmtp)
 {
 	struct vrx *vrx;
 	int err = 0;
@@ -805,27 +838,26 @@ int video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx)
 	if (!v)
 		return EINVAL;
 
-	(void)re_fprintf(stderr, "Set video decoder: %s\n", vc->name);
+	(void)re_fprintf(stderr, "Set video decoder: %s %s\n",
+			 vc->name, vc->variant);
 
 	vrx = &v->vrx;
 
 #if ENABLE_DECODER
 	vrx->pt_rx = pt_rx;
-	vrx->dec = mem_deref(vrx->dec);
 
-	if (!vidcodec_cmp(vc, vidcodec_get(v->vtx.enc))) {
+	if (vc != vrx->vc) {
 
-		err = vc_alloc(&vrx->dec, vc, v, NULL);
+		vrx->dec = mem_deref(vrx->dec);
+
+		err = vc->decupdh(&vrx->dec, vc, fmtp);
 		if (err) {
 			DEBUG_WARNING("decoder alloc: %m\n", err);
+			return err;
 		}
-	}
-#if ENABLE_ENCODER
-	else {
-		vrx->dec = mem_ref(v->vtx.enc);
-	}
-#endif
 
+		vrx->vc = vc;
+	}
 #else
 	(void)vc;
 	(void)pt_rx;
@@ -944,9 +976,14 @@ int video_set_source(struct video *v, const char *name, const char *dev)
 
 	vtx = &v->vtx;
 
+#if ENABLE_ENCODER
 	vtx->vsrc = mem_deref(vtx->vsrc);
 
 	return vs->alloch(&vtx->vsrc, vs, NULL, &vtx->vsrc_prm,
 			  &vtx->vsrc_size, NULL, dev,
 			  vidsrc_frame_handler, vidsrc_error_handler, vtx);
+#else
+	(void)dev;
+	return ENOSYS;
+#endif
 }

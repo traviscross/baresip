@@ -8,99 +8,98 @@
 #include <baresip.h>
 
 
-struct aufilt_st {
-	struct aufilt *af; /* base class */
+struct plc_st {
+	struct aufilt_st af; /* base class */
 	plc_state_t plc;
-	size_t psize;
+	size_t nsamp;
 };
-
-
-static struct aufilt *filt;
 
 
 static void destructor(void *arg)
 {
-	struct aufilt_st *st = arg;
+	struct plc_st *st = arg;
 
-	mem_deref(st->af);
+	list_unlink(&st->af.le);
 }
 
 
-static int alloc(struct aufilt_st **stp, struct aufilt *af,
-		 const struct aufilt_prm *encprm,
-		 const struct aufilt_prm *decprm)
+static int update(struct aufilt_st **stp, struct aufilt *af,
+		  const struct aufilt_prm *encprm,
+		  const struct aufilt_prm *decprm)
 {
-	struct aufilt_st *st;
+	struct plc_st *st;
 	int err = 0;
 
+	(void)af;
 	(void)encprm;
+
+	if (!stp || !decprm)
+		return EINVAL;
+
+	if (*stp)
+		return 0;
+
+	/* XXX: add support for stereo PLC */
+	if (decprm->ch != 1) {
+		re_fprintf(stderr, "plc: only mono supported (ch=%u)\n",
+			   decprm->ch);
+		return ENOSYS;
+	}
 
 	st = mem_zalloc(sizeof(*st), destructor);
 	if (!st)
 		return ENOMEM;
-
-	st->af = mem_ref(af);
 
 	if (!plc_init(&st->plc)) {
 		err = ENOMEM;
 		goto out;
 	}
 
-	if (decprm)
-		st->psize = 2 * decprm->frame_size * decprm->ch;
-	else
-		st->psize = 320;
+	st->nsamp = decprm->frame_size;
 
  out:
 	if (err)
 		mem_deref(st);
 	else
-		*stp = st;
+		*stp = (struct aufilt_st *)st;
 
 	return err;
 }
 
 
-/* PLC is only valid for Decoding (RX) */
-static int dec(struct aufilt_st *st, struct mbuf *mb)
+/**
+ * PLC is only valid for Decoding (RX)
+ *
+ * NOTE: sampc_in==0 , means Packet loss
+ */
+static int decode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 {
-	int nsamp = (int)mbuf_get_left(mb) / 2;
+	struct plc_st *plc = (struct plc_st *)st;
 
-	if (nsamp) {
-		nsamp = plc_rx(&st->plc, (int16_t *)mbuf_buf(mb), nsamp);
-		if (nsamp >= 0)
-			mb->end = mb->pos + (2*nsamp);
-	}
-	else {
-		nsamp = (int)st->psize / 2;
-
-		re_printf("plc: concealing %u bytes\n", st->psize);
-
-		if (mbuf_get_space(mb) < st->psize) {
-
-			int err = mbuf_resize(mb, st->psize);
-			if (err)
-				return err;
-		}
-
-		nsamp = plc_fillin(&st->plc, (int16_t *)mbuf_buf(mb), nsamp);
-
-		mb->end = mb->pos + 2 * nsamp;
-	}
+	if (*sampc)
+		plc_rx(&plc->plc, sampv, (int)*sampc);
+	else
+		*sampc = plc_fillin(&plc->plc, sampv, (int)plc->nsamp);
 
 	return 0;
 }
 
 
+static struct aufilt plc = {
+	LE_INIT, "plc", update, NULL, decode
+};
+
+
 static int module_init(void)
 {
-	return aufilt_register(&filt, "plc", alloc, NULL, dec, NULL);
+	aufilt_register(&plc);
+	return 0;
 }
 
 
 static int module_close(void)
 {
-	filt = mem_deref(filt);
+	aufilt_unregister(&plc);
 	return 0;
 }
 

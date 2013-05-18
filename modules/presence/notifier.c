@@ -242,7 +242,7 @@ static bool sub_handler(const struct sip_msg *msg, void *arg)
 
 	(void)arg;
 
-	ua = ua_find(&msg->uri.user);
+	ua = uag_find(&msg->uri.user);
 	if (!ua) {
 		(void)re_printf("presence: no UA found for %r\n",
 				&msg->uri.user);

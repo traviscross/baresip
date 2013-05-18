@@ -43,11 +43,14 @@ struct stream {
 	struct rtpkeep *rtpkeep; /**< RTP Keepalive                         */
 	struct jbuf *jbuf;       /**< Jitter Buffer for incoming RTP        */
 	struct mnat_media *mns;  /**< Media NAT traversal state             */
-	struct menc_st *menc;    /**< Media Encryption                      */
+	const struct menc *menc; /**< Media encryption module               */
+	struct menc_sess *mencs; /**< Media encryption session state        */
+	struct menc_media *mes;  /**< Media Encryption media state          */
 	uint32_t ssrc_rx;        /**< Incoming syncronizing source          */
 	uint32_t pseq;           /**< Sequence number for incoming RTP      */
 	bool rtcp;               /**< Enable RTCP                           */
 	bool rtcp_mux;           /**< RTP/RTCP multiplex supported by peer  */
+	bool jbuf_started;
 	stream_rtp_h *rtph;      /**< Stream RTP handler                    */
 	stream_rtcp_h *rtcph;    /**< Stream RTCP handler                   */
 	void *arg;               /**< Handler argument                      */
@@ -98,7 +101,8 @@ static void stream_destructor(void *arg)
 	tmr_cancel(&s->tmr_stats);
 	mem_deref(s->rtpkeep);
 	mem_deref(s->sdp);
-	mem_deref(s->menc);
+	mem_deref(s->mes);
+	mem_deref(s->mencs);
 	mem_deref(s->mns);
 	mem_deref(s->jbuf);
 	mem_deref(s->rtp);
@@ -149,8 +153,15 @@ static void rtp_recv(const struct sa *src, const struct rtp_header *hdr,
 					src, err);
 		}
 
-		if (jbuf_get(s->jbuf, &hdr2, &mb2))
+		if (jbuf_get(s->jbuf, &hdr2, &mb2)) {
+
+			if (!s->jbuf_started)
+				return;
+
 			memset(&hdr2, 0, sizeof(hdr2));
+		}
+
+		s->jbuf_started = true;
 
 		if (lostcalc(s, hdr2.seq) > 0)
 			s->rtph(hdr, NULL, s->arg);
@@ -237,7 +248,7 @@ int stream_alloc(struct stream **sp, struct call *call,
 		 struct sdp_session *sdp_sess,
 		 const char *name, int label,
 		 const struct mnat *mnat, struct mnat_sess *mnat_sess,
-		 const struct menc *menc,
+		 const struct menc *menc, struct menc_sess *menc_sess,
 		 stream_rtp_h *rtph, stream_rtcp_h *rtcph, void *arg)
 {
 	struct stream *s;
@@ -284,7 +295,8 @@ int stream_alloc(struct stream **sp, struct call *call,
 
 	err = sdp_media_add(&s->sdp, sdp_sess, name,
 			    sa_port(rtp_local(s->rtp)),
-			    menc2transp(menc));
+			    (menc && menc->sdp_proto) ? menc->sdp_proto :
+			    sdp_proto_rtpavp);
 	if (err)
 		goto out;
 
@@ -306,8 +318,10 @@ int stream_alloc(struct stream **sp, struct call *call,
 	}
 
 	if (menc) {
-		err |= menc->alloch(&s->menc, (struct menc *)menc,
-				    IPPROTO_UDP, rtp_sock(s->rtp),
+		s->menc = menc;
+		s->mencs = mem_ref(menc_sess);
+		err |= menc->mediah(&s->mes, menc_sess, IPPROTO_UDP,
+				    rtp_sock(s->rtp),
 				    s->rtcp ? rtcp_sock(s->rtp) : NULL,
 				    s->sdp);
 	}
@@ -427,6 +441,7 @@ static void stream_remote_set(struct stream *s, const char *cname)
 void stream_update(struct stream *s, const char *cname)
 {
 	const struct sdp_format *fmt;
+	int err = 0;
 
 	if (!s)
 		return;
@@ -438,10 +453,13 @@ void stream_update(struct stream *s, const char *cname)
 	if (stream_has_media(s))
 		stream_remote_set(s, cname);
 
-	if (s->menc && menc_get(s->menc)->updateh) {
-		int err = menc_get(s->menc)->updateh(s->menc);
+	if (s->menc && s->menc->mediah) {
+		err = s->menc->mediah(&s->mes, s->mencs, IPPROTO_UDP,
+				      rtp_sock(s->rtp),
+				      s->rtcp ? rtcp_sock(s->rtp) : NULL,
+				      s->sdp);
 		if (err) {
-			DEBUG_WARNING("menc update: %m\n", err);
+			DEBUG_WARNING("mediaenc update: %m\n", err);
 		}
 	}
 }

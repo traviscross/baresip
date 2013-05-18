@@ -31,6 +31,7 @@ SOURCE        audio.c
 SOURCE        aufilt.c
 SOURCE        auplay.c
 SOURCE        ausrc.c
+SOURCE        bfcp.c
 SOURCE        call.c
 SOURCE        cmd.c
 SOURCE        conf.c
@@ -42,7 +43,9 @@ SOURCE        mnat.c
 SOURCE        module.c
 SOURCE        net.c
 SOURCE        play.c
+SOURCE        reg.c
 SOURCE        rtpkeep.c
+SOURCE        sdp.c
 SOURCE        sipreq.c
 SOURCE        stream.c
 SOURCE        ua.c
@@ -77,7 +80,7 @@ SYSTEMINCLUDE \epoc32\include\rem
 LIBRARY       estlib.lib euser.lib
 LIBRARY       esock.lib insock.lib
 STATICLIBRARY resdp.lib resipsess.lib resip.lib restun.lib redns.lib re.lib
-STATICLIBRARY resipevent.lib rem.lib
+STATICLIBRARY resipevent.lib rebfcp.lib rem.lib
 #ifndef EKA2
 STATICLIBRARY ecrt0.lib
 STATICLIBRARY libgcc.a

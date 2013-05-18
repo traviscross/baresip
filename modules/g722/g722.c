@@ -46,37 +46,34 @@ enum {
 	G722_BITRATE_64k = 64000
 };
 
-struct aucodec_st {
-	struct aucodec *ac;  /* inheritance */
+
+struct auenc_state {
 	g722_encode_state_t enc;
+};
+
+struct audec_state {
 	g722_decode_state_t dec;
 };
 
-static struct aucodec *g722;
 
-
-static void destructor(void *arg)
+static int encode_update(struct auenc_state **aesp,
+			 const struct aucodec *ac,
+			 struct auenc_param *prm, const char *fmtp)
 {
-	struct aucodec_st *st = arg;
-
-	mem_deref(st->ac);
-}
-
-
-static int alloc(struct aucodec_st **stp, struct aucodec *ac,
-		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const char *fmtp)
-{
-	struct aucodec_st *st;
+	struct auenc_state *st;
 	int err = 0;
-
+	(void)prm;
 	(void)fmtp;
 
-	st = mem_alloc(sizeof(*st), destructor);
+	if (!aesp || !ac)
+		return EINVAL;
+
+	if (*aesp)
+		return 0;
+
+	st = mem_alloc(sizeof(*st), NULL);
 	if (!st)
 		return ENOMEM;
-
-	st->ac = mem_ref(ac);
 
 	if (!g722_encode_init(&st->enc, G722_BITRATE_64k, 0)) {
 		DEBUG_WARNING("g722_encode_init failed\n");
@@ -84,103 +81,108 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		goto out;
 	}
 
+ out:
+	if (err)
+		mem_deref(st);
+	else
+		*aesp = st;
+
+	return err;
+}
+
+
+static int decode_update(struct audec_state **adsp,
+			 const struct aucodec *ac, const char *fmtp)
+{
+	struct audec_state *st;
+	int err = 0;
+	(void)fmtp;
+
+	if (!adsp || !ac)
+		return EINVAL;
+
+	if (*adsp)
+		return 0;
+
+	st = mem_alloc(sizeof(*st), NULL);
+	if (!st)
+		return ENOMEM;
+
 	if (!g722_decode_init(&st->dec, G722_BITRATE_64k, 0)) {
 		DEBUG_WARNING("g722_decode_init failed\n");
 		err = EPROTO;
 		goto out;
 	}
 
-	/* This is an exception for the G.722 codec */
-	if (encp)
-		encp->srate = G722_SAMPLE_RATE;
-	if (decp)
-		decp->srate = G722_SAMPLE_RATE;
-
  out:
 	if (err)
 		mem_deref(st);
 	else
-		*stp = st;
+		*adsp = st;
 
 	return err;
 }
 
 
-static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int encode(struct auenc_state *st, uint8_t *buf, size_t *len,
+		  const int16_t *sampv, size_t sampc)
 {
-	size_t n;
-	int err, len;
+	int n;
 
-	n = mbuf_get_left(src);
-
-	/* Make sure there is enough space */
-	if (mbuf_get_space(dst) < n/4) {
-		err = mbuf_resize(dst, 2 * (dst->pos + n/4));
-		if (err)
-			return err;
+	n = g722_encode(&st->enc, buf, sampv, (int)sampc);
+	if (n <= 0) {
+		DEBUG_WARNING("g722_encode: len=%d\n", n);
+		return EPROTO;
+	}
+	else if (n > (int)*len) {
+		DEBUG_WARNING("encode: wrote %d > %d buf\n", n, *len);
+		return EOVERFLOW;
 	}
 
-	len = g722_encode(&st->enc, mbuf_buf(dst),
-			  (int16_t *)mbuf_buf(src), (int)n/2);
-	if (len <= 0) {
-		DEBUG_WARNING("g722_encode: len=%d\n", len);
-	}
-	else if (len > (int)mbuf_get_space(dst)) {
-		DEBUG_WARNING("encode: wrote %d in %d buf\n",
-			      len, mbuf_get_space(dst));
-		return EBADMSG;
-	}
-
-	mbuf_advance(src, n);
-	mbuf_set_end(dst, dst->end + len);
+	*len = n;
 
 	return 0;
 }
 
 
-/* src=NULL means lost packet */
-static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode(struct audec_state *st, int16_t *sampv, size_t *sampc,
+		  const uint8_t *buf, size_t len)
 {
-	int nsamp, err;
-	size_t n;
+	int n;
 
-	if (!mbuf_get_left(src))
-		return 0;
+	if (!st || !sampv || !buf)
+		return EINVAL;
 
-	n = 4 * mbuf_get_left(src);
-
-	/* Make sure there is enough space in the buffer */
-	if (mbuf_get_space(dst) < n) {
-		DEBUG_NOTICE("decode: buffer too small (size=%u, need %u)\n",
-			     mbuf_get_space(dst), n);
-		err = mbuf_resize(dst, 2 * (dst->pos + n));
-		if (err)
-			return err;
+	n = g722_decode(&st->dec, sampv, buf, (int)len);
+	if (n < 0) {
+		DEBUG_WARNING("g722_decode: n=%d\n", n);
+		return EPROTO;
 	}
 
-	nsamp = g722_decode(&st->dec, (int16_t *)mbuf_buf(dst), mbuf_buf(src),
-			    (int)mbuf_get_left(src));
-	if (nsamp <= 0) {
-		DEBUG_WARNING("g722_decode: nsamp=%d\n", nsamp);
-	}
-
-	mbuf_skip_to_end(src);
-	mbuf_set_end(dst, dst->end + nsamp*2);
+	*sampc = n;
 
 	return 0;
 }
+
+
+static struct aucodec g722 = {
+	LE_INIT, "9", "G722", 8000, 1, NULL,
+	encode_update, encode,
+	decode_update, decode, NULL,
+	NULL, NULL
+};
 
 
 static int module_init(void)
 {
-	return aucodec_register(&g722, "9", "G722", 8000, 1, NULL,
-				alloc, encode, decode, NULL);
+	aucodec_register(&g722);
+	return 0;
 }
 
 
 static int module_close(void)
 {
-	g722 = mem_deref(g722);
+	aucodec_unregister(&g722);
 	return 0;
 }
 

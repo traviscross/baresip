@@ -21,43 +21,6 @@ enum {
 
 
 /*
- * Audio Codec
- */
-struct aucodec {
-	struct le        le;
-	const char      *pt;
-	const char      *name;
-	uint32_t         srate;
-	uint8_t          ch;
-	const char      *fmtp;
-	aucodec_alloc_h *alloch;
-	aucodec_enc_h   *ench;
-	aucodec_dec_h   *dech;
-	sdp_fmtp_cmp_h  *cmph;
-};
-
-struct aucodec *aucodec_get(const struct aucodec_st *st);
-const struct aucodec *aucodec_find(const char *name, uint32_t srate,
-				   uint8_t ch);
-int  aucodec_clone(struct list *l, const struct aucodec *src);
-bool aucodec_cmp(const struct aucodec *l, const struct aucodec *r);
-
-
-/*
- * Audio Filters
- */
-
-struct aufilt_chain;
-
-int aufilt_chain_alloc(struct aufilt_chain **fcp,
-		       const struct aufilt_prm *encprm,
-		       const struct aufilt_prm *decprm);
-int aufilt_chain_encode(struct aufilt_chain *fc, struct mbuf *mb);
-int aufilt_chain_decode(struct aufilt_chain *fc, struct mbuf *mb);
-int aufilt_chain_update(struct aufilt_chain *fc);
-
-
-/*
  * Audio Player
  */
 
@@ -91,19 +54,30 @@ typedef void (audio_err_h)(int err, const char *str, void *arg);
 int  audio_alloc(struct audio **ap, struct call *call,
 		 struct sdp_session *sdp_sess, int label,
 		 const struct mnat *mnat, struct mnat_sess *mnat_sess,
-		 const struct menc *menc, uint32_t ptime, enum audio_mode mode,
+		 const struct menc *menc, struct menc_sess *menc_sess,
+		 uint32_t ptime, enum audio_mode mode,
 		 const struct list *aucodecl,
 		 audio_event_h *eventh, audio_err_h *errh, void *arg);
 int  audio_start(struct audio *a);
 void audio_stop(struct audio *a);
-int  audio_encoder_set(struct audio *a, struct aucodec *ac,
+int  audio_encoder_set(struct audio *a, const struct aucodec *ac,
 		       int pt_tx, const char *params);
-int  audio_decoder_set(struct audio *a, struct aucodec *ac,
+int  audio_decoder_set(struct audio *a, const struct aucodec *ac,
 		       int pt_rx, const char *params);
 struct stream *audio_strm(const struct audio *a);
 int  audio_send_digit(struct audio *a, char key);
 void audio_sdp_attr_decode(struct audio *a);
-int  audio_debug(struct re_printf *pf, const struct audio *a);
+
+
+/*
+ * BFCP
+ */
+
+struct bfcp;
+int bfcp_alloc(struct bfcp **bfcpp, struct sdp_session *sdp_sess,
+	       const char *proto, bool offerer,
+	       const struct mnat *mnat, struct mnat_sess *mnat_sess);
+int bfcp_start(struct bfcp *bfcp);
 
 
 /*
@@ -130,7 +104,7 @@ struct call_prm {
 };
 
 typedef void (call_event_h)(struct call *call, enum call_event ev,
-			    const void *prm, void *arg);
+			    const char *str, void *arg);
 
 int call_alloc(struct call **callp, struct list *lst,
 	       struct ua *ua, const struct call_prm *prm,
@@ -151,7 +125,6 @@ int  call_ringtone(struct call *call, const char *ringtone, int repeat);
 int  call_sdp_get(const struct call *call, struct mbuf **descp, bool offer);
 const char *call_peeruri(const struct call *call);
 int  call_debug(struct re_printf *pf, const struct call *call);
-int  call_status(struct re_printf *pf, const struct call *call);
 int  call_jbuf_stat(struct re_printf *pf, const struct call *call);
 int  call_info(struct re_printf *pf, const struct call *call);
 struct ua *call_get_ua(const struct call *call);
@@ -166,22 +139,6 @@ int call_af(const struct call *call);
  */
 
 int mctrl_handle_media_control(struct pl *body, bool *pfu);
-
-
-/*
- * Media Encryption
- */
-
-struct menc {
-	struct le le;
-	const char *id;
-	menc_alloc_h *alloch;
-	menc_update_h *updateh;
-};
-
-const struct menc *menc_find(const char *id);
-struct menc *menc_get(const struct menc_st *st);
-const char *menc2transp(const struct menc *menc);
 
 
 /*
@@ -213,6 +170,22 @@ void module_app_unload(void);
  */
 
 int net_reset(void);
+
+
+/*
+ * Register client
+ */
+
+struct reg;
+
+int  reg_add(struct list *lst, struct ua *ua, int regid);
+int  reg_register(struct reg *reg, const char *reg_uri,
+		    const char *params, uint32_t regint, const char *outbound);
+void reg_unregister(struct reg *reg);
+bool reg_isok(const struct reg *reg);
+int  reg_sipfd(const struct reg *reg);
+int  reg_debug(struct re_printf *pf, const struct reg *reg);
+int  reg_status(struct re_printf *pf, const struct reg *reg);
 
 
 /*
@@ -251,7 +224,7 @@ int  stream_alloc(struct stream **sp, struct call *call,
 		  struct sdp_session *sdp_sess,
 		  const char *name, int label,
 		  const struct mnat *mnat, struct mnat_sess *mnat_sess,
-		  const struct menc *menc,
+		  const struct menc *menc, struct menc_sess *menc_sess,
 		  stream_rtp_h *rtph, stream_rtcp_h *rtcph, void *arg);
 struct sdp_media *stream_sdpmedia(const struct stream *s);
 int  stream_start(struct stream *s);
@@ -280,33 +253,13 @@ struct ua;
 const char  *ua_param(const struct ua *ua, const char *key);
 struct list *ua_aucodecl(const struct ua *ua);
 struct list *ua_vidcodecl(const struct ua *ua);
-int          ua_debug(struct re_printf *pf, const struct ua *ua);
-int          ua_print_calls(struct re_printf *pf, const struct ua *ua);
+void         ua_event(struct ua *ua, enum ua_event ev, const char *fmt, ...);
+void         ua_printf(const struct ua *ua, const char *fmt, ...);
 
-void         ua_next(void);
+void         uag_check_registrations(void);
 struct tls  *uag_tls(void);
 struct list *uag_list(void);
-const char  *ua_allowed_methods(void);
-
-
-/*
- * Video Codec
- */
-
-struct vidcodec {
-	struct le         le;
-	const char       *pt;
-	const char       *name;
-	const char       *fmtp;
-	vidcodec_alloc_h *alloch;
-	vidcodec_enc_h   *ench;
-	vidcodec_pktize_h *pktizeh;
-	vidcodec_dec_h   *dech;
-	sdp_fmtp_cmp_h   *cmph;
-};
-
-int  vidcodec_clone(struct list *l, const struct vidcodec *src);
-bool vidcodec_cmp(const struct vidcodec *l, const struct vidcodec *r);
+const char  *uag_allowed_methods(void);
 
 
 /*
@@ -348,16 +301,16 @@ struct video;
 int  video_alloc(struct video **vp, struct call *call,
 		 struct sdp_session *sdp_sess, int label,
 		 const struct mnat *mnat, struct mnat_sess *mnat_sess,
-		 const struct menc *menc, const char *content,
-		 const struct list *vidcodecl);
+		 const struct menc *menc, struct menc_sess *menc_sess,
+		 const char *content, const struct list *vidcodecl);
 int  video_start(struct video *v, const char *src, const char *dev,
 		 const char *peer);
 void video_stop(struct video *v);
 int  video_encoder_set(struct video *v, struct vidcodec *vc,
 		       int pt_tx, const char *params);
-int  video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx);
+int  video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx,
+		       const char *fmtp);
 struct stream *video_strm(const struct video *v);
 void video_update_picture(struct video *v);
 void video_sdp_attr_decode(struct video *v);
-int  video_debug(struct re_printf *pf, const struct video *v);
 int  video_print(struct re_printf *pf, const struct video *v);

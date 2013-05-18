@@ -13,42 +13,41 @@
 #include <re_dbg.h>
 
 
-struct aufilt_st {
-	struct aufilt *af;  /* base class */
+struct sndfile_st {
+	struct aufilt_st af;  /* base class */
 	SNDFILE *enc, *dec;
 };
 
 
-static struct aufilt *filt;
 static uint32_t count = 0;
 
 
 static void sndfile_destructor(void *arg)
 {
-	struct aufilt_st *st = arg;
+	struct sndfile_st *st = arg;
 
 	if (st->enc)
 		sf_close(st->enc);
 	if (st->dec)
 		sf_close(st->dec);
 
-	mem_deref(st->af);
+	list_unlink(&st->af.le);
 }
 
 
-static int alloc(struct aufilt_st **stp, struct aufilt *af,
-		 const struct aufilt_prm *encprm,
-		 const struct aufilt_prm *decprm)
+static int update(struct aufilt_st **stp, struct aufilt *af,
+		  const struct aufilt_prm *encprm,
+		  const struct aufilt_prm *decprm)
 {
 	char filename_enc[128], filename_dec[128];
 	SF_INFO sfinfo_enc, sfinfo_dec;
-	struct aufilt_st *st;
+	struct sndfile_st *st;
+
+	(void)af;
 
 	st = mem_zalloc(sizeof(*st), sndfile_destructor);
 	if (!st)
 		return EINVAL;
-
-	st->af = mem_ref(af);
 
 	(void)re_snprintf(filename_enc, sizeof(filename_enc),
 			  "dump-%u-enc.wav", count);
@@ -81,7 +80,7 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 		     filename_enc, filename_dec);
 
 	++count;
-	*stp = st;
+	*stp = (struct aufilt_st *)st;
 	return 0;
 
  error:
@@ -90,31 +89,41 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 }
 
 
-static int enc(struct aufilt_st *st, struct mbuf *mb)
+static int encode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 {
-	sf_write_short(st->enc, (short *)mbuf_buf(mb), mbuf_get_left(mb)/2);
+	struct sndfile_st *sf = (struct sndfile_st *)st;
+
+	sf_write_short(sf->enc, sampv, *sampc);
 
 	return 0;
 }
 
 
-static int dec(struct aufilt_st *st, struct mbuf *mb)
+static int decode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 {
-	sf_write_short(st->dec, (short *)mbuf_buf(mb), mbuf_get_left(mb)/2);
+	struct sndfile_st *sf = (struct sndfile_st *)st;
+
+	sf_write_short(sf->dec, sampv, *sampc);
 
 	return 0;
 }
+
+
+static struct aufilt sndfile = {
+	LE_INIT, "sndfile", update, encode, decode
+};
 
 
 static int module_init(void)
 {
-	return aufilt_register(&filt, "sndfile", alloc, enc, dec, NULL);
+	aufilt_register(&sndfile);
+	return 0;
 }
 
 
 static int module_close(void)
 {
-	filt = mem_deref(filt);
+	aufilt_unregister(&sndfile);
 	return 0;
 }
 

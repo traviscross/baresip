@@ -4,9 +4,14 @@ TODO:
 Version v0.x.y:
 
   video rate-control
-  S605th: no DNS-server IP
-  add mwi module for message-waiting indication (mailbox uri)
-  presence: test with presence-server (?)
   conf: move generation of config template to a module ('config.so')
+  separate UA accounts into account.c
+
+
+-------------------------------------------------------------------------------
+BUGS:
+
+  S605th: no DNS-server IP
+  sdl: crashes in virtualbox/linux
 
 -------------------------------------------------------------------------------

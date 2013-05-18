@@ -13,42 +13,49 @@
  */
 
 
-struct aucodec_st {
-	struct aucodec *ac;  /* inheritance */
+struct auenc_state {
+	ISACStruct *inst;
+};
+
+struct audec_state {
 	ISACStruct *inst;
 };
 
 
-static struct aucodec *isac[2];
-
-
-static void destructor(void *arg)
+static void encode_destructor(void *arg)
 {
-	struct aucodec_st *st = arg;
+	struct auenc_state *st = arg;
 
 	if (st->inst)
 		WebRtcIsac_Free(st->inst);
-
-	mem_deref(st->ac);
 }
 
 
-static int alloc(struct aucodec_st **stp, struct aucodec *ac,
-		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const char *fmtp)
+static void decode_destructor(void *arg)
 {
-	struct aucodec_st *st;
-	int err = 0;
+	struct audec_state *st = arg;
 
-	(void)encp;
-	(void)decp;
+	if (st->inst)
+		WebRtcIsac_Free(st->inst);
+}
+
+
+static int encode_update(struct auenc_state **aesp,
+			 const struct aucodec *ac, const char *fmtp)
+{
+	struct auenc_state *st;
+	int err = 0;
 	(void)fmtp;
 
-	st = mem_alloc(sizeof(*st), destructor);
+	if (!aesp || !ac)
+		return EINVAL;
+
+	if (*aesp)
+		return 0;
+
+	st = mem_alloc(sizeof(*st), encode_destructor);
 	if (!st)
 		return ENOMEM;
-
-	st->ac = mem_ref(ac);
 
 	if (WebRtcIsac_Create(&st->inst) < 0) {
 		err = ENOMEM;
@@ -56,82 +63,121 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	}
 
 	WebRtcIsac_EncoderInit(st->inst, 0);
-	WebRtcIsac_DecoderInit(st->inst);
 
-	if (aucodec_srate(ac) == 32000) {
-		WebRtcIsac_SetDecSampRate(st->inst, kIsacSuperWideband);
+	if (ac->srate == 32000)
 		WebRtcIsac_SetEncSampRate(st->inst, kIsacSuperWideband);
-	}
 
  out:
 	if (err)
 		mem_deref(st);
 	else
-		*stp = st;
+		*aesp = st;
 
 	return err;
 }
 
 
-static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode_update(struct audec_state **adsp,
+			 const struct aucodec *ac, const char *fmtp)
 {
-	WebRtc_Word16 encoded[2048];
-	WebRtc_Word16 len1, len2, len;
-	WebRtc_Word16 *in;
-	size_t n;
+	struct audec_state *st;
+	int err = 0;
+	(void)fmtp;
 
-	in = (void *)mbuf_buf(src);
-	n = mbuf_get_left(src);
+	if (!adsp || !ac)
+		return EINVAL;
+
+	if (*adsp)
+		return 0;
+
+	st = mem_alloc(sizeof(*st), decode_destructor);
+	if (!st)
+		return ENOMEM;
+
+	if (WebRtcIsac_Create(&st->inst) < 0) {
+		err = ENOMEM;
+		goto out;
+	}
+
+	WebRtcIsac_DecoderInit(st->inst);
+
+	if (ac->srate == 32000)
+		WebRtcIsac_SetDecSampRate(st->inst, kIsacSuperWideband);
+
+ out:
+	if (err)
+		mem_deref(st);
+	else
+		*adsp = st;
+
+	return err;
+}
+
+
+static int encode(struct auenc_state *st, uint8_t *buf, size_t *len,
+		  const int16_t *sampv, size_t sampc)
+{
+	WebRtc_Word16 len1, len2;
 
 	/* 10 ms audio blocks */
-	len1 = WebRtcIsac_Encode(st->inst, in, encoded);
-	len2 = WebRtcIsac_Encode(st->inst, &in[n/4], encoded);
+	len1 = WebRtcIsac_Encode(st->inst, sampv,           (void *)buf);
+	len2 = WebRtcIsac_Encode(st->inst, &sampv[sampc/2], (void *)buf);
 
-	src->pos = src->end;
-
-	len = len1 ? len1 : len2;
-	if (len > 0)
-		return mbuf_write_mem(dst, (void *)encoded, len);
+	*len = len1 ? len1 : len2;
 
 	return 0;
 }
 
 
-/* src=NULL means lost packet */
-static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode(struct audec_state *st, int16_t *sampv,
+		  size_t *sampc, const uint8_t *buf, size_t len)
 {
-	WebRtc_Word16 decoded[2048];
 	WebRtc_Word16 speechType;
-	int ret;
+	int n;
 
-	if (!mbuf_get_left(src)) {
-		ret = WebRtcIsac_DecodePlc(st->inst, decoded, 1);
-	}
-	else {
-		ret = WebRtcIsac_Decode(st->inst, (void *)mbuf_buf(src),
-					mbuf_get_left(src),
-					decoded, &speechType);
-	}
-	if (ret < 0)
+	n = WebRtcIsac_Decode(st->inst, (void *)buf, len,
+			      (void *)sampv, &speechType);
+	if (n < 0)
 		return EPROTO;
 
-	if (src)
-		src->pos = src->end;
+	*sampc = n;
 
-	return mbuf_write_mem(dst, (void *)decoded, ret * 2);
+	return 0;
 }
+
+
+static int plc(struct audec_state *st, int16_t *sampv, size_t *sampc)
+{
+	int n;
+
+	n = WebRtcIsac_DecodePlc(st->inst, (void *)sampv, 1);
+	if (n < 0)
+		return EPROTO;
+
+	*sampc = n;
+
+	return 0;
+}
+
+
+static struct aucodec isac[2] = {
+	{
+	LE_INIT, 0, "iSAC", 32000, 1, NULL,
+	encode_update, encode, decode_update, decode, plc, NULL, NULL
+	},
+	{
+	LE_INIT, 0, "iSAC", 16000, 1, NULL,
+	encode_update, encode, decode_update, decode, plc, NULL, NULL
+	}
+};
 
 
 static int module_init(void)
 {
-	int err = 0;
+	aucodec_register(&isac[0]);
+	aucodec_register(&isac[1]);
 
-	err |= aucodec_register(&isac[0], NULL, "iSAC", 32000, 1,
-				NULL, alloc, encode, decode, NULL);
-	err |= aucodec_register(&isac[1], NULL, "iSAC", 16000, 1,
-				NULL, alloc, encode, decode, NULL);
-
-	return err;
+	return 0;
 }
 
 
@@ -140,7 +186,7 @@ static int module_close(void)
 	int i = ARRAY_SIZE(isac);
 
 	while (i--)
-		isac[i] = mem_deref(isac[i]);
+		aucodec_unregister(&isac[i]);
 
 	return 0;
 }

@@ -64,7 +64,7 @@ static int cmd_contact(struct re_printf *pf, void *arg)
 		switch (carg->key) {
 
 		case '/':
-			err = ua_connect(ua_cur(), contact_str(cnt),
+			err = ua_connect(uag_cur(), contact_str(cnt),
 					 NULL, NULL, VIDMODE_ON);
 			if (err) {
 				re_fprintf(stderr, "ua_connect failed: %m\n",
@@ -94,7 +94,7 @@ static int cmd_message(struct re_printf *pf, void *arg)
 
 	(void)pf;
 
-	err = ua_im_send(ua_cur(), chat_peer, carg->prm);
+	err = ua_im_send(uag_cur(), chat_peer, carg->prm);
 	if (err) {
 		(void)re_hprintf(pf, "chat: ua_im_send() failed (%m)\n", err);
 	}

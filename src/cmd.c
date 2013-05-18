@@ -197,10 +197,8 @@ static int cmd_process_edit(struct cmd_ctx **ctxp, char key,
 	if (err)
 		return err;
 
-	if (ctx->mb->end) {
-		if (compl || ctx->cmd->flags & CMD_PROG)
-			err = cmd_report(ctx->cmd, pf, ctx->mb, compl);
-	}
+	if (compl || ctx->cmd->flags & CMD_PROG)
+		err = cmd_report(ctx->cmd, pf, ctx->mb, compl);
 
 	if (del)
 		*ctxp = mem_deref(*ctxp);

@@ -1,3 +1,40 @@
+2013-05-18 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.4
+
+	* new modules:
+	  - g726      G.726 audio codec
+	  - mwi       Message Waiting Indication
+	  - snapshot  Save video-stream as PNG images
+
+	* config:
+	  - added 'sip_certificate' to use a Certificate for SIP/TLS
+	  - added 'ausrc_srate' and 'auplay_srate' to force DSP samplerate
+
+	* baresip:
+	  - added a simple BFCP client
+	  - aufilt: improved API
+	  - mediaenc: improved API with session state
+	  - ua: added event handler framework
+	  - aucodec: improved API with separate encode/decode state
+	  - vidcodec: improved API with separate encode/decode state
+	  - sdp.c: added SDP helper functions
+	  - ua: move registration client to reg.c
+	  - audio: added internal resampler
+
+	* auloop: added config option 'auloop_codec' for setting codec
+
+	* ice: remove old 'ice_interface' config option
+
+	* menu: move handling of status-mode here
+
+	* selfview: added config option 'selfview_size'
+
+	* vp8: upgrade to draft-ietf-payload-vp8-08
+
+	* winwave: cleanup and minor fixes
+
+
 2013-01-01 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.4.3

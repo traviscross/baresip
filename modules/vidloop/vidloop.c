@@ -28,15 +28,58 @@ struct vstat {
 
 /** Video loop */
 struct video_loop {
-	struct vidcodec_st *codec;
+	const struct vidcodec *vc;
+	struct videnc_state *enc;
+	struct viddec_state *dec;
 	struct vidisp_st *vidisp;
 	struct vidsrc_st *vsrc;
 	struct vstat stat;
 	struct tmr tmr_bw;
+	uint16_t seq;
 };
 
 
 static struct video_loop *gvl;
+
+
+static int packet_handler(bool marker, const uint8_t *hdr, size_t hdr_len,
+			  const uint8_t *pld, size_t pld_len, void *arg)
+{
+	struct video_loop *vl = arg;
+	struct vidframe frame;
+	struct mbuf *mb;
+	int err;
+
+	mb = mbuf_alloc(hdr_len + pld_len);
+	if (!mb)
+		return ENOMEM;
+
+	if (hdr_len)
+		mbuf_write_mem(mb, hdr, hdr_len);
+	mbuf_write_mem(mb, pld, pld_len);
+
+	mb->pos = 0;
+
+	vl->stat.bytes += mbuf_get_left(mb);
+
+	/* decode */
+	frame.data[0] = NULL;
+	if (vl->dec) {
+		err = vl->vc->dech(vl->dec, &frame, marker, vl->seq++, mb);
+		if (err) {
+			DEBUG_WARNING("codec_decode: %m\n", err);
+			return err;
+		}
+	}
+
+	/* display - if valid picture frame */
+	if (vidframe_isvalid(&frame))
+		(void)vidisp_display(vl->vidisp, "Video Loop", &frame);
+
+	mem_deref(mb);
+
+	return 0;
+}
 
 
 static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
@@ -56,8 +99,10 @@ static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
 		frame = f2;
 	}
 
-	if (vl->codec)
-		(void)vidcodec_encode(vl->codec, false, frame);
+	if (vl->enc) {
+		(void)vl->vc->ench(vl->enc, false, frame,
+				   packet_handler, vl);
+	}
 	else {
 		vl->stat.bytes += vidframe_size(frame->fmt, &frame->size);
 		(void)vidisp_display(vl->vidisp, "Video Loop", frame);
@@ -74,7 +119,8 @@ static void vidloop_destructor(void *arg)
 	tmr_cancel(&vl->tmr_bw);
 	mem_deref(vl->vsrc);
 	mem_deref(vl->vidisp);
-	mem_deref(vl->codec);
+	mem_deref(vl->enc);
+	mem_deref(vl->dec);
 }
 
 
@@ -85,48 +131,42 @@ static void vidisp_input_handler(char key, void *arg)
 }
 
 
-static int vidcodec_send_handler(bool marker, struct mbuf *mb, void *arg)
+static int enable_codec(struct video_loop *vl)
 {
-	struct video_loop *vl = arg;
-	struct vidframe frame;
+	struct videnc_param prm;
 	int err;
 
-	vl->stat.bytes += mbuf_get_left(mb);
+	prm.fps     = config.video.fps;
+	prm.pktsize = 1024;
+	prm.bitrate = config.video.bitrate;
+	prm.max_fs  = -1;
 
-	/* decode */
-	frame.data[0] = NULL;
-	err = vidcodec_decode(vl->codec, &frame, marker, mb);
+	/* Use the first video codec */
+	vl->vc = vidcodec_find(NULL, NULL);
+	if (!vl->vc)
+		return ENOENT;
+
+	err = vl->vc->encupdh(&vl->enc, vl->vc, &prm, NULL);
 	if (err) {
-		DEBUG_WARNING("codec_decode: %m\n", err);
+		DEBUG_WARNING("update encoder: %m\n", err);
 		return err;
 	}
 
-	/* display - if valid picture frame */
-	if (vidframe_isvalid(&frame))
-		(void)vidisp_display(vl->vidisp, "Video Loop", &frame);
+	err = vl->vc->decupdh(&vl->dec, vl->vc, NULL);
+	if (err) {
+		DEBUG_WARNING("update decoder: %m\n", err);
+		return err;
+	}
 
 	return 0;
 }
 
 
-static int enable_codec(struct video_loop *vl)
+static void disable_codec(struct video_loop *vl)
 {
-	struct vidcodec_prm prm;
-	int err;
-
-	prm.fps     = config.video.fps;
-	prm.bitrate = config.video.bitrate;
-
-	/* Use the first video codec */
-	err = vidcodec_alloc(&vl->codec, vidcodec_name(vidcodec_find(NULL)),
-			     &prm, NULL, NULL, vidcodec_send_handler, vl);
-	if (err) {
-		DEBUG_WARNING("alloc encoder: %m\n", err);
-		return err;
-	}
-
-	/* OK */
-	return 0;
+	vl->enc = mem_deref(vl->enc);
+	vl->dec = mem_deref(vl->dec);
+	vl->vc = NULL;
 }
 
 
@@ -240,14 +280,14 @@ static int vidloop_start(struct re_printf *pf, void *arg)
 	size.h = config.video.height;
 
 	if (gvl) {
-		if (gvl->codec)
-			gvl->codec = mem_deref(gvl->codec);
+		if (gvl->vc)
+			disable_codec(gvl);
 		else
 			(void)enable_codec(gvl);
 
 		(void)re_hprintf(pf, "%sabled codec: %s\n",
-				 gvl->codec ? "En" : "Dis",
-				 vidcodec_name(vidcodec_get(gvl->codec)));
+				 gvl->vc ? "En" : "Dis",
+				 gvl->vc ? gvl->vc->name : "");
 	}
 	else {
 		(void)re_hprintf(pf, "Enable video-loop on %s,%s: %u x %u\n",

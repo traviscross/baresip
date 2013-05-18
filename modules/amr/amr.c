@@ -24,6 +24,12 @@
 #include <re_dbg.h>
 
 
+#ifdef VO_AMRWBENC_ENC_IF_H
+#define IF2E_IF_encode E_IF_encode
+#define IF2D_IF_decode D_IF_decode
+#endif
+
+
 /*
  * This module supports both AMR Narrowband (8000 Hz) and
  * AMR Wideband (16000 Hz) audio codecs.
@@ -44,141 +50,193 @@
 #define NB_SERIAL_MAX 61
 #endif
 
+enum {
+	FRAMESIZE_NB = 160
+};
 
-struct aucodec_st {
-	struct aucodec *ac;         /**< Inheritance - base class */
+
+struct auenc_state {
+	const struct aucodec *ac;
 	void *enc;                  /**< Encoder state            */
+};
+
+struct audec_state {
+	const struct aucodec *ac;
 	void *dec;                  /**< Decoder state            */
 };
 
 
-static struct aucodec *codecv[2];
-
-
-static void destructor(void *arg)
+static void encode_destructor(void *arg)
 {
-	struct aucodec_st *st = arg;
+	struct auenc_state *st = arg;
 
-	switch (aucodec_srate(st->ac)) {
+	switch (st->ac->srate) {
 
 #ifdef AMR_NB
 	case 8000:
 		Encoder_Interface_exit(st->enc);
-		Decoder_Interface_exit(st->dec);
 		break;
 #endif
 
 #ifdef AMR_WB
 	case 16000:
 		E_IF_exit(st->enc);
+		break;
+#endif
+	}
+}
+
+
+static void decode_destructor(void *arg)
+{
+	struct audec_state *st = arg;
+
+	switch (st->ac->srate) {
+
+#ifdef AMR_NB
+	case 8000:
+		Decoder_Interface_exit(st->dec);
+		break;
+#endif
+
+#ifdef AMR_WB
+	case 16000:
 		D_IF_exit(st->dec);
 		break;
 #endif
 	}
-
-	mem_deref(st->ac);
 }
 
 
-static int alloc(struct aucodec_st **stp, struct aucodec *ac,
-		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const char *fmtp)
+static int encode_update(struct auenc_state **aesp,
+			 const struct aucodec *ac,
+			 struct auenc_param *prm, const char *fmtp)
 {
-	struct aucodec_st *st;
+	struct auenc_state *st;
 	int err = 0;
-
-	(void)encp;
-	(void)decp;
+	(void)prm;
 	(void)fmtp;
 
-	st = mem_zalloc(sizeof(*st), destructor);
+	if (!aesp || !ac)
+		return EINVAL;
+
+	if (*aesp)
+		return 0;
+
+	st = mem_zalloc(sizeof(*st), encode_destructor);
 	if (!st)
 		return ENOMEM;
 
-	st->ac = mem_ref(ac);
+	st->ac = ac;
 
-	switch (aucodec_srate(ac)) {
+	switch (ac->srate) {
 
 #ifdef AMR_NB
 	case 8000:
 		st->enc = Encoder_Interface_init(0);
-		st->dec = Decoder_Interface_init();
 		break;
 #endif
 
 #ifdef AMR_WB
 	case 16000:
 		st->enc = E_IF_init();
-		st->dec = D_IF_init();
 		break;
 #endif
 	}
 
-	if (!st->enc || !st->dec)
+	if (!st->enc)
 		err = ENOMEM;
 
 	if (err)
 		mem_deref(st);
 	else
-		*stp = st;
+		*aesp = st;
+
+	return err;
+}
+
+
+static int decode_update(struct audec_state **adsp,
+			 const struct aucodec *ac, const char *fmtp)
+{
+	struct audec_state *st;
+	int err = 0;
+	(void)fmtp;
+
+	if (!adsp || !ac)
+		return EINVAL;
+
+	if (*adsp)
+		return 0;
+
+	st = mem_zalloc(sizeof(*st), decode_destructor);
+	if (!st)
+		return ENOMEM;
+
+	st->ac = ac;
+
+	switch (ac->srate) {
+
+#ifdef AMR_NB
+	case 8000:
+		st->dec = Decoder_Interface_init();
+		break;
+#endif
+
+#ifdef AMR_WB
+	case 16000:
+		st->dec = D_IF_init();
+		break;
+#endif
+	}
+
+	if (!st->dec)
+		err = ENOMEM;
+
+	if (err)
+		mem_deref(st);
+	else
+		*adsp = st;
 
 	return err;
 }
 
 
 #ifdef AMR_WB
-static int encode_wb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int encode_wb(struct auenc_state *st, uint8_t *buf, size_t *len,
+		     const int16_t *sampv, size_t sampc)
 {
-	int len;
+	int n;
 
-	if (!mbuf_get_left(src))
-		return 0;
-
-	if (mbuf_get_left(src) != 2*L_FRAME16k) {
-		DEBUG_WARNING("encode: got %d bytes, expected %d\n",
-			      mbuf_get_left(src), 2*L_FRAME16k);
+	if (sampc != L_FRAME16k)
 		return EINVAL;
-	}
 
-	if (mbuf_get_space(dst) < NB_SERIAL_MAX) {
-		int err = mbuf_resize(dst, dst->pos + NB_SERIAL_MAX);
-		if (err)
-			return err;
-	}
+	if (*len < NB_SERIAL_MAX)
+		return ENOMEM;
 
-	len = IF2E_IF_encode(st->enc, 8, (void *)mbuf_buf(src),
-			     mbuf_buf(dst), 0);
-	if (len <= 0) {
-		DEBUG_WARNING("encode error: %d\n", len);
+	n = IF2E_IF_encode(st->enc, 8, sampv, buf, 0);
+	if (n <= 0) {
+		DEBUG_WARNING("encode error: %d\n", n);
 		return EPROTO;
 	}
 
-	src->pos = src->end;
-	dst->end = dst->pos + len;
+	*len = n;
 
 	return 0;
 }
 
 
-/* src=NULL means lost packet */
-static int decode_wb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode_wb(struct audec_state *st, int16_t *sampv, size_t *sampc,
+		     const uint8_t *buf, size_t len)
 {
-	if (!src)
-		return 0;
+	if (*sampc < L_FRAME16k)
+		return ENOMEM;
+	if (len > NB_SERIAL_MAX)
+		return EINVAL;
 
-	/* Make sure there is enough space in the buffer */
-	if (mbuf_get_space(dst) < 2*L_FRAME16k) {
-		int err = mbuf_resize(dst, dst->pos + 2*L_FRAME16k);
-		if (err)
-			return err;
-	}
+	IF2D_IF_decode(st->dec, buf, sampv, 0);
 
-	IF2D_IF_decode(st->dec, mbuf_buf(src), (void *)mbuf_buf(dst), 0);
-
-	if (src)
-		src->pos = src->end;
-
-	dst->end += 2*L_FRAME16k;
+	*sampc = L_FRAME16k;
 
 	return 0;
 }
@@ -186,63 +244,62 @@ static int decode_wb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 
 
 #ifdef AMR_NB
-static int encode_nb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int encode_nb(struct auenc_state *st, uint8_t *buf,
+		     size_t *len, const int16_t *sampv, size_t sampc)
 {
-	enum Mode mode = MR475;
-	int len;
+	int r;
 
-	if (!mbuf_get_left(src))
-		return 0;
-
-	if (mbuf_get_left(src) != 320) {
-		DEBUG_WARNING("encode: got %d bytes, expected %d\n",
-			      mbuf_get_left(src), 320);
+	if (!st || !buf || !len || !sampv || sampc != FRAMESIZE_NB)
 		return EINVAL;
-	}
+	if (*len < NB_SERIAL_MAX)
+		return ENOMEM;
 
-	if (mbuf_get_space(dst) < NB_SERIAL_MAX) {
-		int err = mbuf_resize(dst, dst->pos + NB_SERIAL_MAX);
-		if (err)
-			return err;
-	}
-
-	len = Encoder_Interface_Encode(st->enc, mode, (void *)mbuf_buf(src),
-				       mbuf_buf(dst), 0);
-	if (len <= 0) {
-		DEBUG_WARNING("encode error: %d\n", len);
+	r = Encoder_Interface_Encode(st->enc, MR475, sampv, buf, 0);
+	if (r <= 0)
 		return EPROTO;
-	}
 
-	src->pos = src->end;
-	dst->end = dst->pos + len;
+	*len = r;
 
 	return 0;
 }
 
 
-/* src=NULL means lost packet */
-static int decode_nb(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode_nb(struct audec_state *st, int16_t *sampv,
+		     size_t *sampc, const uint8_t *buf, size_t len)
 {
-	if (!src)
-		return 0;
+	if (!st || !sampv || !sampc || !buf)
+		return EINVAL;
 
-	/* Make sure there is enough space in the buffer */
-	if (mbuf_get_space(dst) < 2*L_FRAME16k) {
-		int err = mbuf_resize(dst, dst->pos + 2*L_FRAME16k);
-		if (err)
-			return err;
-	}
+	if (len > NB_SERIAL_MAX)
+		return EPROTO;
 
-	Decoder_Interface_Decode(st->dec, mbuf_buf(src),
-				 (void *)mbuf_buf(dst), 0);
+	if (*sampc < L_FRAME16k)
+		return ENOMEM;
 
-	if (src)
-		src->pos = src->end;
+	Decoder_Interface_Decode(st->dec, buf, sampv, 0);
 
-	dst->end += 2*L_FRAME16k;
+	*sampc = FRAMESIZE_NB;
 
 	return 0;
 }
+#endif
+
+
+#ifdef AMR_WB
+static struct aucodec amr_wb = {
+	LE_INIT, NULL, "AMR-WB", 16000, 1, NULL,
+	encode_update, encode_wb,
+	decode_update, decode_wb,
+	NULL, NULL, NULL
+};
+#endif
+#ifdef AMR_NB
+static struct aucodec amr_nb = {
+	LE_INIT, NULL, "AMR", 8000, 1, NULL,
+	encode_update, encode_nb,
+	decode_update, decode_nb,
+	NULL, NULL, NULL
+};
 #endif
 
 
@@ -251,12 +308,10 @@ static int module_init(void)
 	int err = 0;
 
 #ifdef AMR_WB
-	err |= aucodec_register(&codecv[0], NULL, "AMR-WB", 16000, 1, NULL,
-				alloc, encode_wb, decode_wb, NULL);
+	aucodec_register(&amr_wb);
 #endif
 #ifdef AMR_NB
-	err |= aucodec_register(&codecv[1], NULL, "AMR", 8000, 1, NULL,
-				alloc, encode_nb, decode_nb, NULL);
+	aucodec_register(&amr_nb);
 #endif
 
 	return err;
@@ -265,10 +320,12 @@ static int module_init(void)
 
 static int module_close(void)
 {
-	size_t i;
-
-	for (i=0; i<ARRAY_SIZE(codecv); i++)
-		codecv[i] = mem_deref(codecv[i]);
+#ifdef AMR_WB
+	aucodec_unregister(&amr_wb);
+#endif
+#ifdef AMR_NB
+	aucodec_unregister(&amr_nb);
+#endif
 
 	return 0;
 }

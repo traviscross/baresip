@@ -17,6 +17,7 @@
 #   USE_G711          G.711 audio codec
 #   USE_G722          G.722 audio codec
 #   USE_G722_1        G.722.1 audio codec
+#   USE_G726          G.726 audio codec
 #   USE_GSM           GSM audio codec
 #   USE_GST           Gstreamer audio module
 #   USE_ILBC          iLBC audio codec
@@ -32,7 +33,6 @@
 #   USE_SPEEX         Speex audio codec
 #   USE_SPEEX_AEC     Speex Acoustic Echo Canceller
 #   USE_SPEEX_PP      Speex preprocessor
-#   USE_SPEEX_RESAMP  Speex Resampler
 #   USE_SRTP          Secure RTP module
 #   USE_STDIO         stdio input driver
 #   USE_SYSLOG        Syslog module
@@ -65,7 +65,7 @@ USE_BV32  := $(shell [ -f $(SYSROOT)/include/bv32/bv32.h ] || \
 	[ -f $(SYSROOT)/local/include/bv32/bv32.h ] && echo "yes")
 USE_CAIRO  := $(shell [ -f $(SYSROOT)/include/cairo/cairo.h ] || \
 	[ -f $(SYSROOT_ALT)/include/cairo/cairo.h ] && echo "yes")
-USE_CELT  := $(shell [ -f $(SYSROOT)/include/celt/celt.h ] || \
+#USE_CELT  := $(shell [ -f $(SYSROOT)/include/celt/celt.h ] || \
 	[ -f $(SYSROOT)/local/include/celt/celt.h ] || \
 	[ -f $(SYSROOT_ALT)/include/celt/celt.h ] && echo "yes")
 USE_FFMPEG := $(shell [ -f $(SYSROOT)/include/libavcodec/avcodec.h ] || \
@@ -80,6 +80,9 @@ USE_G722 := $(shell [ -f $(SYSROOT)/include/spandsp/g722.h ] || \
 USE_G722_1 := $(shell [ -f $(SYSROOT)/include/g722_1.h ] || \
 	[ -f $(SYSROOT_ALT)/include/g722_1.h ] || \
 	[ -f $(SYSROOT)/local/include/g722_1.h ] && echo "yes")
+USE_G726 := $(shell [ -f $(SYSROOT)/include/spandsp/g726.h ] || \
+	[ -f $(SYSROOT_ALT)/include/spandsp/g726.h ] || \
+	[ -f $(SYSROOT)/local/include/spandsp/g726.h ] && echo "yes")
 USE_GSM := $(shell [ -f $(SYSROOT)/include/gsm.h ] || \
 	[ -f $(SYSROOT_ALT)/include/gsm.h ] || \
 	[ -f $(SYSROOT)/include/gsm/gsm.h ] || \
@@ -133,10 +136,6 @@ USE_SPEEX_PP := $(shell [ -f $(SYSROOT)/include/speex_preprocess.h ] || \
 	[ -f $(SYSROOT)/local/include/speex/speex_preprocess.h ] || \
 	[ -f $(SYSROOT_ALT)/include/speex/speex_preprocess.h ] || \
 	[ -f $(SYSROOT)/include/speex/speex_preprocess.h ] && echo "yes")
-USE_SPEEX_RESAMP := $(shell [ -f $(SYSROOT)/include/speex/speex_resampler.h ] \
-	|| [ -f $(SYSROOT)/local/include/speex/speex_resampler.h ] \
-	|| [ -f $(SYSROOT_ALT)/include/speex/speex_resampler.h ] \
-	&& echo "yes")
 USE_SRTP := $(shell [ -f $(SYSROOT)/include/srtp/srtp.h ] || \
 	[ -f $(SYSROOT_ALT)/include/srtp/srtp.h ] || \
 	[ -f $(SYSROOT)/local/include/srtp/srtp.h ] && echo "yes")
@@ -190,7 +189,7 @@ endif
 # ------------------------------------------------------------------------- #
 
 MODULES   += $(EXTRA_MODULES) stun turn ice natbd auloop vidloop presence
-MODULES   += menu contact vumeter selfview
+MODULES   += menu contact vumeter selfview mwi
 
 ifneq ($(USE_ALSA),)
 MODULES   += alsa
@@ -244,6 +243,9 @@ endif
 ifneq ($(USE_G722_1),)
 MODULES   += g7221
 endif
+ifneq ($(USE_G726),)
+MODULES   += g726
+endif
 ifneq ($(USE_GSM),)
 MODULES   += gsm
 endif
@@ -291,9 +293,6 @@ MODULES   += speex_aec
 endif
 ifneq ($(USE_SPEEX_PP),)
 MODULES   += speex_pp
-endif
-ifneq ($(USE_SPEEX_RESAMP),)
-MODULES   += speex_resamp
 endif
 ifneq ($(USE_SRTP),)
 MODULES   += srtp

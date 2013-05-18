@@ -21,24 +21,27 @@ enum {
 	SPEEX_PTIME    = 20,
 };
 
-struct aucodec_st {
-	struct aucodec *ac;  /* inheritance */
+
+struct auenc_state {
+	void *enc;
+	SpeexBits bits;
+
 	uint32_t frame_size;  /* Number of samples */
 	uint8_t channels;
-	struct {
-		void *st;
-		SpeexBits bits;
-	} enc;
-	struct {
-		void *st;
-		SpeexBits bits;
-		SpeexStereoState stereo;
-		SpeexCallback callback;
-	} dec;
 };
 
 
-static struct aucodec *speexv[6];
+struct audec_state {
+	void *dec;
+	SpeexBits bits;
+	SpeexStereoState stereo;
+	SpeexCallback callback;
+
+	uint32_t frame_size;  /* Number of samples */
+	uint8_t channels;
+};
+
+
 static char speex_fmtp[128];
 
 
@@ -58,19 +61,21 @@ static struct {
 };
 
 
-static void speex_destructor(void *arg)
+static void encode_destructor(void *arg)
 {
-	struct aucodec_st *st = arg;
+	struct auenc_state *st = arg;
 
-	/* Encoder */
-	speex_bits_destroy(&st->enc.bits);
-	speex_encoder_destroy(st->enc.st);
+	speex_bits_destroy(&st->bits);
+	speex_encoder_destroy(st->enc);
+}
 
-	/* Decoder */
-	speex_bits_destroy(&st->dec.bits);
-	speex_decoder_destroy(st->dec.st);
 
-	mem_deref(st->ac);
+static void decode_destructor(void *arg)
+{
+	struct audec_state *st = arg;
+
+	speex_bits_destroy(&st->bits);
+	speex_decoder_destroy(st->dec);
 }
 
 
@@ -111,7 +116,7 @@ static void decoder_config(void *st)
 }
 
 
-static int decode_param(struct aucodec_st *st, const struct pl *name,
+static int decode_param(struct auenc_state *st, const struct pl *name,
 			const struct pl *val)
 {
 	int ret;
@@ -138,7 +143,7 @@ static int decode_param(struct aucodec_st *st, const struct pl *name,
 		mode = pl_u32(&v);
 
 		DEBUG_NOTICE("SPEEX_SET_MODE: mode=%d\n", mode);
-		ret = speex_encoder_ctl(st->enc.st, SPEEX_SET_MODE, &mode);
+		ret = speex_encoder_ctl(st->enc, SPEEX_SET_MODE, &mode);
 		if (ret) {
 			DEBUG_WARNING("SPEEX_SET_MODE: ret=%d\n", ret);
 		}
@@ -158,11 +163,11 @@ static int decode_param(struct aucodec_st *st, const struct pl *name,
 		}
 
 		DEBUG_NOTICE("Setting VBR=%d VAD=%d\n", vbr, vad);
-		ret = speex_encoder_ctl(st->enc.st, SPEEX_SET_VBR, &vbr);
+		ret = speex_encoder_ctl(st->enc, SPEEX_SET_VBR, &vbr);
 		if (ret) {
 			DEBUG_WARNING("SPEEX_SET_VBR: ret=%d\n", ret);
 		}
-		ret = speex_encoder_ctl(st->enc.st, SPEEX_SET_VAD, &vad);
+		ret = speex_encoder_ctl(st->enc, SPEEX_SET_VAD, &vad);
 		if (ret) {
 			DEBUG_WARNING("SPEEX_SET_VAD: ret=%d\n", ret);
 		}
@@ -175,7 +180,7 @@ static int decode_param(struct aucodec_st *st, const struct pl *name,
 		else if (0 == pl_strcasecmp(val, "off"))
 			dtx = 1;
 
-		ret = speex_encoder_ctl(st->enc.st, SPEEX_SET_DTX, &dtx);
+		ret = speex_encoder_ctl(st->enc, SPEEX_SET_DTX, &dtx);
 		if (ret) {
 			DEBUG_WARNING("SPEEX_SET_DTX: ret=%d\n", ret);
 		}
@@ -191,71 +196,56 @@ static int decode_param(struct aucodec_st *st, const struct pl *name,
 static void param_handler(const struct pl *name, const struct pl *val,
 			  void *arg)
 {
-	struct aucodec_st *st = arg;
+	struct auenc_state *st = arg;
 
 	decode_param(st, name, val);
 }
 
 
-static int alloc(struct aucodec_st **stp, struct aucodec *ac,
-		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const char *fmtp)
+static const SpeexMode *resolve_mode(uint32_t srate)
 {
-	struct aucodec_st *st;
-	const uint32_t srate = aucodec_srate(ac);
-	const SpeexMode *mode = &speex_nb_mode;
-	const char *speex_ver;
-	int ret, err = 0;
-
 	switch (srate) {
 
-	case 8000:
-		mode = &speex_nb_mode;
-		break;
-
-	case 16000:
-		mode = &speex_wb_mode;
-		break;
-
-	case 32000:
-		mode = &speex_uwb_mode;
-		break;
-
 	default:
-		DEBUG_WARNING("alloc: unsupported srate %lu\n", srate);
-		return EINVAL;
+	case 8000:  return &speex_nb_mode;
+	case 16000: return &speex_wb_mode;
+	case 32000: return &speex_uwb_mode;
 	}
+}
 
-	if ((encp && encp->ptime % 20) || (decp && decp->ptime % 20)) {
-		DEBUG_WARNING("alloc: ptime must be a multiple of 20\n");
+
+static int encode_update(struct auenc_state **aesp, const struct aucodec *ac,
+			 struct auenc_param *prm, const char *fmtp)
+{
+	struct auenc_state *st;
+	int ret, err = 0;
+
+	if (!aesp || !ac || !prm)
 		return EINVAL;
-	}
+	if (prm->ptime != SPEEX_PTIME)
+		return EPROTO;
+	if (*aesp)
+		return 0;
 
-	st = mem_zalloc(sizeof(*st), speex_destructor);
+	st = mem_zalloc(sizeof(*st), encode_destructor);
 	if (!st)
 		return ENOMEM;
 
-	st->ac = mem_ref(ac);
-	st->frame_size = 160 * srate/8000;
-	st->channels = aucodec_ch(ac);
-
-	if (0 == speex_lib_ctl(SPEEX_LIB_GET_VERSION_STRING, &speex_ver)) {
-		DEBUG_NOTICE("using Speex version %s\n", speex_ver);
-	}
+	st->frame_size = 160 * ac->srate/8000;
+	st->channels = ac->ch;
 
 	/* Encoder */
-	st->enc.st = speex_encoder_init((SpeexMode *)mode);
-	if (!st->enc.st) {
-		DEBUG_WARNING("alloc: speex_encoder_init() failed\n");
-		err = EPROTO;
+	st->enc = speex_encoder_init(resolve_mode(ac->srate));
+	if (!st->enc) {
+		err = ENOMEM;
 		goto out;
 	}
 
-	speex_bits_init(&st->enc.bits);
+	speex_bits_init(&st->bits);
 
-	encoder_config(st->enc.st);
+	encoder_config(st->enc);
 
-	ret = speex_encoder_ctl(st->enc.st, SPEEX_GET_FRAME_SIZE,
+	ret = speex_encoder_ctl(st->enc, SPEEX_GET_FRAME_SIZE,
 				&st->frame_size);
 	if (ret) {
 		DEBUG_WARNING("SPEEX_GET_FRAME_SIZE: %d\n", ret);
@@ -269,132 +259,137 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		fmt_param_apply(&params, param_handler, st);
 	}
 
-	/* Decoder */
-	st->dec.st = speex_decoder_init((SpeexMode *)mode);
-	if (!st->dec.st) {
-		err = EPROTO;
-		goto out;
-	}
-
-	speex_bits_init(&st->dec.bits);
-
-	if (2 == st->channels) {
-		DEBUG_NOTICE("decoder: Stereo enabled\n");
-
-		/* Stereo. */
-		st->dec.stereo.balance = 1;
-		st->dec.stereo.e_ratio = .5f;
-		st->dec.stereo.smooth_left = 1;
-		st->dec.stereo.smooth_right = 1;
-
-		st->dec.callback.callback_id = SPEEX_INBAND_STEREO;
-		st->dec.callback.func = speex_std_stereo_request_handler;
-		st->dec.callback.data = &st->dec.stereo;
-		speex_decoder_ctl(st->dec.st, SPEEX_SET_HANDLER,
-				  &st->dec.callback);
-	}
-
-	decoder_config(st->dec.st);
-
-out:
+ out:
 	if (err)
 		mem_deref(st);
 	else
-		*stp = st;
+		*aesp = st;
 
 	return err;
 }
 
 
-static int enc(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode_update(struct audec_state **adsp,
+			 const struct aucodec *ac, const char *fmtp)
 {
-	const size_t n = sizeof(uint16_t) * st->channels * st->frame_size;
-	int ret;
-	int len;
+	struct audec_state *st;
+	int err = 0;
+	(void)fmtp;
 
-	/* Make sure there is enough space */
-	if (mbuf_get_space(dst) < 128) {
-		DEBUG_WARNING("encode: dst buffer is too small (%u bytes)\n",
-			      mbuf_get_space(dst));
+	if (!adsp || !ac)
+		return EINVAL;
+	if (*adsp)
+		return 0;
+
+	st = mem_zalloc(sizeof(*st), decode_destructor);
+	if (!st)
 		return ENOMEM;
+
+	st->frame_size = 160 * ac->srate/8000;
+	st->channels = ac->ch;
+
+	/* Decoder */
+	st->dec = speex_decoder_init(resolve_mode(ac->srate));
+	if (!st->dec) {
+		err = ENOMEM;
+		goto out;
 	}
 
+	speex_bits_init(&st->bits);
+
+	if (2 == st->channels) {
+		DEBUG_NOTICE("decoder: Stereo enabled\n");
+
+		/* Stereo. */
+		st->stereo.balance = 1;
+		st->stereo.e_ratio = .5f;
+		st->stereo.smooth_left = 1;
+		st->stereo.smooth_right = 1;
+
+		st->callback.callback_id = SPEEX_INBAND_STEREO;
+		st->callback.func = speex_std_stereo_request_handler;
+		st->callback.data = &st->stereo;
+		speex_decoder_ctl(st->dec, SPEEX_SET_HANDLER,
+				  &st->callback);
+	}
+
+	decoder_config(st->dec);
+
+ out:
+	if (err)
+		mem_deref(st);
+	else
+		*adsp = st;
+
+	return err;
+}
+
+
+static int encode(struct auenc_state *st, uint8_t *buf,
+		  size_t *len, const int16_t *sampv, size_t sampc)
+{
+	const size_t n = st->channels * st->frame_size;
+	int ret, r;
+
+	if (*len < 128)
+		return ENOMEM;
+
 	/* VAD */
-	if (0 == mbuf_get_left(src)) {
+	if (!sampv || !sampc) {
 		/* 5 zeros interpreted by Speex as silence (submode 0) */
-		speex_bits_pack(&st->enc.bits, 0, 5);
+		speex_bits_pack(&st->bits, 0, 5);
 		goto out;
 	}
 
 	/* Handle multiple Speex frames in one RTP packet */
-	while (mbuf_get_left(src) >= n) {
+	while (sampc > 0) {
 
 		/* Assume stereo */
 		if (2 == st->channels) {
-			speex_encode_stereo_int((int16_t *)mbuf_buf(src),
-						st->frame_size, &st->enc.bits);
+			speex_encode_stereo_int((int16_t *)sampv,
+						st->frame_size, &st->bits);
 		}
 
-		ret = speex_encode_int(st->enc.st, (int16_t *)mbuf_buf(src),
-				       &st->enc.bits);
+		ret = speex_encode_int(st->enc, (int16_t *)sampv, &st->bits);
 		if (1 != ret) {
 			DEBUG_WARNING("speex_encode_int: ret=%d\n", ret);
 		}
 
-		mbuf_advance(src, n);
+		sampc -= n;
+		sampv += n;
 	}
 
  out:
 	/* Terminate bit stream */
-	speex_bits_pack(&st->enc.bits, 15, 5);
+	speex_bits_pack(&st->bits, 15, 5);
 
-	len = speex_bits_write(&st->enc.bits, (char *)mbuf_buf(dst),
-			       (int)(dst->size - dst->pos));
-	dst->end += len;
+	r = speex_bits_write(&st->bits, (char *)buf, (int)*len);
+	*len = r;
 
-	speex_bits_reset(&st->enc.bits);
+	speex_bits_reset(&st->bits);
 
 	return 0;
 }
 
 
-/* src=NULL means lost packet */
-static int dec(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode(struct audec_state *st, int16_t *sampv,
+		  size_t *sampc, const uint8_t *buf, size_t len)
 {
-	const size_t n = sizeof(uint16_t) * st->channels * st->frame_size;
-	int err;
-
-	/* Make sure there is enough space in the buffer */
-	if (mbuf_get_space(dst) < n) {
-		err = mbuf_resize(dst, dst->size + n);
-		if (err)
-			return err;
-	}
-
-	/* Silence */
-	if (0 == mbuf_get_left(src)) {
-		speex_decode_int(st->dec.st, NULL, (int16_t *)mbuf_buf(dst));
-		dst->end += n;
-		return 0;
-	}
+	const size_t n = st->channels * st->frame_size;
+	size_t i = 0;
 
 	/* Read into bit-stream */
-	speex_bits_read_from(&st->dec.bits, (char *)mbuf_buf(src),
-			     (int)mbuf_get_left(src));
-	mbuf_skip_to_end(src);
+	speex_bits_read_from(&st->bits, (char *)buf, (int)len);
 
 	/* Handle multiple Speex frames in one RTP packet */
-	while (speex_bits_remaining(&st->dec.bits) >= MIN_FRAME_SIZE) {
+	while (speex_bits_remaining(&st->bits) >= MIN_FRAME_SIZE) {
 		int ret;
 
-		if (mbuf_get_space(dst) < n) {
-			err = mbuf_resize(dst, dst->size + n);
-			if (err)
-				return err;
-		}
+		if (*sampc < n)
+			return ENOMEM;
 
-		ret = speex_decode_int(st->dec.st, &st->dec.bits,
-				       (int16_t *)mbuf_buf(dst));
+		ret = speex_decode_int(st->dec, &st->bits,
+				       (int16_t *)&sampv[i]);
 		if (ret < 0) {
 			if (-1 == ret) {
 			}
@@ -411,14 +406,31 @@ static int dec(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 		/* Transforms a mono frame into a stereo frame
 		   using intensity stereo info */
 		if (2 == st->channels) {
-			speex_decode_stereo_int((int16_t *)mbuf_buf(dst),
+			speex_decode_stereo_int((int16_t *)&sampv[i],
 						st->frame_size,
-						&st->dec.stereo);
+						&st->stereo);
 		}
 
-		dst->end += n;
-		mbuf_advance(dst, n);
+		i      += n;
+		*sampc -= n;
 	}
+
+	*sampc = i;
+
+	return 0;
+}
+
+
+static int pkloss(struct audec_state *st, int16_t *sampv, size_t *sampc)
+{
+	const size_t n = st->channels * st->frame_size;
+
+	if (*sampc < n)
+		return ENOMEM;
+
+	/* Silence */
+	speex_decode_int(st->dec, NULL, sampv);
+	*sampc = n;
 
 	return 0;
 }
@@ -441,9 +453,29 @@ static void config_parse(struct conf *conf)
 }
 
 
+static struct aucodec speexv[] = {
+
+	/* Stereo Speex */
+	{LE_INIT, 0, "speex", 32000, 2, speex_fmtp,
+	 encode_update, encode, decode_update, decode, pkloss, 0, 0},
+	{LE_INIT, 0, "speex", 16000, 2, speex_fmtp,
+	 encode_update, encode, decode_update, decode, pkloss, 0, 0},
+	{LE_INIT, 0, "speex",  8000, 2, speex_fmtp,
+	 encode_update, encode, decode_update, decode, pkloss, 0, 0},
+
+	/* Standard Speex */
+	{LE_INIT, 0, "speex", 32000, 1, speex_fmtp,
+	 encode_update, encode, decode_update, decode, pkloss, 0, 0},
+	{LE_INIT, 0, "speex", 16000, 1, speex_fmtp,
+	 encode_update, encode, decode_update, decode, pkloss, 0, 0},
+	{LE_INIT, 0, "speex",  8000, 1, speex_fmtp,
+	 encode_update, encode, decode_update, decode, pkloss, 0, 0},
+};
+
+
 static int speex_init(void)
 {
-	int err;
+	size_t i;
 
 	config_parse(conf_cur());
 
@@ -451,23 +483,10 @@ static int speex_init(void)
 			  "mode=\"7\";vbr=%s;cng=on",
 			  sconf.vad ? "vad" : (sconf.vbr ? "on" : "off"));
 
-	/* Stereo Speex */
-	err  = aucodec_register(&speexv[0], NULL, "speex", 32000, 2,
-				speex_fmtp, alloc, enc, dec, NULL);
-	err |= aucodec_register(&speexv[1], NULL, "speex", 16000, 2,
-				speex_fmtp, alloc, enc, dec, NULL);
-	err |= aucodec_register(&speexv[2], NULL, "speex",  8000, 2,
-				speex_fmtp, alloc, enc, dec, NULL);
+	for (i=0; i<ARRAY_SIZE(speexv); i++)
+		aucodec_register(&speexv[i]);
 
-	/* Standard Speex */
-	err |= aucodec_register(&speexv[3], NULL, "speex", 32000, 1,
-				speex_fmtp, alloc, enc, dec, NULL);
-	err |= aucodec_register(&speexv[4], NULL, "speex", 16000, 1,
-				speex_fmtp, alloc, enc, dec, NULL);
-	err |= aucodec_register(&speexv[5], NULL, "speex",  8000, 1,
-				speex_fmtp, alloc, enc, dec, NULL);
-
-	return err;
+	return 0;
 }
 
 
@@ -475,7 +494,7 @@ static int speex_close(void)
 {
 	size_t i;
 	for (i=0; i<ARRAY_SIZE(speexv); i++)
-		speexv[i] = mem_deref(speexv[i]);
+		aucodec_unregister(&speexv[i]);
 	return 0;
 }
 

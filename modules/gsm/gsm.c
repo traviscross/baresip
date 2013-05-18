@@ -14,57 +14,55 @@
 
 
 enum {
-	SRATE = 8000,
-	FRAME_SIZE = sizeof(gsm_signal[160])
-};
-
-struct aucodec_st {
-	struct aucodec *ac;  /* inheritance */
-	gsm enc, dec;
+	FRAME_SIZE = 160
 };
 
 
-static struct aucodec *ac_gsm;
+struct auenc_state {
+	gsm enc;
+};
+
+struct audec_state {
+	gsm dec;
+};
 
 
-static void gsm_destructor(void *arg)
+static void encode_destructor(void *arg)
 {
-	struct aucodec_st *st = arg;
+	struct auenc_state *st = arg;
 
 	gsm_destroy(st->enc);
-	gsm_destroy(st->dec);
-
-	mem_deref(st->ac);
 }
 
 
-static int alloc(struct aucodec_st **stp, struct aucodec *ac,
-		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const char *fmtp)
+static void decode_destructor(void *arg)
 {
-	struct aucodec_st *st;
-	int err = 0;
+	struct audec_state *st = arg;
 
-	(void)encp;
-	(void)decp;
+	gsm_destroy(st->dec);
+}
+
+
+static int encode_update(struct auenc_state **aesp, const struct aucodec *ac,
+			 struct auenc_param *prm, const char *fmtp)
+{
+	struct auenc_state *st;
+	int err = 0;
+	(void)ac;
+	(void)prm;
 	(void)fmtp;
 
-	st = mem_zalloc(sizeof(*st), gsm_destructor);
+	if (!aesp)
+		return EINVAL;
+	if (*aesp)
+		return 0;
+
+	st = mem_zalloc(sizeof(*st), encode_destructor);
 	if (!st)
 		return ENOMEM;
 
-	st->ac = mem_ref(ac);
-
 	st->enc = gsm_create();
 	if (!st->enc) {
-		DEBUG_WARNING("gsm_create() encoder failed\n");
-		err = EPROTO;
-		goto out;
-	}
-
-	st->dec = gsm_create();
-	if (!st->dec) {
-		DEBUG_WARNING("gsm_create() decoder failed\n");
 		err = EPROTO;
 		goto out;
 	}
@@ -73,94 +71,101 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	if (err)
 		mem_deref(st);
 	else
-		*stp = st;
+		*aesp = st;
 
 	return err;
 }
 
 
-static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode_update(struct audec_state **adsp,
+			 const struct aucodec *ac, const char *fmtp)
 {
-	gsm_signal *sig;
-	gsm_byte *byte;
+	struct audec_state *st;
+	int err = 0;
+	(void)ac;
+	(void)fmtp;
 
-	/* Make sure we have enough samples */
-	if (mbuf_get_left(src) < FRAME_SIZE) {
-		DEBUG_WARNING("encode: expected %d bytes, got %u\n",
-			      FRAME_SIZE, mbuf_get_left(src));
-		return ENOMEM;
-	}
-
-	/* Make sure there is enough space */
-	if (mbuf_get_space(dst) < sizeof(gsm_frame)) {
-		DEBUG_WARNING("encode: dest buffer is too small (%u bytes)\n",
-			      mbuf_get_space(dst));
-		return ENOMEM;
-	}
-
-	sig = (gsm_signal *)mbuf_buf(src);
-	byte = mbuf_buf(dst);
-
-	gsm_encode(st->enc, sig, byte);
-
-	mbuf_advance(src, FRAME_SIZE);
-	dst->end += sizeof(gsm_frame);
-
-	return 0;
-}
-
-
-static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
-{
-	gsm_signal *sig;
-	gsm_byte *byte;
-	int err;
-
-	if (!mbuf_get_left(src))
+	if (!adsp)
+		return EINVAL;
+	if (*adsp)
 		return 0;
 
-	/* Make sure we have a complete GSM frame */
-	if (mbuf_get_left(src) < sizeof(gsm_frame)) {
-		DEBUG_INFO("decode: not enough input (%u bytes)\n",
-			   mbuf_get_left(src));
-		return EINVAL;
-	}
-
-	/* Make sure there is enough space in the buffer */
-	if (mbuf_get_space(dst) < FRAME_SIZE) {
-		DEBUG_WARNING("decode: buffer too small (size=%u, need %u)\n",
-			      mbuf_get_space(dst), FRAME_SIZE);
+	st = mem_zalloc(sizeof(*st), decode_destructor);
+	if (!st)
 		return ENOMEM;
+
+	st->dec = gsm_create();
+	if (!st->dec) {
+		err = EPROTO;
+		goto out;
 	}
 
-	byte = mbuf_buf(src);
-	sig = (gsm_signal *)mbuf_buf(dst);
+ out:
+	if (err)
+		mem_deref(st);
+	else
+		*adsp = st;
 
-	err = gsm_decode(st->dec, byte, sig);
-	if (err) {
-		DEBUG_WARNING("decode: gsm_decode() failed (err=%d)\n", err);
-		return ENOENT;
-	}
+	return err;
+}
 
-	mbuf_advance(src, sizeof(gsm_frame));
-	dst->end += FRAME_SIZE;
+
+static int encode(struct auenc_state *st, uint8_t *buf, size_t *len,
+		  const int16_t *sampv, size_t sampc)
+{
+	if (sampc != FRAME_SIZE)
+		return EPROTO;
+	if (*len < sizeof(gsm_frame))
+		return ENOMEM;
+
+	gsm_encode(st->enc, (gsm_signal *)sampv, buf);
+
+	*len = sizeof(gsm_frame);
 
 	return 0;
 }
+
+
+static int decode(struct audec_state *st, int16_t *sampv, size_t *sampc,
+		  const uint8_t *buf, size_t len)
+{
+	int ret;
+
+	if (*sampc < FRAME_SIZE)
+		return ENOMEM;
+	if (len < sizeof(gsm_frame))
+		return EBADMSG;
+
+	ret = gsm_decode(st->dec, (gsm_byte *)buf, (gsm_signal *)sampv);
+	if (ret) {
+		DEBUG_WARNING("decode: gsm_decode() failed (ret=%d)\n", ret);
+		return EPROTO;
+	}
+
+	*sampc = 160;
+
+	return 0;
+}
+
+
+static struct aucodec ac_gsm = {
+	LE_INIT, "3", "GSM", 8000, 1, NULL,
+	encode_update, encode, decode_update, decode, NULL, NULL, NULL
+};
 
 
 static int module_init(void)
 {
 	DEBUG_INFO("GSM v%u.%u.%u\n", GSM_MAJOR, GSM_MINOR, GSM_PATCHLEVEL);
 
-	return aucodec_register(&ac_gsm, "3", "GSM", 8000, 1, NULL,
-				alloc, encode, decode, NULL);
+	aucodec_register(&ac_gsm);
+	return 0;
 }
 
 
 static int module_close(void)
 {
-	ac_gsm = mem_deref(ac_gsm);
+	aucodec_unregister(&ac_gsm);
 	return 0;
 }
 

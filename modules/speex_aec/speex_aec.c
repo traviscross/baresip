@@ -4,6 +4,7 @@
  * Copyright (C) 2010 Creytiv.com
  */
 #include <stdlib.h>
+#include <string.h>
 #include <speex/speex.h>
 #include <speex/speex_echo.h>
 #include <re.h>
@@ -15,37 +16,41 @@
 #include <re_dbg.h>
 
 
-struct aufilt_st {
-	struct aufilt *af;    /* base class */
-	uint32_t psize;
+struct speex_st {
+	struct aufilt af;    /* base class */
+	uint32_t nsamp;
 	int16_t *out;
 	SpeexEchoState *state;
 };
 
 
-static struct aufilt *filt;
-
-
 #ifdef SPEEX_SET_VBR_MAX_BITRATE
 static void speex_aec_destructor(void *arg)
 {
-	struct aufilt_st *st = arg;
+	struct speex_st *st = arg;
 
 	if (st->state)
 		speex_echo_state_destroy(st->state);
 
 	mem_deref(st->out);
-
-	mem_deref(st->af);
+	list_unlink(&st->af.le);
 }
 
 
-static int alloc(struct aufilt_st **stp, struct aufilt *af,
-		 const struct aufilt_prm *encprm,
-		 const struct aufilt_prm *decprm)
+static int update(struct aufilt_st **stp, struct aufilt *af,
+		  const struct aufilt_prm *encprm,
+		  const struct aufilt_prm *decprm)
 {
-	struct aufilt_st *st;
+	struct speex_st *st;
 	int err, tmp, fl;
+
+	(void)af;
+
+	if (!stp)
+		return EINVAL;
+
+	if (*stp)
+		return 0;
 
 	/* Check config */
 	if (encprm->srate != decprm->srate) {
@@ -61,11 +66,9 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 	if (!st)
 		return ENOMEM;
 
-	st->af = mem_ref(af);
+	st->nsamp = encprm->ch * encprm->frame_size;
 
-	st->psize = 2 * encprm->ch * encprm->frame_size;
-
-	st->out = mem_alloc(st->psize, NULL);
+	st->out = mem_alloc(2 * st->nsamp, NULL);
 	if (!st->out) {
 		err = ENOMEM;
 		goto out;
@@ -91,45 +94,48 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 	if (err)
 		mem_deref(st);
 	else
-		*stp = st;
+		*stp = (struct aufilt_st *)st;
 
 	return err;
 }
 
 
-static int enc(struct aufilt_st *st, struct mbuf *mb)
+static int encode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 {
-	size_t pos = mb->pos;
-	int err;
+	struct speex_st *sp = (struct speex_st *)st;
 
-	if (mbuf_get_left(mb) != st->psize) {
-		DEBUG_WARNING("enc: expect %u bytes, got %u\n", st->psize,
-			      mbuf_get_left(mb));
-		return ENOMEM;
+	if (*sampc) {
+		speex_echo_capture(sp->state, sampv, sp->out);
+		memcpy(sampv, sp->out, 2 * sp->nsamp);
 	}
 
-	speex_echo_capture(st->state, (int16_t *)mbuf_buf(mb), st->out);
-	err = mbuf_write_mem(mb, (uint8_t *)st->out, st->psize);
-	mb->pos = pos;
-	mb->end = st->psize;
-
-	return err;
+	return 0;
 }
 
 
-static int dec(struct aufilt_st *st, struct mbuf *mb)
+static int decode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 {
-	speex_echo_playback(st->state, (int16_t *)mbuf_buf(mb));
+	struct speex_st *sp = (struct speex_st *)st;
+
+	if (*sampc)
+		speex_echo_playback(sp->state, sampv);
+
 	return 0;
 }
 #endif
+
+
+static struct aufilt speex_aec = {
+	LE_INIT, "speex_aec", update, encode, decode
+};
 
 
 static int module_init(void)
 {
 	/* Note: Hack to check libspeex version */
 #ifdef SPEEX_SET_VBR_MAX_BITRATE
-	return aufilt_register(&filt, "speex_aec", alloc, enc, dec, NULL);
+	aufilt_register(&speex_aec);
+	return 0;
 #else
 	return ENOSYS;
 #endif
@@ -138,7 +144,7 @@ static int module_init(void)
 
 static int module_close(void)
 {
-	filt = mem_deref(filt);
+	aufilt_unregister(&speex_aec);
 	return 0;
 }
 

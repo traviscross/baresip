@@ -14,9 +14,8 @@
 #include <re_dbg.h>
 
 
-/* NOTE: This is experimental code!
- *
- * Latest supported version: 0.9.8
+/*
+ * Latest supported version: libopus 1.0.0
  *
  * References:
  *
@@ -29,22 +28,20 @@
 
 enum {
 	DEFAULT_BITRATE    = 64000, /**< 32-128 kbps               */
-	DEFAULT_PTIME      = 20,    /**< Packet time in [ms]       */
-	MAX_PACKET         = 1500,  /**< Maximum bytes per packet  */
 };
 
 
-struct aucodec_st {
-	struct aucodec *ac;         /**< Inheritance - base class     */
-	OpusEncoder *enc;           /**< Encoder state                */
+struct auenc_state {
+	OpusEncoder *enc;           /**< Encoder state                   */
+	int frame_size;             /**< Num samples, excluding channels */
+	int ch;
+};
+
+struct audec_state {
 	OpusDecoder *dec;           /**< Decoder state                */
-	uint32_t frame_size;        /**< Frame size in [samples]      */
-	uint32_t fsize;             /**< PCM Frame size in bytes      */
-	bool got_packet;            /**< We have received a packet    */
+	uint8_t ch;
 };
 
-
-static struct aucodec *codecv[4];
 
 static struct {
 	int app;
@@ -61,48 +58,50 @@ static struct {
 };
 
 
-static void destructor(void *arg)
+static void encode_destructor(void *arg)
 {
-	struct aucodec_st *st = arg;
+	struct auenc_state *st = arg;
 
 	if (st->enc)
 		opus_encoder_destroy(st->enc);
-	if (st->dec)
-		opus_decoder_destroy(st->dec);
-
-	mem_deref(st->ac);
 }
 
 
-static int alloc(struct aucodec_st **stp, struct aucodec *ac,
-		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const char *fmtp)
+static void decode_destructor(void *arg)
 {
-	struct aucodec_st *st;
-	const uint32_t srate = aucodec_srate(ac);
-	const uint8_t ch = aucodec_ch(ac);
-	uint32_t ptime = DEFAULT_PTIME;
+	struct audec_state *st = arg;
+
+	if (st->dec)
+		opus_decoder_destroy(st->dec);
+}
+
+
+static int encode_update(struct auenc_state **aesp,
+			 const struct aucodec *ac,
+			 struct auenc_param *prm, const char *fmtp)
+{
+	struct auenc_state *st;
 	int use_inbandfec;
 	int use_dtx;
-	int err = 0;
 	int opuserr;
-
-	(void)decp;
+	int err = 0;
+	(void)prm;
 	(void)fmtp;
 
-	st = mem_zalloc(sizeof(*st), destructor);
+	if (!aesp || !ac)
+		return EINVAL;
+	if (*aesp)
+		return 0;
+
+	st = mem_zalloc(sizeof(*st), encode_destructor);
 	if (!st)
 		return ENOMEM;
 
-	if (encp && encp->ptime)
-		ptime = encp->ptime;
-
-	st->ac         = mem_ref(ac);
-	st->frame_size = srate * ptime / 1000;
-	st->fsize      = 2 * st->frame_size * ch;
+	st->frame_size = ac->srate * prm->ptime / 1000;
+	st->ch = ac->ch;
 
 	/* Encoder */
-	st->enc = opus_encoder_create(srate, ch, opus.app, &opuserr);
+	st->enc = opus_encoder_create(ac->srate, ac->ch, opus.app, &opuserr);
 	if (!st->enc) {
 		err = ENOMEM;
 		goto out;
@@ -118,8 +117,37 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	opus_encoder_ctl(st->enc, OPUS_SET_INBAND_FEC(use_inbandfec));
 	opus_encoder_ctl(st->enc, OPUS_SET_DTX(use_dtx));
 
+ out:
+	if (err)
+		mem_deref(st);
+	else
+		*aesp = st;
+
+	return err;
+}
+
+
+static int decode_update(struct audec_state **adsp,
+			 const struct aucodec *ac, const char *fmtp)
+{
+	struct audec_state *st;
+	int err = 0;
+	int opuserr;
+	(void)fmtp;
+
+	if (!adsp || !ac)
+		return EINVAL;
+	if (*adsp)
+		return 0;
+
+	st = mem_zalloc(sizeof(*st), decode_destructor);
+	if (!st)
+		return ENOMEM;
+
+	st->ch = ac->ch;
+
 	/* Decoder */
-	st->dec = opus_decoder_create(srate, ch, &opuserr);
+	st->dec = opus_decoder_create(ac->srate, ac->ch, &opuserr);
 	if (!st->dec) {
 		err = ENOMEM;
 		goto out;
@@ -129,78 +157,82 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 	if (err)
 		mem_deref(st);
 	else
-		*stp = st;
+		*adsp = st;
 
 	return err;
 }
 
 
-static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int encode(struct auenc_state *st, uint8_t *buf,
+		  size_t *len, const int16_t *sampv, size_t sampc)
 {
-	int len;
+	int n;
 
-	if (!mbuf_get_left(src))
-		return 0;
-
-	if (mbuf_get_left(src) != st->fsize) {
-		DEBUG_WARNING("encode: got %d bytes, expected %d\n",
-			      mbuf_get_left(src), st->fsize);
+	if (!st || !buf || !len || !sampv || !sampc)
 		return EINVAL;
-	}
 
-	if (mbuf_get_space(dst) < MAX_PACKET) {
-		int err = mbuf_resize(dst, dst->pos + MAX_PACKET);
-		if (err)
-			return err;
-	}
+	/* verify sample-count */
+	if ((int)sampc != st->ch * st->frame_size)
+		return EINVAL;
 
-	len = opus_encode(st->enc, (short *)mbuf_buf(src), st->frame_size,
-			  mbuf_buf(dst), (int)mbuf_get_space(dst));
-	if (len < 0) {
-		DEBUG_WARNING("encode error: %d (%u bytes)\n", len,
-			      mbuf_get_left(src));
+	n = opus_encode(st->enc, sampv, st->frame_size, buf, (int)*len);
+	if (n < 0)
 		return EPROTO;
+
+	if (n > (int)*len) {
+		DEBUG_WARNING("opus overwrite buffer: %d > %d\n",
+			      n, *len);
+		return ENOMEM;
 	}
 
-	src->pos = src->end;
-	dst->end = dst->pos + len;
+	*len = n;
 
 	return 0;
 }
 
 
-/* src=NULL means lost packet */
-static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode(struct audec_state *st, int16_t *sampv,
+		  size_t *sampc, const uint8_t *buf, size_t len)
 {
-	int r;
+	int n;
 
-	if (!mbuf_get_left(src) && !st->got_packet)
-		return 0;
+	n = opus_decode(st->dec, buf, (int)len, sampv, (int)*sampc, 0);
+	if (n < 0)
+		return EPROTO;
 
-	/* Make sure there is enough space in the buffer */
-	if (mbuf_get_space(dst) < st->fsize) {
-		int err = mbuf_resize(dst, dst->pos + st->fsize);
-		if (err)
-			return err;
-	}
-
-	r = opus_decode(st->dec, mbuf_buf(src), (int)mbuf_get_left(src),
-			(short *)mbuf_buf(dst), st->frame_size, 0);
-	if (r <= 0) {
-		DEBUG_WARNING("opus_decode: r=%d (%u bytes)\n",
-			      r, mbuf_get_left(src));
-		return EBADMSG;
-	}
-
-	if (src)
-		src->pos = src->end;
-
-	dst->end += 2 * r * aucodec_ch(st->ac);
-
-	st->got_packet = true;
+	*sampc = n * st->ch;
 
 	return 0;
 }
+
+
+static int pkloss(struct audec_state *st, int16_t *sampv, size_t *sampc)
+{
+	int n;
+
+	n = opus_decode(st->dec, NULL, 0, sampv, (int)*sampc, 0);
+	if (n < 0)
+		return EPROTO;
+
+	*sampc = n * st->ch;
+
+	return 0;
+}
+
+
+static struct aucodec opus0 = {
+	LE_INIT, 0, "opus", 48000, 2, NULL,
+	encode_update, encode,
+	decode_update, decode, pkloss,
+	NULL, NULL
+};
+
+static struct aucodec opus1 = {
+	LE_INIT, 0, "opus", 48000, 1, NULL,
+	encode_update, encode,
+	decode_update, decode, pkloss,
+	NULL, NULL
+};
 
 
 static int module_init(void)
@@ -243,15 +275,8 @@ static int module_init(void)
 	conf_get_bool(conf_cur(), "opus_vbr",        &opus.vbr);
 #endif
 
-	err |= aucodec_register(&codecv[0], NULL, "opus", 48000, 2, NULL,
-				alloc, encode, decode, NULL);
-
-	err |= aucodec_register(&codecv[1], NULL, "opus", 48000, 1, NULL,
-				alloc, encode, decode, NULL);
-#if 0
-	err |= aucodec_register(&codecv[2], NULL, "opus", 32000, 1, NULL,
-				alloc, encode, decode, NULL);
-#endif
+	aucodec_register(&opus0);
+	aucodec_register(&opus1);
 
 	return err;
 }
@@ -259,10 +284,8 @@ static int module_init(void)
 
 static int module_close(void)
 {
-	size_t i;
-
-	for (i=0; i<ARRAY_SIZE(codecv); i++)
-		codecv[i] = mem_deref(codecv[i]);
+	aucodec_unregister(&opus1);
+	aucodec_unregister(&opus0);
 
 	return 0;
 }

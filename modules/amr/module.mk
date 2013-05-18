@@ -41,8 +41,20 @@ else
 ifneq ($(shell [ -f $(SYSROOT)/include/amrwb/enc_if.h ] && echo 1),)
 CFLAGS += -DAMR_WB=1 -I$(SYSROOT)/include/amrwb
 $(MOD)_LFLAGS	+= -lamrwb
+else
+ifneq ($(shell [ -f $(SYSROOT)/include/vo-amrwbenc/enc_if.h ] && echo 1),)
+CFLAGS += -DAMR_WB=1 -I$(SYSROOT)/include/vo-amrwbenc
+$(MOD)_LFLAGS	+= -lvo-amrwbenc
 endif
 endif
+endif
+endif
+
+
+# extra for decoder
+ifneq ($(shell [ -f $(SYSROOT)/include/opencore-amrwb/dec_if.h ] && echo 1 ),)
+CFLAGS += -I$(SYSROOT)/include/opencore-amrwb
+$(MOD)_LFLAGS	+= -lopencore-amrwb
 endif
 
 

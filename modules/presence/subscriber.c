@@ -190,7 +190,7 @@ static int subscribe(struct presence *pres)
 	int err;
 
 	/* We use the first UA */
-	ua = ua_find_aor(NULL);
+	ua = uag_find_aor(NULL);
 	if (!ua) {
 		(void)re_printf("presence: no UA found\n");
 		return ENOENT;

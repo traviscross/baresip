@@ -5,7 +5,7 @@
 #
 
 MOD		:= winwave
-$(MOD)_SRCS	+= winwave.c
+$(MOD)_SRCS	+= winwave.c src.c play.c
 $(MOD)_LFLAGS	+= -lwinmm
 
 include mk/mod.mk

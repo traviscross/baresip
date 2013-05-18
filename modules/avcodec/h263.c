@@ -31,13 +31,28 @@ int h263_hdr_encode(const struct h263_hdr *hdr, struct mbuf *mb)
 }
 
 
+enum h263_mode h263_hdr_mode(const struct h263_hdr *hdr)
+{
+	if (!hdr->f) {
+		return H263_MODE_A;
+	}
+	else {
+		if (!hdr->p)
+			return H263_MODE_B;
+		else
+			return H263_MODE_C;
+	}
+}
+
+
 int h263_hdr_decode(struct h263_hdr *hdr, struct mbuf *mb)
 {
 	uint32_t v;
-	enum h263_mode mode;
 
+	if (!hdr)
+		return EINVAL;
 	if (mbuf_get_left(mb) < H263_HDR_SIZE_MODEA)
-		return ENOENT;
+		return EBADMSG;
 
 	v = ntohl(mbuf_read_u32(mb));
 
@@ -48,14 +63,7 @@ int h263_hdr_decode(struct h263_hdr *hdr, struct mbuf *mb)
 	hdr->ebit = v>>24 & 0x7;
 	hdr->src  = v>>21 & 0x7;
 
-	if (hdr->f == 0)
-		mode = H263_MODE_A;
-	else if (hdr->p == 0)
-		mode = H263_MODE_B;
-	else
-		mode = H263_MODE_C;
-
-	switch (mode) {
+	switch (h263_hdr_mode(hdr)) {
 
 	case H263_MODE_A:
 		hdr->i    = v>>20 & 0x1;
@@ -69,13 +77,36 @@ int h263_hdr_decode(struct h263_hdr *hdr, struct mbuf *mb)
 		break;
 
 	case H263_MODE_B:
-		/* todo: decode Mode B header */
+		hdr->quant = v>>16 & 0x1f;
+		hdr->gobn  = v>>11 & 0x1f;
+		hdr->mba   = v>>2  & 0x1ff;
+
+		if (mbuf_get_left(mb) < 4)
+			return EBADMSG;
+
 		v = ntohl(mbuf_read_u32(mb));
+
+		hdr->i     = v>>31 & 0x1;
+		hdr->u     = v>>30 & 0x1;
+		hdr->s     = v>>29 & 0x1;
+		hdr->a     = v>>28 & 0x1;
+		hdr->hmv1  = v>>21 & 0x7f;
+		hdr->vmv1  = v>>14 & 0x7f;
+		hdr->hmv2  = v>>7  & 0x7f;
+		hdr->vmv2  = v>>0  & 0x7f;
 		break;
 
 	case H263_MODE_C:
-		/* todo: decode Mode C header */
+		/* NOTE: Mode C is optional, only parts decoded */
+		if (mbuf_get_left(mb) < 8)
+			return EBADMSG;
+
 		v = ntohl(mbuf_read_u32(mb));
+		hdr->i    = v>>31 & 0x1;
+		hdr->u    = v>>30 & 0x1;
+		hdr->s    = v>>29 & 0x1;
+		hdr->a    = v>>28 & 0x1;
+
 		v = ntohl(mbuf_read_u32(mb));
 		break;
 	}
@@ -147,87 +178,4 @@ void h263_hdr_copy_strm(struct h263_hdr *hdr, const struct h263_strm *s)
 	hdr->dbq  = 0;   /* No PB-frames */
 	hdr->trb  = 0;   /* No PB-frames */
 	hdr->tr   = s->temp_ref;
-}
-
-
-static enum h263_fmt h263_fmt(const struct pl *name)
-{
-	if (0 == pl_strcasecmp(name, "sqcif")) return H263_FMT_SQCIF;
-	if (0 == pl_strcasecmp(name, "qcif"))  return H263_FMT_QCIF;
-	if (0 == pl_strcasecmp(name, "cif"))   return H263_FMT_CIF;
-	if (0 == pl_strcasecmp(name, "cif4"))  return H263_FMT_4CIF;
-	if (0 == pl_strcasecmp(name, "cif16")) return H263_FMT_16CIF;
-	return H263_FMT_OTHER;
-}
-
-
-int decode_sdpparam_h263(struct vidcodec_st *st, const struct pl *name,
-			 const struct pl *val)
-{
-	enum h263_fmt fmt = h263_fmt(name);
-	const int mpi = pl_u32(val);
-
-	if (fmt == H263_FMT_OTHER) {
-		DEBUG_NOTICE("h263: unknown param '%r'\n", name);
-		return 0;
-	}
-	if (mpi < 1 || mpi > 32) {
-		DEBUG_NOTICE("h263: %r: MPI out of range %d\n", name, mpi);
-		return 0;
-	}
-
-	if (st->u.h263.picszn >= ARRAY_SIZE(st->u.h263.picszv)) {
-		DEBUG_NOTICE("h263: picszv overflow: %r\n", name);
-		return 0;
-	}
-
-	st->u.h263.picszv[st->u.h263.picszn].fmt = fmt;
-	st->u.h263.picszv[st->u.h263.picszn].mpi = mpi;
-
-	++st->u.h263.picszn;
-
-	return 0;
-}
-
-
-int h263_packetize(struct vidcodec_st *st, struct mbuf *mb)
-{
-	struct h263_strm h263_strm;
-	struct h263_hdr h263_hdr;
-	size_t pos;
-	int err;
-
-	/* Decode bit-stream header, used by packetizer */
-	err = h263_strm_decode(&h263_strm, mb);
-	if (err)
-		return err;
-
-	h263_hdr_copy_strm(&h263_hdr, &h263_strm);
-
-	/* Make space for RTP header */
-	st->mb_frag->pos = st->mb_frag->end = RTP_PRESZ;
-	err = h263_hdr_encode(&h263_hdr, st->mb_frag);
-	pos = st->mb_frag->pos;
-
-	/* Assemble frame into smaller packets */
-	while (!err) {
-		size_t sz, left = mbuf_get_left(mb);
-		bool last = (left < MAX_RTP_SIZE);
-		if (!left)
-			break;
-
-		sz = last ? left : MAX_RTP_SIZE;
-
-		st->mb_frag->pos = st->mb_frag->end = pos;
-		err = mbuf_write_mem(st->mb_frag, mbuf_buf(mb), sz);
-		if (err)
-			break;
-
-		st->mb_frag->pos = RTP_PRESZ;
-		err = st->sendh(last, st->mb_frag, st->arg);
-
-		mbuf_advance(mb, sz);
-	}
-
-	return err;
 }

@@ -15,94 +15,65 @@ struct aucodec_st {
 };
 
 
-static struct aucodec *l16v[NR_CODECS];
-
-
-static void destructor(void *arg)
+static int encode(struct auenc_state *st, uint8_t *buf, size_t *len,
+		  const int16_t *sampv, size_t sampc)
 {
-	struct aucodec_st *st = arg;
+	int16_t *p = (void *)buf;
 
-	mem_deref(st->ac);
-}
+	(void)st;
 
-
-static int alloc(struct aucodec_st **stp, struct aucodec *ac,
-		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const char *fmtp)
-{
-	struct aucodec_st *st;
-
-	(void)encp;
-	(void)decp;
-	(void)fmtp;
-
-	st = mem_zalloc(sizeof(*st), destructor);
-	if (!st)
+	if (sampc*2 > *len)
 		return ENOMEM;
 
-	st->ac = mem_ref(ac);
+	*len = sampc*2;
 
-	*stp = st;
+	while (sampc--)
+		*p++ = htons(*sampv++);
 
 	return 0;
 }
 
 
-static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode(struct audec_state *st, int16_t *sampv, size_t *sampc,
+		  const uint8_t *buf, size_t len)
 {
-	int err = 0;
+	int16_t *p = (void *)buf;
 
 	(void)st;
 
-	while (mbuf_get_left(src) >= 2)
-		err |= mbuf_write_u16(dst, htons(mbuf_read_u16(src)));
+	if (len/2 > *sampc)
+		return ENOMEM;
 
-	return err;
-}
+	*sampc = len/2;
 
+	while ((len -= 2))
+		*sampv++ = ntohs(*p++);
 
-static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
-{
-	int err = 0;
-
-	(void)st;
-
-	while (mbuf_get_left(src))
-		err |= mbuf_write_u16(dst, ntohs(mbuf_read_u16(src)));
-
-	return err;
+	return 0;
 }
 
 
 /* See RFC 3551 */
-static const struct {
-	const char *pt;
-	uint32_t srate;
-	uint8_t ch;
-} codecv[NR_CODECS] = {
-	{"10", 44100, 2},
-	{NULL, 32000, 2},
-	{NULL, 16000, 2},
-	{NULL,  8000, 2},
-	{"11", 44100, 1},
-	{NULL, 32000, 1},
-	{NULL, 16000, 1},
-	{NULL,  8000, 1}
+static struct aucodec l16v[NR_CODECS] = {
+	{LE_INIT, "10", "L16", 44100, 2, 0, 0, encode, 0, decode, 0, 0, 0},
+	{LE_INIT,    0, "L16", 32000, 2, 0, 0, encode, 0, decode, 0, 0, 0},
+	{LE_INIT,    0, "L16", 16000, 2, 0, 0, encode, 0, decode, 0, 0, 0},
+	{LE_INIT,    0, "L16",  8000, 2, 0, 0, encode, 0, decode, 0, 0, 0},
+	{LE_INIT, "11", "L16", 44100, 1, 0, 0, encode, 0, decode, 0, 0, 0},
+	{LE_INIT,    0, "L16", 32000, 1, 0, 0, encode, 0, decode, 0, 0, 0},
+	{LE_INIT,    0, "L16", 16000, 1, 0, 0, encode, 0, decode, 0, 0, 0},
+	{LE_INIT,    0, "L16",  8000, 1, 0, 0, encode, 0, decode, 0, 0, 0},
 };
 
 
 static int module_init(void)
 {
 	size_t i;
-	int err = 0;
 
-	for (i=0; i<NR_CODECS; i++) {
-		err |= aucodec_register(&l16v[i], codecv[i].pt, "L16",
-					codecv[i].srate, codecv[i].ch, NULL,
-					alloc, encode, decode, NULL);
-	}
+	for (i=0; i<NR_CODECS; i++)
+		aucodec_register(&l16v[i]);
 
-	return err;
+	return 0;
 }
 
 
@@ -110,9 +81,8 @@ static int module_close(void)
 {
 	size_t i;
 
-	for (i=0; i<NR_CODECS; i++) {
-		l16v[i] = mem_deref(l16v[i]);
-	}
+	for (i=0; i<NR_CODECS; i++)
+		aucodec_unregister(&l16v[i]);
 
 	return 0;
 }

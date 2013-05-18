@@ -19,6 +19,9 @@ struct selfview {
 };
 
 
+static struct vidsz selfview_size = {0, 0};
+
+
 static void destructor(void *arg)
 {
 	struct selfview *st = arg;
@@ -95,8 +98,14 @@ static int encode_pip(struct vidfilt_st *st, struct vidframe *frame)
 	if (!sv->frame) {
 		struct vidsz sz;
 
-		sz.w = frame->size.w / 5;
-		sz.h = frame->size.h / 5;
+		/* Use size if configured, or else 20% of main window */
+		if (selfview_size.w && selfview_size.h) {
+			sz = selfview_size;
+		}
+		else {
+			sz.w = frame->size.w / 5;
+			sz.h = frame->size.h / 5;
+		}
 
 		err = vidframe_alloc(&sv->frame, VID_FMT_YUV420P, &sz);
 	}
@@ -133,16 +142,10 @@ static int decode_pip(struct vidfilt_st *st, struct vidframe *frame)
 
 
 static struct vidfilt selfview_win = {
-	.name = "window",
-	.updh = update,
-	.ench = encode_win,
-	.dech = NULL,
+	LE_INIT, "window", update, encode_win, NULL
 };
 static struct vidfilt selfview_pip = {
-	.name = "pip",
-	.updh = update,
-	.ench = encode_pip,
-	.dech = decode_pip,
+	LE_INIT, "pip", update, encode_pip, decode_pip,
 };
 
 
@@ -157,6 +160,8 @@ static int module_init(void)
 		vidfilt_register(&selfview_win);
 	else if (0 == pl_strcasecmp(&pl, "pip"))
 		vidfilt_register(&selfview_pip);
+
+	(void)conf_get_vidsz(conf_cur(), "selfview_size", &selfview_size);
 
 	return 0;
 }

@@ -36,11 +36,15 @@ enum h263_fmt {
  * H.263 Header defined in RFC 2190
  */
 struct h263_hdr {
+
+	/* common */
 	unsigned f:1;      /**< 1 bit  - Flag; 0=mode A, 1=mode B/C         */
 	unsigned p:1;      /**< 1 bit  - PB-frames, 0=mode B, 1=mode C      */
 	unsigned sbit:3;   /**< 3 bits - Start Bit Position (SBIT)          */
 	unsigned ebit:3;   /**< 3 bits - End Bit Position (EBIT)            */
 	unsigned src:3;    /**< 3 bits - Source format                      */
+
+	/* mode A */
 	unsigned i:1;      /**< 1 bit  - 0=intra-coded, 1=inter-coded       */
 	unsigned u:1;      /**< 1 bit  - Unrestricted Motion Vector         */
 	unsigned s:1;      /**< 1 bit  - Syntax-based Arithmetic Coding     */
@@ -49,6 +53,17 @@ struct h263_hdr {
 	unsigned dbq:2;    /**< 2 bits - DBQUANT                            */
 	unsigned trb:3;    /**< 3 bits - Temporal Reference for B-frame     */
 	unsigned tr:8;     /**< 8 bits - Temporal Reference for P-frame     */
+
+	/* mode B */
+	unsigned quant:5; //=0 for GOB header
+	unsigned gobn:5;  // gob number
+	unsigned mba:9;   // address
+	unsigned hmv1:7;  // horizontal motion vector
+	unsigned vmv1:7;  // vertical motion vector
+	unsigned hmv2:7;
+	unsigned vmv2:7;
+
+
 };
 
 enum {I_FRAME=0, P_FRAME=1};
@@ -75,6 +90,7 @@ struct h263_strm {
 
 int h263_hdr_encode(const struct h263_hdr *hdr, struct mbuf *mb);
 int h263_hdr_decode(struct h263_hdr *hdr, struct mbuf *mb);
+enum h263_mode h263_hdr_mode(const struct h263_hdr *hdr);
 
 const uint8_t *h263_strm_find_psc(const uint8_t *p, uint32_t size);
 int  h263_strm_decode(struct h263_strm *s, struct mbuf *mb);

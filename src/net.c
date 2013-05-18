@@ -158,6 +158,8 @@ int net_init(void)
 
 	if (str_isset(config.net.ifname)) {
 
+		bool got_it = false;
+
 		(void)re_printf("Binding to interface '%s'\n",
 				config.net.ifname);
 
@@ -166,9 +168,11 @@ int net_init(void)
 		err = net_if_getaddr(config.net.ifname,
 				     AF_INET, &net.laddr);
 		if (err) {
-			DEBUG_WARNING("%s: could not get IPv4 address (%m)\n",
-				      config.net.ifname, err);
+			DEBUG_NOTICE("%s: could not get IPv4 address (%m)\n",
+				     config.net.ifname, err);
 		}
+		else
+			got_it = true;
 
 #ifdef HAVE_INET6
 		str_ncpy(net.ifname6, config.net.ifname,
@@ -177,10 +181,19 @@ int net_init(void)
 		err = net_if_getaddr(config.net.ifname,
 				     AF_INET6, &net.laddr6);
 		if (err) {
-			DEBUG_WARNING("%s: could not get IPv6 address (%m)\n",
-				      config.net.ifname, err);
+			DEBUG_NOTICE("%s: could not get IPv6 address (%m)\n",
+				     config.net.ifname, err);
 		}
+		else
+			got_it = true;
 #endif
+		if (got_it)
+			err = 0;
+		else {
+			DEBUG_WARNING("%s: could not get network address\n",
+				      config.net.ifname);
+			return EADDRNOTAVAIL;
+		}
 	}
 	else {
 		(void)net_default_source_addr_get(AF_INET, &net.laddr);

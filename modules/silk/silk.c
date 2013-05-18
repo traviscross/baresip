@@ -19,53 +19,57 @@ enum {
 };
 
 
-struct aucodec_st {
-	struct aucodec *ac;  /* inheritance */
+struct auenc_state {
 	void *enc;
 	SKP_SILK_SDK_EncControlStruct encControl;
+};
+
+struct audec_state {
 	void *dec;
 	SKP_SILK_SDK_DecControlStruct decControl;
 };
 
-static struct aucodec *silk[4];
 
-
-static void destructor(void *arg)
+static void encode_destructor(void *arg)
 {
-	struct aucodec_st *st = arg;
+	struct auenc_state *st = arg;
 
-	mem_deref(st->dec);
 	mem_deref(st->enc);
-
-	mem_deref(st->ac);
 }
 
 
-static int alloc(struct aucodec_st **stp, struct aucodec *ac,
-		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const char *fmtp)
+static void decode_destructor(void *arg)
 {
-	struct aucodec_st *st;
-	int ret, err = 0;
-	int32_t enc_size, dec_size;
+	struct audec_state *st = arg;
 
-	(void)decp;
+	mem_deref(st->dec);
+}
+
+
+static int encode_update(struct auenc_state **aesp,
+			 const struct aucodec *ac,
+			 struct auenc_param *prm, const char *fmtp)
+{
+	struct auenc_state *st;
+	int ret, err = 0;
+	int32_t enc_size;
 	(void)fmtp;
 
-	ret  = SKP_Silk_SDK_Get_Encoder_Size(&enc_size);
-	ret |= SKP_Silk_SDK_Get_Decoder_Size(&dec_size);
-	if (ret || enc_size <= 0 || dec_size <= 0)
+	if (!aesp || !ac || !prm)
+		return EINVAL;
+	if (*aesp)
+		return 0;
+
+	ret = SKP_Silk_SDK_Get_Encoder_Size(&enc_size);
+	if (ret || enc_size <= 0)
 		return EINVAL;
 
-	st = mem_alloc(sizeof(*st), destructor);
+	st = mem_alloc(sizeof(*st), encode_destructor);
 	if (!st)
 		return ENOMEM;
 
-	st->ac = mem_ref(ac);
-
 	st->enc = mem_alloc(enc_size, NULL);
-	st->dec = mem_alloc(dec_size, NULL);
-	if (!st->enc || !st->dec) {
+	if (!st->enc) {
 		err = ENOMEM;
 		goto out;
 	}
@@ -76,23 +80,15 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		goto out;
 	}
 
-	ret = SKP_Silk_SDK_InitDecoder(st->dec);
-	if (ret) {
-		err = EPROTO;
-		goto out;
-	}
-
-	st->encControl.API_sampleRate = aucodec_srate(ac);
-	st->encControl.maxInternalSampleRate = aucodec_srate(ac);
-	st->encControl.packetSize = encp->ptime * aucodec_srate(ac) / 1000;
+	st->encControl.API_sampleRate = ac->srate;
+	st->encControl.maxInternalSampleRate = ac->srate;
+	st->encControl.packetSize = prm->ptime * ac->srate / 1000;
 	st->encControl.bitRate = 64000;
 	st->encControl.complexity = 2;
 	st->encControl.useInBandFEC = 0;
 	st->encControl.useDTX = 0;
 
-	st->decControl.API_sampleRate = aucodec_srate(ac);
-
-	re_printf("SILK: %dHz, psize=%d, bitrate=%d, complex=%d,"
+	re_printf("SILK encoder: %dHz, psize=%d, bitrate=%d, complex=%d,"
 		  " fec=%d, dtx=%d\n",
 		  st->encControl.API_sampleRate,
 		  st->encControl.packetSize,
@@ -101,98 +97,145 @@ static int alloc(struct aucodec_st **stp, struct aucodec *ac,
 		  st->encControl.useInBandFEC,
 		  st->encControl.useDTX);
 
+ out:
+	if (err)
+		mem_deref(st);
+	else
+		*aesp = st;
+
+	return err;
+}
+
+
+static int decode_update(struct audec_state **adsp,
+			 const struct aucodec *ac, const char *fmtp)
+{
+	struct audec_state *st;
+	int ret, err = 0;
+	int32_t dec_size;
+	(void)fmtp;
+
+	if (*adsp)
+		return 0;
+
+	ret = SKP_Silk_SDK_Get_Decoder_Size(&dec_size);
+	if (ret || dec_size <= 0)
+		return EINVAL;
+
+	st = mem_alloc(sizeof(*st), decode_destructor);
+	if (!st)
+		return ENOMEM;
+
+	st->dec = mem_alloc(dec_size, NULL);
+	if (!st->dec) {
+		err = ENOMEM;
+		goto out;
+	}
+
+	ret = SKP_Silk_SDK_InitDecoder(st->dec);
+	if (ret) {
+		err = EPROTO;
+		goto out;
+	}
+
+	st->decControl.API_sampleRate = ac->srate;
 
  out:
 	if (err)
 		mem_deref(st);
 	else
-		*stp = st;
+		*adsp = st;
 
 	return err;
 }
 
 
-static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int encode(struct auenc_state *st, uint8_t *buf, size_t *len,
+		  const int16_t *sampv, size_t sampc)
 {
 	int ret;
 	int16_t nBytesOut;
 
-	/* Make sure there is enough space */
-	if (mbuf_get_space(dst) < MAX_BYTES_PER_FRAME) {
-		int err = mbuf_resize(dst, dst->pos + MAX_BYTES_PER_FRAME);
-		if (err)
-			return err;
-	}
+	if (*len < MAX_BYTES_PER_FRAME)
+		return ENOMEM;
 
-	nBytesOut = mbuf_get_space(dst);
+	nBytesOut = *len;
 	ret = SKP_Silk_SDK_Encode(st->enc,
 				  &st->encControl,
-				  (int16_t *)mbuf_buf(src),
-				  (int)mbuf_get_left(src)/2,
-				  mbuf_buf(dst),
+				  sampv,
+				  (int)sampc,
+				  buf,
 				  &nBytesOut);
 	if (ret) {
 		re_printf("SKP_Silk_SDK_Encode: ret=%d\n", ret);
 	}
 
-	src->pos = src->end;
-	mbuf_set_end(dst, dst->end + nBytesOut);
+	*len = nBytesOut;
 
 	return 0;
 }
 
 
-/* src=NULL means lost packet */
-static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode(struct audec_state *st, int16_t *sampv,
+		  size_t *sampc, const uint8_t *buf, size_t len)
 {
-	int16_t nsamp;
+	int16_t nsamp = *sampc;
 	int ret;
-
-	/* Make sure there is enough space in the buffer */
-	if (mbuf_get_space(dst) < MAX_FRAME_SIZE) {
-		int err = mbuf_resize(dst, MAX_FRAME_SIZE);
-		if (err)
-			return err;
-	}
-
-	nsamp = mbuf_get_space(dst) / 2;
 
 	ret = SKP_Silk_SDK_Decode(st->dec,
 				  &st->decControl,
-				  mbuf_get_left(src) == 0,
-				  mbuf_buf(src),
-				  (int)mbuf_get_left(src),
-				  (int16_t *)mbuf_buf(dst),
+				  0,
+				  buf,
+				  (int)len,
+				  sampv,
 				  &nsamp);
 	if (ret) {
 		re_printf("SKP_Silk_SDK_Decode: ret=%d\n", ret);
 	}
 
-	if (src)
-		mbuf_skip_to_end(src);
-	if (nsamp > 0)
-		mbuf_set_end(dst, dst->end + nsamp*2);
+	*sampc = nsamp;
 
 	return 0;
 }
 
 
+static int plc(struct audec_state *st, int16_t *sampv, size_t *sampc)
+{
+	int16_t nsamp = *sampc;
+	int ret;
+
+	ret = SKP_Silk_SDK_Decode(st->dec,
+				  &st->decControl,
+				  1,
+				  NULL,
+				  0,
+				  sampv,
+				  &nsamp);
+	if (ret)
+		return EPROTO;
+
+	*sampc = nsamp;
+
+	return 0;
+}
+
+
+static struct aucodec silk[] = {
+	{
+		LE_INIT, 0, "SILK", 24000, 1, NULL,
+		encode_update, encode, decode_update, decode, plc, 0, 0
+	},
+
+};
+
+
 static int module_init(void)
 {
-	int err = 0;
-
 	re_printf("SILK %s\n", SKP_Silk_SDK_get_version());
 
-	err |= aucodec_register(&silk[0], NULL, "SILK", 24000, 1,
-				NULL, alloc, encode, decode, NULL);
-	err |= aucodec_register(&silk[1], NULL, "SILK", 16000, 1,
-				NULL, alloc, encode, decode, NULL);
-	err |= aucodec_register(&silk[2], NULL, "SILK", 12000, 1,
-				NULL, alloc, encode, decode, NULL);
-	err |= aucodec_register(&silk[3], NULL, "SILK", 8000, 1,
-				NULL, alloc, encode, decode, NULL);
+	aucodec_register(&silk[0]);
 
-	return err;
+	return 0;
 }
 
 
@@ -201,7 +244,7 @@ static int module_close(void)
 	int i = ARRAY_SIZE(silk);
 
 	while (i--)
-		silk[i] = mem_deref(silk[i]);
+		aucodec_unregister(&silk[i]);
 
 	return 0;
 }

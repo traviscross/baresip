@@ -137,6 +137,9 @@
 				RelativePath="..\..\src\ausrc.c">
 			</File>
 			<File
+				RelativePath="..\..\src\bfcp.c">
+			</File>
+			<File
 				RelativePath="..\..\src\call.c">
 			</File>
 			<File
@@ -170,10 +173,16 @@
 				RelativePath="..\..\src\play.c">
 			</File>
 			<File
+				RelativePath="..\..\src\reg.c">
+			</File>
+			<File
 				RelativePath="..\..\src\rtpkeep.c">
 			</File>
 			<File
 				RelativePath=".\static.c">
+			</File>
+			<File
+				RelativePath="..\..\src\sdp.c">
 			</File>
 			<File
 				RelativePath="..\..\src\stream.c">

@@ -102,7 +102,7 @@ int main(int argc, char *argv[])
 	if (err)
 		goto out;
 
-	err = configure();
+	err = conf_configure();
 	if (err) {
 		DEBUG_WARNING("configure: %m\n", err);
 		goto out;

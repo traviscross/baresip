@@ -18,8 +18,6 @@
 
 
 struct menc_st {
-	struct menc *me;  /* base class */
-
 	/* one SRTP session per media line */
 	uint8_t key_tx[32];  /* 32 for alignment, only 30 used */
 	uint8_t key_rx[32];
@@ -39,9 +37,6 @@ static const char aes_cm_128_hmac_sha1_32[] = "AES_CM_128_HMAC_SHA1_32";
 static const char aes_cm_128_hmac_sha1_80[] = "AES_CM_128_HMAC_SHA1_80";
 
 
-static struct menc *menc_srtp_opt, *menc_srtp_mand;
-
-
 static void destructor(void *arg)
 {
 	struct menc_st *st = arg;
@@ -58,8 +53,6 @@ static void destructor(void *arg)
 		srtp_dealloc(st->srtp_tx);
 	if (st->srtp_rx)
 		srtp_dealloc(st->srtp_rx);
-
-	mem_deref(st->me);
 }
 
 
@@ -285,54 +278,6 @@ static int sdp_enc(struct menc_st *st, struct sdp_media *m)
 }
 
 
-static int alloc(struct menc_st **stp, struct menc *me, int proto,
-		 void *rtpsock, void *rtcpsock, struct sdp_media *sdpm)
-{
-	struct menc_st *st;
-	int layer = 10; /* above zero */
-	int err = 0;
-
-	if (proto != IPPROTO_UDP)
-		return EPROTONOSUPPORT;
-
-	st = mem_zalloc(sizeof(*st), destructor);
-	if (!st)
-		return ENOMEM;
-
-	st->me = mem_ref(me);
-	st->sdpm = mem_ref(sdpm);
-
-	if (rtpsock) {
-		st->rtpsock = mem_ref(rtpsock);
-		err |= udp_register_helper(&st->uh_rtp, rtpsock, layer,
-					   menc_send_handler,
-					   menc_recv_handler, st);
-	}
-	if (rtcpsock) {
-		st->rtcpsock = mem_ref(rtcpsock);
-		err |= udp_register_helper(&st->uh_rtcp, rtcpsock, layer,
-					   menc_send_rtcp,
-					   menc_recv_rtcp, st);
-	}
-	if (err)
-		goto out;
-
-	err = setup_srtp(st);
-	if (err)
-		goto out;
-
-	err = sdp_enc(st, sdpm);
-
- out:
-	if (err)
-		mem_deref(st);
-	else
-		*stp = st;
-
-	return err;
-}
-
-
 static int decode_crypto(struct menc_st *st, const char *value)
 {
 	struct crypto c;
@@ -398,26 +343,94 @@ static int update(struct menc_st *st)
 }
 
 
-static int mod_srtp_init(void)
+static int alloc(struct menc_media **stp, struct menc_sess *sess,
+		 int proto, void *rtpsock, void *rtcpsock,
+		 struct sdp_media *sdpm)
 {
-	int err;
+	struct menc_st *st;
+	int layer = 10; /* above zero */
+	int err = 0;
+	(void)sess;
 
-	if (err_status_ok != srtp_init()) {
-		DEBUG_WARNING("srtp_init() failed\n");
-		return ENOSYS;
+	if (!stp || !sdpm)
+		return EINVAL;
+	if (proto != IPPROTO_UDP)
+		return EPROTONOSUPPORT;
+
+	if (*stp) {
+		return update((struct menc_st *)*stp);
 	}
 
-	err  = menc_register(&menc_srtp_opt, "srtp", alloc, update);
-	err |= menc_register(&menc_srtp_mand, "srtp-mand", alloc, update);
+	st = mem_zalloc(sizeof(*st), destructor);
+	if (!st)
+		return ENOMEM;
+
+	st->sdpm = mem_ref(sdpm);
+
+	if (rtpsock) {
+		st->rtpsock = mem_ref(rtpsock);
+		err |= udp_register_helper(&st->uh_rtp, rtpsock, layer,
+					   menc_send_handler,
+					   menc_recv_handler, st);
+	}
+	if (rtcpsock) {
+		st->rtcpsock = mem_ref(rtcpsock);
+		err |= udp_register_helper(&st->uh_rtcp, rtcpsock, layer,
+					   menc_send_rtcp,
+					   menc_recv_rtcp, st);
+	}
+	if (err)
+		goto out;
+
+	err = setup_srtp(st);
+	if (err)
+		goto out;
+
+	err = sdp_enc(st, sdpm);
+
+ out:
+	if (err)
+		mem_deref(st);
+	else
+		*stp = (struct menc_media *)st;
 
 	return err;
 }
 
 
+static struct menc menc_srtp_opt = {
+	LE_INIT, "srtp", "RTP/AVP", NULL, alloc
+};
+
+static struct menc menc_srtp_mand = {
+	LE_INIT, "srtp-mand", "RTP/SAVP", NULL, alloc
+};
+
+static struct menc menc_srtp_mandf = {
+	LE_INIT, "srtp-mandf", "RTP/SAVPF", NULL, alloc
+};
+
+
+static int mod_srtp_init(void)
+{
+	if (err_status_ok != srtp_init()) {
+		DEBUG_WARNING("srtp_init() failed\n");
+		return ENOSYS;
+	}
+
+	menc_register(&menc_srtp_opt);
+	menc_register(&menc_srtp_mand);
+	menc_register(&menc_srtp_mandf);
+
+	return 0;
+}
+
+
 static int mod_srtp_close(void)
 {
-	menc_srtp_opt = mem_deref(menc_srtp_opt);
-	menc_srtp_mand = mem_deref(menc_srtp_mand);
+	menc_unregister(&menc_srtp_mandf);
+	menc_unregister(&menc_srtp_mand);
+	menc_unregister(&menc_srtp_opt);
 
 	crypto_kernel_shutdown();
 

@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
+#include <string.h>
 #include <stdlib.h>
 #include <speex/speex.h>
 #include <speex/speex_preprocess.h>
@@ -15,8 +16,8 @@
 #include <re_dbg.h>
 
 
-struct aufilt_st {
-	struct aufilt *af;    /* base class */
+struct preproc {
+	struct aufilt_st af;    /* base class */
 	uint32_t psize;
 	SpeexPreprocessState *state;
 };
@@ -37,27 +38,29 @@ static struct {
 	8000
 };
 
-static struct aufilt *filt;
-
 
 static void speexpp_destructor(void *arg)
 {
-	struct aufilt_st *st = arg;
+	struct preproc *st = arg;
 
 	if (st->state)
 		speex_preprocess_state_destroy(st->state);
 
-	mem_deref(st->af);
+	list_unlink(&st->af.le);
 }
 
 
-static int alloc(struct aufilt_st **stp, struct aufilt *af,
-		 const struct aufilt_prm *encprm,
-		 const struct aufilt_prm *decprm)
+static int update(struct aufilt_st **stp, struct aufilt *af,
+		  const struct aufilt_prm *encprm,
+		  const struct aufilt_prm *decprm)
 {
-	struct aufilt_st *st;
+	struct preproc *st;
 
+	(void)af;
 	(void)decprm;
+
+	if (!stp)
+		return EINVAL;
 
 	if (!encprm || encprm->ch != 1)
 		return EINVAL;
@@ -65,8 +68,6 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 	st = mem_zalloc(sizeof(*st), speexpp_destructor);
 	if (!st)
 		return ENOMEM;
-
-	st->af = mem_ref(af);
 
 	st->psize = 2 * encprm->frame_size;
 
@@ -95,7 +96,7 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 
 	DEBUG_NOTICE("Speex preprocessor loaded: enc=%uHz\n", encprm->srate);
 
-	*stp = st;
+	*stp = (struct aufilt_st *)st;
 	return 0;
 
  error:
@@ -104,24 +105,21 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 }
 
 
-static int enc(struct aufilt_st *st, struct mbuf *mb)
+static int encode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 {
+	struct preproc *pp = (struct preproc *)st;
 	int is_speech = 1;
 
-	if (mbuf_get_left(mb) != st->psize) {
-		DEBUG_WARNING("enc: expect %u bytes, got %u\n",
-			      st->psize, mbuf_get_left(mb));
-		return EINVAL;
-	}
+	if (!*sampc)
+		return 0;
 
 	/* NOTE: Using this macro to check libspeex version */
 #ifdef SPEEX_PREPROCESS_SET_NOISE_SUPPRESS
 	/* New API */
-	is_speech = speex_preprocess_run(st->state, (int16_t *)mbuf_buf(mb));
+	is_speech = speex_preprocess_run(pp->state, sampv);
 #else
 	/* Old API - not tested! */
-	is_speech = speex_preprocess(st->state,
-				     (int16_t *)mbuf_buf(mb), NULL);
+	is_speech = speex_preprocess(st->state, sampv, NULL);
 #endif
 
 	/* XXX: Handle is_speech and VAD */
@@ -140,16 +138,21 @@ static void config_parse(struct conf *conf)
 }
 
 
+static struct aufilt preproc = {
+	LE_INIT, "speex_pp", update, encode, NULL
+};
+
 static int module_init(void)
 {
 	config_parse(conf_cur());
-	return aufilt_register(&filt, "speex_pp", alloc, enc, NULL, NULL);
+	aufilt_register(&preproc);
+	return 0;
 }
 
 
 static int module_close(void)
 {
-	filt = mem_deref(filt);
+	aufilt_unregister(&preproc);
 	return 0;
 }
 

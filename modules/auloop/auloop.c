@@ -17,8 +17,6 @@
 /* Configurable items */
 #define PTIME 20
 
-static const char *codec = NULL; /*"pcmu";*/
-
 
 /** Audio Loop */
 struct audio_loop {
@@ -26,7 +24,9 @@ struct audio_loop {
 	struct aubuf *ab;
 	struct ausrc_st *ausrc;
 	struct auplay_st *auplay;
-	struct aucodec_st *codec;
+	const struct aucodec *ac;
+	struct auenc_state *enc;
+	struct audec_state *dec;
 	uint32_t srate;
 	uint32_t ch;
 	uint32_t fs;
@@ -49,6 +49,7 @@ static const struct {
 };
 
 static struct audio_loop *gal = NULL;
+static char aucodec[64];
 
 
 static void auloop_destructor(void *arg)
@@ -58,7 +59,8 @@ static void auloop_destructor(void *arg)
 	mem_deref(al->ausrc);
 	mem_deref(al->auplay);
 	mem_deref(al->ab);
-	mem_deref(al->codec);
+	mem_deref(al->enc);
+	mem_deref(al->dec);
 }
 
 
@@ -66,47 +68,38 @@ static void print_stats(struct audio_loop *al)
 {
 	(void)re_fprintf(stderr, "\r%uHz %dch frame_size=%u"
 			 " n_read=%u n_write=%u"
-			 " aubuf=%u codec=%s",
+			 " aubuf=%5u codec=%s",
 			 al->srate, al->ch, al->fs,
 			 al->n_read, al->n_write,
-			 aubuf_cur_size(al->ab), codec);
+			 aubuf_cur_size(al->ab), aucodec);
 }
 
 
 static int codec_read(struct audio_loop *al, uint8_t *buf, size_t sz)
 {
-	struct mbuf *mbr = NULL, *mbc = NULL, *mbw = NULL;
+	int16_t *sampv;
+	uint8_t x[1024];
+	size_t xlen = sizeof(x), sampc = sz/2;
 	int err;
 
-	mbr = mbuf_alloc(sz);
-	mbc = mbuf_alloc(sz);
-	mbw = mbuf_alloc(sz);
-	if (!mbr || !mbc || !mbw) {
+	sampv = mem_alloc(sz, NULL);
+	if (!sampv) {
 		err = ENOMEM;
 		goto out;
 	}
 
-	aubuf_read(al->ab, mbr->buf, sz);
+	aubuf_read_samp(al->ab, sampv, sampc);
 
-	mbr->pos = 0;
-	mbr->end = sz;
-
-	err = aucodec_encode(al->codec, mbc, mbr);
+	err = al->ac->ench(al->enc, x, &xlen, sampv, sampc);
 	if (err)
 		goto out;
 
-	mbc->pos = 0;
-
-	err = aucodec_decode(al->codec, mbw, mbc);
+	err = al->ac->dech(al->dec, (void *)buf, &sampc, x, xlen);
 	if (err)
 		goto out;
-
-	memcpy(buf, mbw->buf, sz);
 
  out:
-	mem_deref(mbr);
-	mem_deref(mbc);
-	mem_deref(mbw);
+	mem_deref(sampv);
 
 	return err;
 }
@@ -135,7 +128,7 @@ static bool write_handler(uint8_t *buf, size_t sz, void *arg)
 	++al->n_write;
 
 	/* read from beginning */
-	if (al->codec) {
+	if (al->ac) {
 		(void)codec_read(al, buf, sz);
 	}
 	else {
@@ -154,21 +147,31 @@ static void error_handler(int err, const char *str, void *arg)
 }
 
 
-static void start_codec(struct audio_loop *al)
+static void start_codec(struct audio_loop *al, const char *name)
 {
-	struct aucodec_prm prm;
+	struct auenc_param prm = {PTIME};
 	int err;
 
-	prm.srate = configv[al->index].srate;
-	prm.ptime = PTIME;
+	al->ac = aucodec_find(name,
+			      configv[al->index].srate,
+			      configv[al->index].ch);
+	if (!al->ac) {
+		DEBUG_WARNING("could not find codec: %s\n", name);
+		return;
+	}
 
-	al->codec = mem_deref(al->codec);
-	err = aucodec_alloc(&al->codec, codec,
-			    configv[al->index].srate,
-			    configv[al->index].ch,
-			    &prm, &prm, NULL);
-	if (err) {
-		DEBUG_WARNING("codec_alloc: %m\n", err);
+	if (al->ac->encupdh) {
+		err = al->ac->encupdh(&al->enc, al->ac, &prm, NULL);
+		if (err) {
+			DEBUG_WARNING("encoder update failed: %m\n", err);
+		}
+	}
+
+	if (al->ac->decupdh) {
+		err = al->ac->decupdh(&al->dec, al->ac, NULL);
+		if (err) {
+			DEBUG_WARNING("decoder update failed: %m\n", err);
+		}
 	}
 }
 
@@ -178,6 +181,10 @@ static int auloop_reset(struct audio_loop *al)
 	struct auplay_prm auplay_prm;
 	struct ausrc_prm ausrc_prm;
 	int err;
+
+	/* Optional audio codec */
+	if (str_isset(aucodec))
+		start_codec(al, aucodec);
 
 	al->auplay = mem_deref(al->auplay);
 	al->ausrc = mem_deref(al->ausrc);
@@ -232,11 +239,6 @@ static int audio_loop_alloc(struct audio_loop **alp)
 	if (!al)
 		return ENOMEM;
 
-	/* Optional audio codec */
-	if (codec) {
-		start_codec(al);
-	}
-
 	err = auloop_reset(al);
 	if (err)
 		goto out;
@@ -262,9 +264,6 @@ static int audio_loop_cycle(struct audio_loop *al)
 		(void)re_printf("\nAudio-loop stopped\n");
 		return 0;
 	}
-
-	if (codec)
-		start_codec(al);
 
 	err = auloop_reset(al);
 	if (err)
@@ -325,6 +324,8 @@ static const struct cmd cmdv[] = {
 
 static int module_init(void)
 {
+	conf_get_str(conf_cur(), "auloop_codec", aucodec, sizeof(aucodec));
+
 	return cmd_register(cmdv, ARRAY_SIZE(cmdv));
 }
 

@@ -5,72 +5,58 @@
  */
 
 
-enum {
-	MAX_RTP_SIZE     = 1024,
-	RTP_PRESZ        = 4 + RTP_HEADER_SIZE
-};
-
-struct picsz {
-	enum h263_fmt fmt;  /**< Picture size */
-	uint8_t mpi;        /**< Minimum Picture Interval (1-32) */
-};
-
-struct vidcodec_st {
-	struct vidcodec *vc;  /* must be first member */
-
-	struct {
-		AVCodec *codec;
-		AVCodecContext *ctx;
-		AVFrame *pict;
-		struct mbuf *mb;
-		size_t sz_max; /* todo: figure out proper buffer size */
-	} enc, dec;
-#ifdef USE_X264
-	x264_t *x264;
+#if LIBAVCODEC_VERSION_INT >= ((54<<16)+(25<<8)+0)
+#define CodecID AVCodecID
 #endif
-	int64_t pts;
-	struct mbuf *mb_frag;
-	bool got_keyframe;
-
-	enum CodecID codec_id;
-	union {
-		struct {
-			struct picsz picszv[8];
-			uint32_t picszn;
-		} h263;
-
-		struct {
-			uint32_t packetization_mode;
-			uint32_t profile_idc;
-			uint32_t profile_iop;
-			uint32_t level_idc;
-			uint32_t max_fs;
-			uint32_t max_smbps;
-		} h264;
-	} u;
-
-	struct vidcodec_prm encprm;
-	struct vidsz encsize;
-	vidcodec_enq_h *enqh;
-	vidcodec_send_h *sendh;
-	void *arg;
-};
 
 
 extern const uint8_t h264_level_idc;
 
 
-int decode_sdpparam_h263(struct vidcodec_st *st, const struct pl *name,
-			 const struct pl *val);
-int decode_sdpparam_h264(struct vidcodec_st *st, const struct pl *name,
-			 const struct pl *val);
-int h263_packetize(struct vidcodec_st *st, struct mbuf *mb);
-int h264_packetize(struct vidcodec_st *st, struct mbuf *mb);
-int h264_decode(struct vidcodec_st *st, struct mbuf *src);
-int h264_nal_send(struct vidcodec_st *st, bool first, bool last,
-		  bool marker, uint32_t hdr, const uint8_t *buf,
-		  size_t len, size_t maxlen);
+/*
+ * Encode
+ */
+
+struct videnc_state;
+
+int encode_update(struct videnc_state **vesp, const struct vidcodec *vc,
+		  struct videnc_param *prm, const char *fmtp);
+int encode(struct videnc_state *st, bool update, const struct vidframe *frame,
+	   videnc_packet_h *pkth, void *arg);
 #ifdef USE_X264
-int enc_x264(struct vidcodec_st *st, bool update,
-	     const struct vidframe *frame);
+int encode_x264(struct videnc_state *st, bool update,
+		const struct vidframe *frame,
+		videnc_packet_h *pkth, void *arg);
 #endif
+
+
+/*
+ * Decode
+ */
+
+struct viddec_state;
+
+int decode_update(struct viddec_state **vdsp, const struct vidcodec *vc,
+		  const char *fmtp);
+int decode_h263(struct viddec_state *st, struct vidframe *frame,
+		bool eof, uint16_t seq, struct mbuf *src);
+int decode_h264(struct viddec_state *st, struct vidframe *frame,
+		bool eof, uint16_t seq, struct mbuf *src);
+int decode_mpeg4(struct viddec_state *st, struct vidframe *frame,
+		 bool eof, uint16_t seq, struct mbuf *src);
+int decode_h263_test(struct viddec_state *st, struct vidframe *frame,
+		     bool marker, uint16_t seq, struct mbuf *src);
+
+
+int decode_sdpparam_h264(struct videnc_state *st, const struct pl *name,
+			 const struct pl *val);
+int h264_packetize(struct mbuf *mb, size_t pktsize,
+		   videnc_packet_h *pkth, void *arg);
+int h264_decode(struct viddec_state *st, struct mbuf *src);
+int h264_nal_send(bool first, bool last,
+		  bool marker, uint32_t ihdr, const uint8_t *buf,
+		  size_t size, size_t maxsz,
+		  videnc_packet_h *pkth, void *arg);
+
+
+int avcodec_resolve_codecid(const char *s);

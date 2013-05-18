@@ -36,6 +36,7 @@ evdev         Linux input driver
 g711          G.711 audio codec
 g722          G.722 audio codec
 g7221         G.722.1 audio codec
+g726          G.726 audio codec
 gsm           GSM audio codec
 gst           Gstreamer audio source
 ice           ICE protocol for NAT Traversal
@@ -44,6 +45,7 @@ isac          iSAC audio codec
 l16           L16 audio codec
 mda           Symbian Mediaserver audio driver
 menu          Interactive menu
+mwi           Message Waiting Indication
 natbd         NAT Behavior Discovery Module
 opengl        OpenGL video output
 opengles      OpenGLES video output
@@ -59,11 +61,12 @@ rst           Radio streamer using mpg123
 sdl           Simple DirectMedia Layer (SDL) video output driver
 selfview      Video selfview module
 silk          SILK audio codec
+snapshot      Save video-stream as PNG images
 sndfile       Audio dumper using libsndfile
 speex         Speex audio codec
 speex_aec     Acoustic Echo Cancellation (AEC) using libspeexdsp
 speex_pp      Audio pre-processor using libspeexdsp
-speex_resamp  Audio resampler using libspeexdsp
+speex_resamp  Speex resampler (deprecated)
 srtp          Secure RTP encryption
 stdio         Standard input/output UI driver
 stun          Session Traversal Utilities for NAT (STUN) module
@@ -110,7 +113,7 @@ IETF RFC/I-Ds:
 * RFC 6716  Definition of the Opus Audio Codec
 
 * draft-valin-celt-rtp-profile-02
-* draft-westin-payload-vp8-02
+* draft-ietf-payload-vp8-08
 * draft-spittka-payload-rtp-opus-00
 
 

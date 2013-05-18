@@ -5,7 +5,7 @@
 #
 
 MOD		:= vpx
-$(MOD)_SRCS	+= vpx.c
+$(MOD)_SRCS	+= vpx.c sdp.c decode.c encode.c
 $(MOD)_LFLAGS	+= -lvpx
 
 include mk/mod.mk

@@ -9,23 +9,20 @@
 #include <baresip.h>
 
 
-struct aufilt_st {
-	struct aufilt *af; /* inheritance */
+struct vumeter {
+	struct aufilt_st af;  /* inheritance */
 	struct tmr tmr;
 	int16_t avg_rec;
 	int16_t avg_play;
 };
 
 
-static struct aufilt *filt;
-
-
 static void destructor(void *arg)
 {
-	struct aufilt_st *st = arg;
+	struct vumeter *st = arg;
 
+	list_unlink(&st->af.le);
 	tmr_cancel(&st->tmr);
-	mem_deref(st->af);
 }
 
 
@@ -62,7 +59,7 @@ static int audio_print_vu(struct re_printf *pf, int16_t *avg)
 
 static void tmr_handler(void *arg)
 {
-	struct aufilt_st *st = arg;
+	struct vumeter *st = arg;
 
 	tmr_start(&st->tmr, 100, tmr_handler, st);
 
@@ -76,11 +73,17 @@ static void tmr_handler(void *arg)
 }
 
 
-static int alloc(struct aufilt_st **stp, struct aufilt *af,
-		 const struct aufilt_prm *encprm,
-		 const struct aufilt_prm *decprm)
+static int update(struct aufilt_st **stp, struct aufilt *af,
+		  const struct aufilt_prm *encprm,
+		  const struct aufilt_prm *decprm)
 {
-	struct aufilt_st *st;
+	struct vumeter *st;
+
+	if (!stp || !af)
+		return EINVAL;
+
+	if (*stp)
+		return 0;
 
 	(void)encprm;
 	(void)decprm;
@@ -89,41 +92,45 @@ static int alloc(struct aufilt_st **stp, struct aufilt *af,
 	if (!st)
 		return ENOMEM;
 
-	st->af = mem_ref(af);
-
 	tmr_start(&st->tmr, 10, tmr_handler, st);
 
-	*stp = st;
+	*stp = (struct aufilt_st *)st;
 
 	return 0;
 }
 
 
-static int enc(struct aufilt_st *st, struct mbuf *mb)
+static int encode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 {
-	st->avg_rec = calc_avg_s16((int16_t *)mbuf_buf(mb),
-				   mbuf_get_left(mb)/2);
+	struct vumeter *vu = (struct vumeter *)st;
+	vu->avg_rec = calc_avg_s16(sampv, *sampc);
 	return 0;
 }
 
 
-static int dec(struct aufilt_st *st, struct mbuf *mb)
+static int decode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 {
-	st->avg_play = calc_avg_s16((int16_t *)mbuf_buf(mb),
-				    mbuf_get_left(mb)/2);
+	struct vumeter *vu = (struct vumeter *)st;
+	vu->avg_play = calc_avg_s16(sampv, *sampc);
 	return 0;
 }
+
+
+static struct aufilt vumeter = {
+	LE_INIT, "vumeter", update, encode, decode
+};
 
 
 static int module_init(void)
 {
-	return aufilt_register(&filt, "vumeter", alloc, enc, dec, NULL);
+	aufilt_register(&vumeter);
+	return 0;
 }
 
 
 static int module_close(void)
 {
-	filt = mem_deref(filt);
+	aufilt_unregister(&vumeter);
 	return 0;
 }
 

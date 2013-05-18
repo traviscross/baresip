@@ -52,6 +52,7 @@ struct config config = {
 	/** SIP User-Agent */
 	{
 		16,
+		"",
 		""
 	},
 
@@ -62,8 +63,8 @@ struct config config = {
 		"","",
 		{8000, 48000},
 		{1, 2},
-		{0, 0},
-		{0, 0},
+		0,
+		0,
 		false,
 	},
 
@@ -83,6 +84,10 @@ struct config config = {
 		true,
 		false,
 		{5, 10}
+	},
+
+	{
+		""
 	},
 
 	{
@@ -277,6 +282,7 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "\n# SIP\n");
 	(void)re_fprintf(f, "sip_trans_bsize\t\t128\n");
 	(void)re_fprintf(f, "#sip_listen\t\t127.0.0.1:5050\n");
+	(void)re_fprintf(f, "#sip_certificate\t\tcert.pem\n");
 
 	(void)re_fprintf(f, "\n# Audio\n");
 	(void)re_fprintf(f, "#audio_player\t\talsa,default\n");
@@ -286,6 +292,10 @@ static int conf_write_config_template(const char *file)
 			 config.audio.srate.max);
 	(void)re_fprintf(f, "audio_channels\t\t%u-%u\n",
 			 config.audio.channels.min, config.audio.channels.max);
+	(void)re_fprintf(f, "#ausrc_srate\t\t%u\n",
+			 config.audio.srate_src);
+	(void)re_fprintf(f, "#auplay_srate\t\t%u\n",
+			 config.audio.srate_play);
 
 #ifdef USE_VIDEO
 	(void)re_fprintf(f, "\n# Video\n");
@@ -338,18 +348,15 @@ static int conf_write_config_template(const char *file)
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "gsm" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "l16" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "speex" MOD_EXT "\n");
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "celt" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "bv32" MOD_EXT "\n");
 
-	(void)re_fprintf(f, "\n# Audio filter Modules (in order)\n");
+	(void)re_fprintf(f, "\n# Audio filter Modules (in encoding order)\n");
 	(void)re_fprintf(f, "# NOTE: AEC should be before Preproc\n");
+	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "vumeter" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "sndfile" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "speex_aec" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "speex_pp" MOD_EXT "\n");
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "speex_resamp"
-			 MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "plc" MOD_EXT "\n");
-	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "vumeter" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Audio driver Modules\n");
 #if defined (WIN32)
@@ -602,8 +609,7 @@ static int conf_get_csv(struct conf *conf, const char *name,
 }
 
 
-static int get_video_size(struct conf *conf, const char *name,
-			  struct vidsz *sz)
+int conf_get_vidsz(struct conf *conf, const char *name, struct vidsz *sz)
 {
 	struct pl r, w, h;
 	int err;
@@ -624,8 +630,8 @@ static int get_video_size(struct conf *conf, const char *name,
 
 	/* check resolution */
 	if (sz->w & 0x1 || sz->h & 0x1) {
-		DEBUG_WARNING("video_size should be multiple of 2 (%ux%u)\n",
-			      sz->w, sz->h);
+		DEBUG_WARNING("%s: should be multiple of 2 (%u x %u)\n",
+			      name, sz->w, sz->h);
 		return EINVAL;
 	}
 
@@ -686,6 +692,8 @@ static int config_parse(struct conf *conf)
 	(void)conf_get_u32(conf, "sip_trans_bsize", &config.sip.trans_bsize);
 	(void)conf_get_str(conf, "sip_listen", config.sip.local,
 			   sizeof(config.sip.local));
+	(void)conf_get_str(conf, "sip_certificate", config.sip.cert,
+			   sizeof(config.sip.cert));
 
 	/* Audio */
 	(void)conf_get_csv(conf, "audio_player",
@@ -706,8 +714,8 @@ static int config_parse(struct conf *conf)
 
 	(void)conf_get_range(conf, "audio_srate", &config.audio.srate);
 	(void)conf_get_range(conf, "audio_channels", &config.audio.channels);
-	(void)conf_get_range(conf, "ausrc_srate", &config.audio.srate_src);
-	(void)conf_get_range(conf, "auplay_srate", &config.audio.srate_play);
+	(void)conf_get_u32(conf, "ausrc_srate", &config.audio.srate_src);
+	(void)conf_get_u32(conf, "auplay_srate", &config.audio.srate_play);
 
 	if (0 == conf_get(conf, "audio_source", &as) &&
 	    0 == conf_get(conf, "audio_player", &ap))
@@ -717,7 +725,7 @@ static int config_parse(struct conf *conf)
 	(void)conf_get_csv(conf, "video_source",
 			   config.video.src_mod, sizeof(config.video.src_mod),
 			   config.video.src_dev, sizeof(config.video.src_dev));
-	if (0 == get_video_size(conf, "video_size", &size)) {
+	if (0 == conf_get_vidsz(conf, "video_size", &size)) {
 		config.video.width  = size.w;
 		config.video.height = size.h;
 	}
@@ -747,6 +755,10 @@ static int config_parse(struct conf *conf)
 	(void)conf_get_str(conf, "net_interface",
 			   config.net.ifname, sizeof(config.net.ifname));
 
+	/* BFCP */
+	(void)conf_get_str(conf, "bfcp_proto", config.bfcp.proto,
+			   sizeof(config.bfcp.proto));
+
 	return err;
 }
 
@@ -769,7 +781,7 @@ static int config_mod_parse(const struct conf *conf)
  *
  * @return 0 if success, otherwise errorcode
  */
-int configure(void)
+int conf_configure(void)
 {
 	char path[256], file[256];
 	int err;
@@ -838,6 +850,7 @@ int conf_modules(void)
 	print_populated("audio codec",  list_count(aucodec_list()));
 	print_populated("audio filter", list_count(aufilt_list()));
 	print_populated("video codec",  list_count(vidcodec_list()));
+	print_populated("video filter", list_count(vidfilt_list()));
 
  out:
 	conf_obj = mem_deref(conf_obj);

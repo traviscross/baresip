@@ -59,6 +59,7 @@ struct call {
 	struct list streaml;      /**< List of mediastreams (struct stream) */
 	struct audio *audio;      /**< Audio stream                         */
 	struct video *video;      /**< Video stream                         */
+	struct bfcp *bfcp;        /**< BFCP Client                          */
 	enum state state;         /**< Call state                           */
 	char *local_name;         /**< Local Display name                   */
 	char *local_uri;          /**< Local SIP uri                        */
@@ -71,6 +72,8 @@ struct call {
 	struct mnat_sess *mnats;  /**< Media NAT session                    */
 	const struct mnat *mnat;  /**< Media NAT object                     */
 	bool mnat_wait;           /**< Waiting for MNAT to establish        */
+	const struct menc *menc;  /**< Media encryption object              */
+	struct menc_sess *mencs;  /**< Media encryption session state       */
 	int af;                   /**< Preferred Address Family             */
 	call_event_h *eh;         /**< Event handler                        */
 	void *arg;                /**< Handler argument                     */
@@ -138,11 +141,10 @@ static void call_stream_start(struct call *call, bool active)
 	/* Video Stream */
 	sc = sdp_media_rformat(stream_sdpmedia(video_strm(call->video)), NULL);
 	if (sc) {
-		(void)re_printf("enable video stream [%s]\n", sc->params);
-
 		err  = video_encoder_set(call->video, sc->data, sc->pt,
 					 sc->params);
-		err |= video_decoder_set(call->video, sc->data, sc->pt);
+		err |= video_decoder_set(call->video, sc->data, sc->pt,
+					 sc->rparams);
 		if (!err) {
 			err = video_start(call->video, config.video.src_mod,
 					  config.video.src_dev,
@@ -156,6 +158,13 @@ static void call_stream_start(struct call *call, bool active)
 		(void)re_printf("video stream is disabled..\n");
 	}
 #endif
+
+	if (call->bfcp) {
+		err = bfcp_start(call->bfcp);
+		if (err) {
+			DEBUG_WARNING("bfcp_start() error: %m\n", err);
+		}
+	}
 
 	if (active) {
 		struct le *le;
@@ -191,13 +200,21 @@ static void call_stream_stop(struct call *call)
 
 
 static void call_event_handler(struct call *call, enum call_event ev,
-			       const void *prm)
+			       const char *fmt, ...)
 {
 	call_event_h *eh = call->eh;
 	void *eh_arg = call->arg;
+	char buf[256];
+	va_list ap;
 
-	if (eh)
-		eh(call, ev, prm, eh_arg);
+	if (!eh)
+		return;
+
+	va_start(ap, fmt);
+	(void)re_vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+
+	eh(call, ev, buf, eh_arg);
 }
 
 
@@ -232,13 +249,15 @@ static void mnat_handler(int err, uint16_t scode, const char *reason,
 	MAGIC_CHECK(call);
 
 	if (err) {
-		DEBUG_WARNING("medianat failed: %m\n", err);
-		call_event_handler(call, CALL_EVENT_CLOSED, strerror(err));
+		DEBUG_WARNING("medianat '%s' failed: %m\n",
+			      call->mnat->id, err);
+		call_event_handler(call, CALL_EVENT_CLOSED, "%m", err);
 		return;
 	}
 	else if (scode) {
 		DEBUG_WARNING("medianat failed: %u %s\n", scode, reason);
-		call_event_handler(call, CALL_EVENT_CLOSED, reason);
+		call_event_handler(call, CALL_EVENT_CLOSED, "%u %s",
+				   scode, reason);
 		return;
 	}
 
@@ -269,6 +288,7 @@ static void mnat_handler(int err, uint16_t scode, const char *reason,
 
 static int update_media(struct call *call)
 {
+	const struct sdp_format *sc;
 	struct le *le;
 	int err = 0;
 
@@ -287,6 +307,37 @@ static int update_media(struct call *call)
 
 	if (call->mnat && call->mnat->updateh && call->mnats)
 		err = call->mnat->updateh(call->mnats);
+
+	sc = sdp_media_rformat(stream_sdpmedia(audio_strm(call->audio)), NULL);
+	if (sc) {
+		struct aucodec *ac = sc->data;
+		if (ac) {
+			err = audio_decoder_set(call->audio, sc->data,
+						sc->pt, sc->params);
+			err = audio_encoder_set(call->audio, sc->data,
+						sc->pt, sc->params);
+		}
+		else {
+			(void)re_printf("no common audio-codecs..\n");
+		}
+	}
+	else {
+		(void)re_printf("audio stream is disabled..\n");
+	}
+
+#ifdef USE_VIDEO
+	sc = sdp_media_rformat(stream_sdpmedia(video_strm(call->video)), NULL);
+	if (sc) {
+		err = video_encoder_set(call->video, sc->data,
+					sc->pt, sc->params);
+		if (err) {
+			DEBUG_WARNING("video stream: %m\n", err);
+		}
+	}
+	else {
+		(void)re_printf("video stream is disabled..\n");
+	}
+#endif
 
 	return err;
 }
@@ -322,8 +373,10 @@ static void call_destructor(void *arg)
 	mem_deref(call->local_name);
 	mem_deref(call->audio);
 	mem_deref(call->video);
+	mem_deref(call->bfcp);
 	mem_deref(call->sdp);
 	mem_deref(call->mnats);
+	mem_deref(call->mencs);
 	mem_deref(call->sub);
 	mem_deref(call->not);
 }
@@ -349,6 +402,18 @@ static void audio_error_handler(int err, const char *str, void *arg)
 
 	call_stream_stop(call);
 	call_event_handler(call, CALL_EVENT_CLOSED, str);
+}
+
+
+static void menc_error_handler(int err, void *arg)
+{
+	struct call *call = arg;
+	MAGIC_CHECK(call);
+
+	DEBUG_WARNING("mediaenc error: %m\n", err);
+
+	call_stream_stop(call);
+	call_event_handler(call, CALL_EVENT_CLOSED, "mediaenc failed");
 }
 
 
@@ -443,9 +508,24 @@ int call_alloc(struct call **callp, struct list *lst,
 	}
 	call->mnat_wait = true;
 
+	/* Media encryption */
+	if (menc) {
+		call->menc = menc;
+
+		if (call->menc->sessh) {
+			err = call->menc->sessh(&call->mencs, call->sdp,
+						!got_offer,
+						menc_error_handler, call);
+			if (err) {
+				DEBUG_WARNING("mediaenc session: %m\n", err);
+				goto out;
+			}
+		}
+	}
+
 	/* Audio stream */
 	err = audio_alloc(&call->audio, call, call->sdp, ++label,
-			  mnat, call->mnats, menc,
+			  mnat, call->mnats, menc, call->mencs,
 			  ptime ? ptime : PTIME, aumode,
 			  ua_aucodecl(ua),
 			  audio_event_handler, audio_error_handler, call);
@@ -462,7 +542,8 @@ int call_alloc(struct call **callp, struct list *lst,
 	/* Video stream */
 	if (use_video) {
  		err = video_alloc(&call->video, call, call->sdp, ++label,
-				  mnat, call->mnats, menc, "main",
+				  mnat, call->mnats, menc, call->mencs,
+				  "main",
 				  ua_vidcodecl(ua));
 		if (err)
 			goto out;
@@ -471,6 +552,15 @@ int call_alloc(struct call **callp, struct list *lst,
 	(void)use_video;
 	(void)vidmode;
 #endif
+
+	if (str_isset(config.bfcp.proto)) {
+
+		err = bfcp_alloc(&call->bfcp, call->sdp,
+				 config.bfcp.proto, !got_offer,
+				 mnat, call->mnats);
+		if (err)
+			goto out;
+	}
 
 	/* Bandwidth management [bit/s] */
 
@@ -610,7 +700,7 @@ int call_progress(struct call *call)
 		return err;
 
 	err = sipsess_progress(call->sess, 183, "Session Progress",
-			       desc, "Allow: %s\r\n", ua_allowed_methods());
+			       desc, "Allow: %s\r\n", uag_allowed_methods());
 
 	if (!err)
 		call_stream_start(call, false);
@@ -652,7 +742,7 @@ int call_answer(struct call *call, uint16_t scode)
 		return err;
 
 	err = sipsess_answer(call->sess, scode, "Answering", desc,
-                             "Allow: %s\r\n", ua_allowed_methods());
+                             "Allow: %s\r\n", uag_allowed_methods());
 
 	mem_deref(desc);
 
@@ -1158,7 +1248,7 @@ static void sipsess_refer_handler(struct sip *sip, const struct sip_msg *msg,
 			      ua_cuser(call->ua), "message/sipfrag",
 			      auth_handler, ua_prm(call->ua), true,
 			      sipnot_close_handler, call,
-	                      "Allow: %s\r\n", ua_allowed_methods());
+	                      "Allow: %s\r\n", uag_allowed_methods());
 	if (err) {
 		DEBUG_WARNING("refer: sipevent_accept failed: %m\n", err);
 		return;
@@ -1166,7 +1256,7 @@ static void sipsess_refer_handler(struct sip *sip, const struct sip_msg *msg,
 
 	(void)call_notify_sipfrag(call, 100, "Trying");
 
-	call_event_handler(call, CALL_EVENT_TRANSFER, &hdr->val);
+	call_event_handler(call, CALL_EVENT_TRANSFER, "%r", &hdr->val);
 }
 
 
@@ -1248,7 +1338,7 @@ int call_accept(struct call *call, struct sipsess_sock *sess_sock,
 			     sipsess_offer_handler, sipsess_answer_handler,
 			     sipsess_estab_handler, sipsess_info_handler,
 			     sipsess_refer_handler, sipsess_close_handler,
-			     call, "Allow: %s\r\n", ua_allowed_methods());
+			     call, "Allow: %s\r\n", uag_allowed_methods());
 	if (err) {
 		DEBUG_WARNING("sipsess_accept: %m\n", err);
 		return err;
@@ -1350,7 +1440,7 @@ static int send_invite(struct call *call)
 			      sipsess_progr_handler, sipsess_estab_handler,
 			      sipsess_info_handler, sipsess_refer_handler,
 			      sipsess_close_handler, call,
-			      "Allow: %s\r\n", ua_allowed_methods());
+			      "Allow: %s\r\n", uag_allowed_methods());
 	if (err) {
 		DEBUG_WARNING("sipsess_connect: %m\n", err);
 	}
