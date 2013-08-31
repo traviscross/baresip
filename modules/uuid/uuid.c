@@ -71,7 +71,8 @@ static int uuid_load(const char *file, char *uuid, size_t sz)
 
 static int module_init(void)
 {
-	char path[256], uuid[64];
+	struct config *cfg = conf_config();
+	char path[256];
 	int err = 0;
 
 	err = conf_path_get(path, sizeof(path));
@@ -84,11 +85,9 @@ static int module_init(void)
 	if (err)
 		return err;
 
-	err = uuid_load(path, uuid, sizeof(uuid));
+	err = uuid_load(path, cfg->sip.uuid, sizeof(cfg->sip.uuid));
 	if (err)
 		return err;
-
-	ua_set_uuid(uuid);
 
 	return 0;
 }

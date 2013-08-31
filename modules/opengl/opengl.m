@@ -170,8 +170,8 @@ static int setup_shader(struct vidisp_st *st, int width, int height)
 }
 
 
-static int alloc(struct vidisp_st **stp, struct vidisp_st *parent,
-		 struct vidisp *vd, struct vidisp_prm *prm, const char *dev,
+static int alloc(struct vidisp_st **stp, struct vidisp *vd,
+		 struct vidisp_prm *prm, const char *dev,
 		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
 {
 	NSOpenGLPixelFormatAttribute attr[] = {
@@ -186,7 +186,6 @@ static int alloc(struct vidisp_st **stp, struct vidisp_st *parent,
 	GLint vsync = 1;
 	int err = 0;
 
-	(void)parent;
 	(void)dev;
 	(void)inputh;
 	(void)resizeh;

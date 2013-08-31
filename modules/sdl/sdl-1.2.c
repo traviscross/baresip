@@ -180,15 +180,14 @@ static void destructor(void *arg)
 }
 
 
-static int alloc(struct vidisp_st **stp, struct vidisp_st *parent,
-		 struct vidisp *vd, struct vidisp_prm *prm, const char *dev,
+static int alloc(struct vidisp_st **stp, struct vidisp *vd,
+		 struct vidisp_prm *prm, const char *dev,
 		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
 {
 	struct vidisp_st *st;
 	int err;
 
 	/* Not used by SDL */
-	(void)parent;
 	(void)prm;
 	(void)dev;
 

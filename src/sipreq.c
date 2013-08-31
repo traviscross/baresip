@@ -83,9 +83,9 @@ static void resp_handler(int err, const struct sip_msg *msg, void *arg)
 static int auth_handler(char **username, char **password,
 			const char *realm, void *arg)
 {
-	struct ua_prm *prm = arg;
+	struct account *acc = arg;
 
-	return ua_auth(prm, username, password, realm);
+	return account_auth(acc, username, password, realm);
 }
 
 

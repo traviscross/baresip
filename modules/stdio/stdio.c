@@ -93,9 +93,8 @@ static void ui_fd_handler(int flags, void *arg)
 		return;
 	}
 
-	report_key(st, key);
-
 	tmr_start(&st->tmr, RELEASE_VAL, timeout, st);
+	report_key(st, key);
 }
 
 

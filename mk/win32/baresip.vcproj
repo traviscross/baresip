@@ -161,6 +161,9 @@
 				RelativePath="..\..\src\menc.c">
 			</File>
 			<File
+				RelativePath="..\..\src\message.c">
+			</File>
+			<File
 				RelativePath="..\..\src\mnat.c">
 			</File>
 			<File

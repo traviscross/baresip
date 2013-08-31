@@ -8,25 +8,40 @@
 #include <baresip.h>
 
 
-static struct sipsub *sub;
+struct mwi {
+	struct le le;
+	struct sipsub *sub;
+	struct ua *ua;
+};
+
 static struct tmr tmr;
+static struct list mwil;
+
+
+static void destructor(void *arg)
+{
+	struct mwi *mwi = arg;
+
+	list_unlink(&mwi->le);
+	mem_deref(mwi->sub);
+}
 
 
 static int auth_handler(char **username, char **password,
 			const char *realm, void *arg)
 {
-	struct ua_prm *prm = arg;
-	return ua_auth(prm, username, password, realm);
+	struct account *acc = arg;
+	return account_auth(acc, username, password, realm);
 }
 
 
 static void notify_handler(struct sip *sip, const struct sip_msg *msg,
 			   void *arg)
 {
-	struct ua *ua = arg;
+	struct mwi *mwi = arg;
 
 	if (mbuf_get_left(msg->mb)) {
-		re_printf("----- MWI for %s -----\n", ua_aor(ua));
+		re_printf("----- MWI for %s -----\n", ua_aor(mwi->ua));
 		re_printf("%b\n", mbuf_buf(msg->mb), mbuf_get_left(msg->mb));
 	}
 
@@ -38,63 +53,73 @@ static void close_handler(int err, const struct sip_msg *msg,
 			  const struct sipevent_substate *substate,
 			  void *arg)
 {
-	struct ua *ua = arg;
+	struct mwi *mwi = arg;
 	(void)substate;
 
 	re_printf("mwi: subscription for %s closed: %s (%u %r)\n",
-		  ua_aor(ua),
+		  ua_aor(mwi->ua),
 		  err ? strerror(err) : "",
 		  err ? 0 : msg->scode,
 		  err ? 0 : &msg->reason);
 
-	sub = mem_deref(sub);
+	mem_deref(mwi);
 }
 
 
-static int subscribe(void)
+static int mwi_subscribe(struct ua *ua)
 {
 	const char *routev[1];
-	struct ua *ua;
+	struct mwi *mwi;
 	int err;
 
-	/* NOTE: We only use the first account */
-	ua = uag_find_aor(NULL);
-	if (!ua) {
-		re_fprintf(stderr, "mwi: UA not found\n");
-		return ENOENT;
-	}
+	mwi = mem_zalloc(sizeof(*mwi), destructor);
+	if (!mwi)
+		return ENOMEM;
+
+	list_append(&mwil, &mwi->le, mwi);
+	mwi->ua = ua;
 
 	routev[0] = ua_outbound(ua);
 
 	re_printf("mwi: subscribing to messages for %s\n", ua_aor(ua));
 
-	err = sipevent_subscribe(&sub, uag_sipevent_sock(), ua_aor(ua),
+	err = sipevent_subscribe(&mwi->sub, uag_sipevent_sock(), ua_aor(ua),
 				 NULL, ua_aor(ua), "message-summary", NULL,
 	                         600, ua_cuser(ua),
 				 routev, routev[0] ? 1 : 0,
 	                         auth_handler, ua_prm(ua), true, NULL,
-				 notify_handler, close_handler, ua,
+				 notify_handler, close_handler, mwi,
 				 "Accept:"
 				 " application/simple-message-summary\r\n");
 	if (err) {
 	        re_fprintf(stderr, "mwi: subscribe ERROR: %m\n", err);
-	        return err;
 	}
 
-	return 0;
+	if (err)
+		mem_deref(mwi);
+
+	return err;
 }
 
 
 static void tmr_handler(void *arg)
 {
+	struct le *le;
+
 	(void)arg;
-	subscribe();
+
+	for (le = list_head(uag_list()); le; le = le->next) {
+		struct ua *ua = le->data;
+		mwi_subscribe(ua);
+	}
 }
 
 
 static int module_init(void)
 {
+	list_init(&mwil);
 	tmr_start(&tmr, 10, tmr_handler, 0);
+
 	return 0;
 }
 
@@ -102,7 +127,8 @@ static int module_init(void)
 static int module_close(void)
 {
 	tmr_cancel(&tmr);
-	sub = mem_deref(sub);
+	list_flush(&mwil);
+
 	return 0;
 }
 

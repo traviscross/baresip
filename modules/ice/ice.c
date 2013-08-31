@@ -11,7 +11,7 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "ice"
+#define DEBUG_MODULE "mod_ice"
 #define DEBUG_LEVEL 5
 #include <re_dbg.h>
 
@@ -181,8 +181,8 @@ static bool if_handler(const char *ifname, const struct sa *sa, void *arg)
 
 	lprio = is_cellular(sa) ? 0 : 10;
 
-	DEBUG_NOTICE("%s: added interface: %s:%j (local prio %u)\n",
-		     sdp_media_name(m->sdpm), ifname, sa, lprio);
+	ice_printf(m, "added interface: %s:%j (local prio %u)\n",
+		   ifname, sa, lprio);
 
 	for (i=0; i<2; i++) {
 		if (m->compv[i].sock)
@@ -298,6 +298,7 @@ static int session_alloc(struct mnat_sess **sessp, struct dnsc *dnsc,
 
 	usage = ice.turn ? stun_usage_relay : stun_usage_binding;
 
+	/* todo: AF_INET is hardcoded, get from net.c instead */
 	err = stun_server_discover(&sess->dnsq, dnsc, usage, stun_proto_udp,
 				   AF_INET, srv, port, dns_handler, sess);
 
@@ -421,12 +422,13 @@ static void conncheck_handler(int err, bool update, void *arg)
 	struct mnat_sess *sess = m->sess;
 	struct le *le;
 
-	DEBUG_NOTICE("%s: Conncheck is complete\n", sdp_media_name(m->sdpm));
+	DEBUG_NOTICE("%s: Conncheck is complete (update=%d)\n",
+		     sdp_media_name(m->sdpm), update);
+
+	ice_printf(m, "Dumping media state: %H\n", icem_debug, m->icem);
 
 	if (err) {
 		DEBUG_WARNING("conncheck failed: %m\n", err);
-
-		(void)re_printf("Dumping state: %H\n", ice_debug, sess->ice);
 	}
 	else {
 		bool changed;
@@ -451,6 +453,11 @@ static void conncheck_handler(int err, bool update, void *arg)
 
 	/* call estab-handler and send re-invite */
 	if (sess->send_reinvite && update) {
+
+		DEBUG_NOTICE("%s: sending Re-INVITE with updated"
+			     " default candidates\n",
+			     sdp_media_name(m->sdpm));
+
 		sess->estabh(0, 0, NULL, sess->arg);
 		sess->send_reinvite = false;
 	}

@@ -23,6 +23,7 @@ struct ui {
 };
 
 static struct list uil;  /**< List of UIs (struct ui) */
+static struct config_input input_cfg;
 
 
 static void ui_handler(char key, struct re_printf *pf, void *arg)
@@ -85,8 +86,8 @@ int ui_register(struct ui **uip, const char *name,
 	if (alloch) {
 		struct ui_prm prm;
 
-		prm.device = config.input.device;
-		prm.port   = config.input.port;
+		prm.device = input_cfg.device;
+		prm.port   = input_cfg.port;
 
 		err = alloch(&ui->st, &prm, ui_handler, ui);
 		if (err) {
@@ -145,6 +146,26 @@ void ui_input_str(const char *str)
 }
 
 
+int ui_input_pl(struct re_printf *pf, const struct pl *pl)
+{
+	struct cmd_ctx *ctx = NULL;
+	size_t i;
+	int err = 0;
+
+	if (!pf || !pl)
+		return EINVAL;
+
+	for (i=0; i<pl->l; i++) {
+		err |= cmd_process(&ctx, pl->p[i], pf);
+	}
+
+	if (pl->l > 1 && ctx)
+		err |= cmd_process(&ctx, '\n', pf);
+
+	return err;
+}
+
+
 /**
  * Send output to all modules registered in the UI subsystem
  *
@@ -160,4 +181,13 @@ void ui_output(const char *str)
 		if (ui->outputh)
 			ui->outputh(ui->st, str);
 	}
+}
+
+
+void ui_init(const struct config_input *cfg)
+{
+	if (!cfg)
+		return;
+
+	input_cfg = *cfg;
 }

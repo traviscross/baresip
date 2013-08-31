@@ -23,11 +23,6 @@
 #include "magic.h"
 
 
-/* Useful macro switches for development/testing */
-#define ENABLE_ENCODER 1
-#define ENABLE_DECODER 1
-
-
 enum {
 	SRATE = 90000,
 	MAX_MUTED_FRAMES = 3,
@@ -73,7 +68,7 @@ struct vtx {
 	struct lock *lock;                 /**< Lock for encoder          */
 	struct vidframe *frame;            /**< Source frame              */
 	struct vidframe *mute_frame;       /**< Frame with muted video    */
-	struct mbuf *mb;
+	struct mbuf *mb;                   /**< Packetization buffer      */
 	int muted_frames;                  /**< # of muted frames sent    */
 	uint32_t ts_tx;                    /**< Outgoing RTP timestamp    */
 	bool picup;                        /**< Send picture update       */
@@ -102,12 +97,12 @@ struct vrx {
 /** Generic Video stream */
 struct video {
 	MAGIC_DECL              /**< Magic number for debugging           */
+	struct config_video cfg;/**< Video configuration                  */
 	struct stream *strm;    /**< Generic media stream                 */
 	struct vtx vtx;         /**< Transmit/encoder direction           */
 	struct vrx vrx;         /**< Receive/decoder direction            */
 	struct list filtl;      /**< Filters in order (struct vidfilt_st) */
 	struct tmr tmr;         /**< Timer for frame-rate estimation      */
-	size_t max_rtp_size;    /**< Maximum size of outgoing RTP packets */
 	char *peer;             /**< Peer URI                             */
 	bool nack_pli;          /**< Send NACK/PLI to peer                */
 };
@@ -143,7 +138,6 @@ static void video_destructor(void *arg)
 }
 
 
-#if ENABLE_ENCODER
 static int get_fps(const struct video *v)
 {
 	const char *attr;
@@ -156,7 +150,7 @@ static int get_fps(const struct video *v)
 		return (int)fps;
 	}
 	else
-		return config.video.fps;
+		return v->cfg.fps;
 }
 
 
@@ -272,7 +266,6 @@ static void vidsrc_error_handler(int err, void *arg)
 
 	vtx->vsrc = mem_deref(vtx->vsrc);
 }
-#endif
 
 
 static int vtx_alloc(struct vtx *vtx, struct video *video)
@@ -311,7 +304,6 @@ static int vrx_alloc(struct vrx *vrx, struct video *video)
 }
 
 
-#if ENABLE_DECODER
 /**
  * Decode incoming RTP packets using the Video decoder
  *
@@ -377,16 +369,6 @@ out:
 
 	return err;
 }
-#else
-static int video_stream_decode(struct vrx *vrx, const struct rtp_header *hdr,
-			       struct mbuf *mb)
-{
-	(void)vrx;
-	(void)hdr;
-	(void)mb;
-	return 0;
-}
-#endif
 
 
 static int pt_handler(struct video *v, uint8_t pt_old, uint8_t pt_new)
@@ -397,8 +379,11 @@ static int pt_handler(struct video *v, uint8_t pt_old, uint8_t pt_new)
 	if (!lc)
 		return ENOENT;
 
-	(void)re_fprintf(stderr, "Video decoder changed payload %u -> %u\n",
-			 pt_old, pt_new);
+	if (pt_old != (uint8_t)-1) {
+		(void)re_fprintf(stderr, "Video decoder changed payload"
+				 " %u -> %u\n",
+				 pt_old, pt_new);
+	}
 
 	v->vrx.pt_rx = pt_new;
 
@@ -444,24 +429,36 @@ static void rtcp_handler(struct rtcp_msg *msg, void *arg)
 			v->vtx.picup = true;
 		break;
 
+	case RTCP_RTPFB:
+		if (msg->hdr.count == RTCP_RTPFB_GNACK)
+			v->vtx.picup = true;
+		break;
+
 	default:
 		break;
 	}
 }
 
 
-int video_alloc(struct video **vp, struct call *call,
-		struct sdp_session *sdp_sess, int label,
+static void vidfilt_destructor(void *arg)
+{
+	struct vidfilt_st *st = arg;
+
+	list_unlink(&st->le);
+}
+
+
+int video_alloc(struct video **vp, const struct config *cfg,
+		struct call *call, struct sdp_session *sdp_sess, int label,
 		const struct mnat *mnat, struct mnat_sess *mnat_sess,
 		const struct menc *menc, struct menc_sess *menc_sess,
-		const char *content,
-		const struct list *vidcodecl)
+		const char *content, const struct list *vidcodecl)
 {
 	struct video *v;
 	struct le *le;
 	int err = 0;
 
-	if (!vp)
+	if (!vp || !cfg)
 		return EINVAL;
 
 	v = mem_zalloc(sizeof(*v), video_destructor);
@@ -470,16 +467,25 @@ int video_alloc(struct video **vp, struct call *call,
 
 	MAGIC_INIT(v);
 
+	v->cfg = cfg->video;
 	tmr_init(&v->tmr);
 
-	err = stream_alloc(&v->strm, call, sdp_sess, "video", label,
+	err = stream_alloc(&v->strm, &cfg->avt, call, sdp_sess, "video", label,
 			   mnat, mnat_sess, menc, menc_sess,
 			   stream_recv_handler, rtcp_handler, v);
 	if (err)
 		goto out;
 
+	if (cfg->avt.rtp_bw.max >= AUDIO_BANDWIDTH) {
+		stream_set_bw(v->strm, cfg->avt.rtp_bw.max - AUDIO_BANDWIDTH);
+	}
+	else {
+		DEBUG_WARNING("bandwidth too low (%u bit/s)\n",
+			      cfg->avt.rtp_bw.max);
+	}
+
 	err |= sdp_media_set_lattr(stream_sdpmedia(v->strm), true,
-				   "framerate", "%d", config.video.fps);
+				   "framerate", "%d", v->cfg.fps);
 
 	/* RFC 4585 */
 	err |= sdp_media_set_lattr(stream_sdpmedia(v->strm), true,
@@ -499,8 +505,6 @@ int video_alloc(struct video **vp, struct call *call,
 	if (err)
 		goto out;
 
-	v->max_rtp_size = 1024;
-
 	/* Video codecs */
 	for (le = list_head(vidcodecl); le; le = le->next) {
 		struct vidcodec *vc = le->data;
@@ -515,10 +519,15 @@ int video_alloc(struct video **vp, struct call *call,
 		struct vidfilt *vf = le->data;
 		struct vidfilt_st *st = NULL;
 
-		if (!vf->updh)
-			continue;
+		if (vf->updh) {
+			err = vf->updh(&st, vf);
+		}
+		else {
+			st = mem_zalloc(sizeof(*st), vidfilt_destructor);
+			if (!st)
+				err = ENOMEM;
+		}
 
-		err = vf->updh(&st, vf);
 		if (err) {
 			DEBUG_WARNING("video-filter '%s' failed (%m)\n",
 				      vf->name, err);
@@ -539,7 +548,6 @@ int video_alloc(struct video **vp, struct call *call,
 }
 
 
-#if ENABLE_DECODER
 static void vidisp_input_handler(char key, void *arg)
 {
 	struct vrx *vrx = arg;
@@ -573,13 +581,11 @@ static int set_vidisp(struct vrx *vrx)
 	if (!vd)
 		return ENOENT;
 
-	return vd->alloch(&vrx->vidisp, NULL, vd, &vrx->vidisp_prm, NULL,
+	return vd->alloch(&vrx->vidisp, vd, &vrx->vidisp_prm, NULL,
 			  vidisp_input_handler, vidisp_resize_handler, vrx);
 }
-#endif
 
 
-#if ENABLE_ENCODER
 /* Set the encoder format - can be called multiple times */
 static int set_encoder_format(struct vtx *vtx, const char *src,
 			      const char *dev, struct vidsz *size)
@@ -613,7 +619,6 @@ static int set_encoder_format(struct vtx *vtx, const char *src,
 
 	return err;
 }
-#endif
 
 
 enum {TMR_INTERVAL = 5};
@@ -632,8 +637,7 @@ static void tmr_handler(void *arg)
 }
 
 
-int video_start(struct video *v, const char *src, const char *dev,
-		const char *peer)
+int video_start(struct video *v, const char *peer)
 {
 	struct vidsz size;
 	int err;
@@ -654,27 +658,20 @@ int video_start(struct video *v, const char *src, const char *dev,
 	if (err)
 		return err;
 
-#if ENABLE_DECODER
 	err = set_vidisp(&v->vrx);
 	if (err) {
 		DEBUG_WARNING("could not set vidisp: %m\n", err);
 	}
-#endif
 
-#if ENABLE_ENCODER
-	size.w = config.video.width;
-	size.h = config.video.height;
-	err = set_encoder_format(&v->vtx, src, dev, &size);
+	size.w = v->cfg.width;
+	size.h = v->cfg.height;
+	err = set_encoder_format(&v->vtx, v->cfg.src_mod,
+				 v->cfg.src_dev, &size);
 	if (err) {
 		DEBUG_WARNING("could not set encoder format to"
 			      " [%u x %u] %m\n",
 			      size.w, size.h, err);
 	}
-#else
-	(void)src;
-	(void)dev;
-	(void)size;
-#endif
 
 	tmr_start(&v->tmr, TMR_INTERVAL * 1000, tmr_handler, v);
 
@@ -775,7 +772,6 @@ int video_set_orient(struct video *v, int orient)
 }
 
 
-#if ENABLE_ENCODER
 int video_encoder_set(struct video *v, struct vidcodec *vc,
 		      int pt_tx, const char *params)
 {
@@ -791,7 +787,7 @@ int video_encoder_set(struct video *v, struct vidcodec *vc,
 
 		struct videnc_param prm;
 
-		prm.bitrate = config.video.bitrate;
+		prm.bitrate = v->cfg.bitrate;
 		prm.pktsize = 1300;
 		prm.fps     = get_fps(v);
 		prm.max_fs  = -1;
@@ -815,18 +811,6 @@ int video_encoder_set(struct video *v, struct vidcodec *vc,
 
 	return err;
 }
-#else
-int video_encoder_set(struct video *v, struct vidcodec *vc,
-		      int pt_tx, const char *params)
-{
-	(void)v;
-	(void)vc;
-	(void)pt_tx;
-	(void)params;
-
-	return 0;
-}
-#endif
 
 
 int video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx,
@@ -838,15 +822,14 @@ int video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx,
 	if (!v)
 		return EINVAL;
 
-	(void)re_fprintf(stderr, "Set video decoder: %s %s\n",
-			 vc->name, vc->variant);
-
 	vrx = &v->vrx;
 
-#if ENABLE_DECODER
 	vrx->pt_rx = pt_rx;
 
 	if (vc != vrx->vc) {
+
+		(void)re_fprintf(stderr, "Set video decoder: %s %s\n",
+				 vc->name, vc->variant);
 
 		vrx->dec = mem_deref(vrx->dec);
 
@@ -858,10 +841,6 @@ int video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx,
 
 		vrx->vc = vc;
 	}
-#else
-	(void)vc;
-	(void)pt_rx;
-#endif
 
 	return err;
 }
@@ -976,14 +955,9 @@ int video_set_source(struct video *v, const char *name, const char *dev)
 
 	vtx = &v->vtx;
 
-#if ENABLE_ENCODER
 	vtx->vsrc = mem_deref(vtx->vsrc);
 
 	return vs->alloch(&vtx->vsrc, vs, NULL, &vtx->vsrc_prm,
 			  &vtx->vsrc_size, NULL, dev,
 			  vidsrc_frame_handler, vidsrc_error_handler, vtx);
-#else
-	(void)dev;
-	return ENOSYS;
-#endif
 }

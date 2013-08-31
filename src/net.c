@@ -14,6 +14,7 @@
 
 
 static struct {
+	struct config_net cfg;
 	struct sa laddr;
 	char ifname[16];
 #ifdef HAVE_INET6
@@ -25,6 +26,7 @@ static struct {
 	struct sa nsv[4];    /**< Configured name servers           */
 	uint32_t nsn;        /**< Number of configured name servers */
 	uint32_t interval;
+	int af;              /**< Preferred address family          */
 	char domain[64];     /**< DNS domain from network           */
 	net_change_h *ch;
 	void *arg;
@@ -59,10 +61,12 @@ static void dns_refresh(void)
 static void ipchange_handler(void *arg)
 {
 	bool change = false;
-
 	(void)arg;
 
 	tmr_start(&net.tmr, net.interval * 1000, ipchange_handler, NULL);
+
+	dns_refresh();
+
 	change = net_check();
 	if (change && net.ch) {
 		net.ch(net.arg);
@@ -77,37 +81,46 @@ static void ipchange_handler(void *arg)
  */
 bool net_check(void)
 {
-	struct sa la;
+	struct sa laddr = net.laddr;
+#ifdef HAVE_INET6
+	struct sa laddr6 = net.laddr6;
+#endif
 	bool change = false;
 
-	DEBUG_INFO("checking for IPv4 change, current: %s:%j\n",
-		   net.ifname, &net.laddr);
+	if (str_isset(net.cfg.ifname)) {
 
-	dns_refresh();
-
-	/* Get default source addresses */
-	if (0 == net_default_source_addr_get(AF_INET, &la)
-	    && !sa_cmp(&net.laddr, &la, SA_ADDR)) {
-		DEBUG_NOTICE("local IPv4 addr changed: %j -> %j\n",
-			     &net.laddr, &la);
-		sa_cpy(&net.laddr, &la);
-		change = true;
-	}
-
-	/* Get default routes */
-	(void)net_rt_default_get(AF_INET, net.ifname, sizeof(net.ifname));
+		(void)net_if_getaddr(net.cfg.ifname, AF_INET, &net.laddr);
 
 #ifdef HAVE_INET6
-	if (0 == net_default_source_addr_get(AF_INET6, &la)
-	    && !sa_cmp(&net.laddr6, &la, SA_ADDR)) {
-
-		DEBUG_NOTICE("local IPv6 addr changed: %j -> %j\n",
-			     &net.laddr6, &la);
-
-		sa_cpy(&net.laddr6, &la);
-		change = true;
+		(void)net_if_getaddr(net.cfg.ifname, AF_INET6, &net.laddr6);
+#endif
 	}
-	(void)net_rt_default_get(AF_INET6, net.ifname6, sizeof(net.ifname6));
+	else {
+		(void)net_default_source_addr_get(AF_INET, &net.laddr);
+		(void)net_rt_default_get(AF_INET, net.ifname,
+					 sizeof(net.ifname));
+
+#ifdef HAVE_INET6
+		(void)net_default_source_addr_get(AF_INET6, &net.laddr6);
+		(void)net_rt_default_get(AF_INET6, net.ifname6,
+					 sizeof(net.ifname6));
+#endif
+	}
+
+	if (sa_isset(&net.laddr, SA_ADDR) &&
+	    !sa_cmp(&laddr, &net.laddr, SA_ADDR)) {
+		change = true;
+		DEBUG_NOTICE("local IPv4 address changed: %j -> %j\n",
+			     &laddr, &net.laddr);
+	}
+
+#ifdef HAVE_INET6
+	if (sa_isset(&net.laddr6, SA_ADDR) &&
+	    !sa_cmp(&laddr6, &net.laddr6, SA_ADDR)) {
+		change = true;
+		DEBUG_NOTICE("local IPv6 address changed: %j -> %j\n",
+			     &laddr6, &net.laddr6);
+	}
 #endif
 
 	return change;
@@ -138,11 +151,20 @@ static int dns_init(void)
 /**
  * Initialise networking
  *
+ * @param cfg Network configuration
+ * @param af  Preferred address family
+ *
  * @return 0 if success, otherwise errorcode
  */
-int net_init(void)
+int net_init(const struct config_net *cfg, int af)
 {
 	int err;
+
+	if (!cfg)
+		return EINVAL;
+
+	net.cfg = *cfg;
+	net.af  = af;
 
 	tmr_init(&net.tmr);
 
@@ -156,33 +178,33 @@ int net_init(void)
 	sa_init(&net.laddr, AF_INET);
 	(void)sa_set_str(&net.laddr, "127.0.0.1", 0);
 
-	if (str_isset(config.net.ifname)) {
+	if (str_isset(cfg->ifname)) {
 
 		bool got_it = false;
 
 		(void)re_printf("Binding to interface '%s'\n",
-				config.net.ifname);
+				cfg->ifname);
 
-		str_ncpy(net.ifname, config.net.ifname, sizeof(net.ifname));
+		str_ncpy(net.ifname, cfg->ifname, sizeof(net.ifname));
 
-		err = net_if_getaddr(config.net.ifname,
+		err = net_if_getaddr(cfg->ifname,
 				     AF_INET, &net.laddr);
 		if (err) {
 			DEBUG_NOTICE("%s: could not get IPv4 address (%m)\n",
-				     config.net.ifname, err);
+				     cfg->ifname, err);
 		}
 		else
 			got_it = true;
 
 #ifdef HAVE_INET6
-		str_ncpy(net.ifname6, config.net.ifname,
+		str_ncpy(net.ifname6, cfg->ifname,
 			 sizeof(net.ifname6));
 
-		err = net_if_getaddr(config.net.ifname,
+		err = net_if_getaddr(cfg->ifname,
 				     AF_INET6, &net.laddr6);
 		if (err) {
 			DEBUG_NOTICE("%s: could not get IPv6 address (%m)\n",
-				     config.net.ifname, err);
+				     cfg->ifname, err);
 		}
 		else
 			got_it = true;
@@ -191,7 +213,7 @@ int net_init(void)
 			err = 0;
 		else {
 			DEBUG_WARNING("%s: could not get network address\n",
-				      config.net.ifname);
+				      cfg->ifname);
 			return EADDRNOTAVAIL;
 		}
 	}

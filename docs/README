@@ -19,6 +19,7 @@ Design goals:
 
 Modular Plugin Architecture:
 
+account       Account loader
 alsa          ALSA audio driver
 amr           Adaptive Multi-Rate (AMR) audio codec
 audiounit     AudioUnit audio driver for MacOSX/iOS
@@ -47,6 +48,7 @@ mda           Symbian Mediaserver audio driver
 menu          Interactive menu
 mwi           Message Waiting Indication
 natbd         NAT Behavior Discovery Module
+natpmp        NAT Port Mapping Protocol (NAT-PMP) module
 opengl        OpenGL video output
 opengles      OpenGLES video output
 opensles      OpenSLES audio driver
@@ -59,6 +61,7 @@ qtcapture     Apple QTCapture video source driver
 quicktime     Apple Quicktime video source driver
 rst           Radio streamer using mpg123
 sdl           Simple DirectMedia Layer (SDL) video output driver
+sdl2          Simple DirectMedia Layer v2 (SDL2) video output driver
 selfview      Video selfview module
 silk          SILK audio codec
 snapshot      Save video-stream as PNG images
@@ -88,6 +91,7 @@ IETF RFC/I-Ds:
 * RFC 2190  RTP Payload Format for H.263 Video Streams (Historic)
 * RFC 2429  RTP Payload Format for 1998 ver of ITU-T Rec. H.263 Video (H.263+)
 * RFC 3016  RTP Payload Format for MPEG-4 Audio/Visual Streams
+* RFC 3428  SIP Extension for Instant Messaging
 * RFC 3711  The Secure Real-time Transport Protocol (SRTP)
 * RFC 3856  A Presence Event Package for SIP
 * RFC 3863  Presence Information Data Format (PIDF)
@@ -111,6 +115,7 @@ IETF RFC/I-Ds:
 * RFC 5761  Multiplexing RTP Data and Control Packets on a Single Port
 * RFC 6263  App. Mechanism for Keeping Alive NAT Associated with RTP / RTCP
 * RFC 6716  Definition of the Opus Audio Codec
+* RFC 6886  NAT Port Mapping Protocol (NAT-PMP)
 
 * draft-valin-celt-rtp-profile-02
 * draft-ietf-payload-vp8-08

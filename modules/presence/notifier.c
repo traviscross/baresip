@@ -112,7 +112,7 @@ static void destructor(void *arg)
 static int auth_handler(char **username, char **password,
 			const char *realm, void *arg)
 {
-	return ua_auth(arg, username, password, realm);
+	return account_auth(arg, username, password, realm);
 }
 
 

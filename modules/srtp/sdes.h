@@ -17,6 +17,6 @@ struct crypto {
 
 extern const char sdp_attr_crypto[];
 
-int sdes_encode_crypto(struct sdp_media *m, const char *suite,
+int sdes_encode_crypto(struct sdp_media *m, uint32_t tag, const char *suite,
 		       const char *key, size_t key_len);
 int sdes_decode_crypto(struct crypto *c, const char *val);

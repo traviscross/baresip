@@ -20,14 +20,6 @@
 
 enum {
 	RTP_RECV_SIZE    = 8192,  /**< Receive buffer for incoming RTP     */
-	RTP_KEEPALIVE_Tr = 15,    /**< RTP keepalive interval in [seconds] */
-};
-
-
-enum stream_type {
-	STREAM_UNKNOWN = 0,
-	STREAM_AUDIO,
-	STREAM_VIDEO
 };
 
 
@@ -36,7 +28,7 @@ struct stream {
 	MAGIC_DECL
 
 	struct le le;            /**< Linked list element                   */
-	enum stream_type type;   /**< Type of stream (audio, video...)      */
+	struct config_avt cfg;   /**< Stream configuration                  */
 	struct call *call;       /**< Ref. to call object                   */
 	struct sdp_media *sdp;   /**< SDP Media line                        */
 	struct rtp_sock *rtp;    /**< RTP Socket                            */
@@ -182,9 +174,7 @@ static void rtp_recv(const struct sa *src, const struct rtp_header *hdr,
 static void rtcp_handler(const struct sa *src, struct rtcp_msg *msg, void *arg)
 {
 	struct stream *s = arg;
-
 	(void)src;
-	(void)s;
 
 	if (s->rtcph)
 		s->rtcph(msg, s->arg);
@@ -200,15 +190,15 @@ static int stream_sock_alloc(struct stream *s, int af)
 		return EINVAL;
 
 	/* we listen on all interfaces */
-	sa_init(&laddr, sa_af(net_laddr_af(af)));
+	sa_init(&laddr, af);
 
 	err = rtp_listen(&s->rtp, IPPROTO_UDP, &laddr,
-			 config.avt.rtp_ports.min, config.avt.rtp_ports.max,
+			 s->cfg.rtp_ports.min, s->cfg.rtp_ports.max,
 			 s->rtcp, rtp_recv, rtcp_handler, s);
 	if (err)
 		return err;
 
-	tos = config.avt.rtp_tos;
+	tos = s->cfg.rtp_tos;
 	(void)udp_setsockopt(rtp_sock(s->rtp), IPPROTO_IP, IP_TOS,
 			     &tos, sizeof(tos));
 	(void)udp_setsockopt(rtcp_sock(s->rtp), IPPROTO_IP, IP_TOS,
@@ -244,8 +234,8 @@ static void tmr_stats_handler(void *arg)
 }
 
 
-int stream_alloc(struct stream **sp, struct call *call,
-		 struct sdp_session *sdp_sess,
+int stream_alloc(struct stream **sp, const struct config_avt *cfg,
+		 struct call *call, struct sdp_session *sdp_sess,
 		 const char *name, int label,
 		 const struct mnat *mnat, struct mnat_sess *mnat_sess,
 		 const struct menc *menc, struct menc_sess *menc_sess,
@@ -254,7 +244,7 @@ int stream_alloc(struct stream **sp, struct call *call,
 	struct stream *s;
 	int err;
 
-	if (!sp || !call || !rtph)
+	if (!sp || !cfg || !call || !rtph)
 		return EINVAL;
 
 	s = mem_zalloc(sizeof(*s), stream_destructor);
@@ -265,30 +255,23 @@ int stream_alloc(struct stream **sp, struct call *call,
 
 	tmr_init(&s->tmr_stats);
 
+	s->cfg   = *cfg;
 	s->call  = call;
-
-	if (!str_casecmp(name, "audio"))
-		s->type = STREAM_AUDIO;
-	else if (!str_casecmp(name, "video"))
-		s->type = STREAM_VIDEO;
-	else
-		s->type = STREAM_UNKNOWN;
-
 	s->rtph  = rtph;
 	s->rtcph = rtcph;
 	s->arg   = arg;
 	s->pseq  = -1;
-	s->rtcp  = config.avt.rtcp_enable;
+	s->rtcp  = s->cfg.rtcp_enable;
 
 	err = stream_sock_alloc(s, call_af(call));
 	if (err)
 		goto out;
 
 	/* Jitter buffer */
-	if (config.avt.jbuf_del.min && config.avt.jbuf_del.max) {
+	if (cfg->jbuf_del.min && cfg->jbuf_del.max) {
 
-		err = jbuf_alloc(&s->jbuf, config.avt.jbuf_del.min,
-				 config.avt.jbuf_del.max);
+		err = jbuf_alloc(&s->jbuf, cfg->jbuf_del.min,
+				 cfg->jbuf_del.max);
 		if (err)
 			goto out;
 	}
@@ -306,21 +289,22 @@ int stream_alloc(struct stream **sp, struct call *call,
 	}
 
 	/* RFC 5761 */
-	if (config.avt.rtcp_mux)
+	if (cfg->rtcp_mux)
 		err |= sdp_media_set_lattr(s->sdp, true, "rtcp-mux", NULL);
 
 	if (mnat) {
 		err |= mnat->mediah(&s->mns, mnat_sess, IPPROTO_UDP,
 				    rtp_sock(s->rtp),
-				    (s->rtcp && !config.avt.rtcp_mux)
-				    ? rtcp_sock(s->rtp) : NULL,
+				    s->rtcp ? rtcp_sock(s->rtp) : NULL,
 				    s->sdp);
 	}
 
 	if (menc) {
 		s->menc = menc;
 		s->mencs = mem_ref(menc_sess);
-		err |= menc->mediah(&s->mes, menc_sess, IPPROTO_UDP,
+		err |= menc->mediah(&s->mes, menc_sess,
+				    s->rtp,
+				    IPPROTO_UDP,
 				    rtp_sock(s->rtp),
 				    s->rtcp ? rtcp_sock(s->rtp) : NULL,
 				    s->sdp);
@@ -360,14 +344,14 @@ int stream_start(struct stream *s)
 }
 
 
-void stream_start_keepalive(struct stream *s)
+static void stream_start_keepalive(struct stream *s)
 {
 	const char *rtpkeep;
 
 	if (!s)
 		return;
 
-	rtpkeep = ua_param(call_get_ua(s->call), "rtpkeep");
+	rtpkeep = ua_prm(call_get_ua(s->call))->rtpkeep;
 
 	s->rtpkeep = mem_deref(s->rtpkeep);
 
@@ -421,7 +405,7 @@ static void stream_remote_set(struct stream *s, const char *cname)
 		return;
 
 	/* RFC 5761 */
-	if (config.avt.rtcp_mux && sdp_media_rattr(s->sdp, "rtcp-mux")) {
+	if (s->cfg.rtcp_mux && sdp_media_rattr(s->sdp, "rtcp-mux")) {
 
 		if (!s->rtcp_mux)
 			(void)re_printf("%s: RTP/RTCP multiplexing enabled\n",
@@ -450,11 +434,12 @@ void stream_update(struct stream *s, const char *cname)
 
 	s->pt_enc = fmt ? fmt->pt : -1;
 
-	if (stream_has_media(s))
+	if (sdp_media_has_media(s->sdp))
 		stream_remote_set(s, cname);
 
 	if (s->menc && s->menc->mediah) {
-		err = s->menc->mediah(&s->mes, s->mencs, IPPROTO_UDP,
+		err = s->menc->mediah(&s->mes, s->mencs, s->rtp,
+				      IPPROTO_UDP,
 				      rtp_sock(s->rtp),
 				      s->rtcp ? rtcp_sock(s->rtp) : NULL,
 				      s->sdp);
@@ -538,6 +523,8 @@ void stream_reset(struct stream *s)
 		return;
 
 	jbuf_flush(s->jbuf);
+
+	stream_start_keepalive(s);
 }
 
 
@@ -547,21 +534,6 @@ void stream_set_bw(struct stream *s, uint32_t bps)
 		return;
 
 	sdp_media_set_lbandwidth(s->sdp, SDP_BANDWIDTH_AS, bps / 1024);
-}
-
-
-bool stream_has_media(const struct stream *s)
-{
-	bool has;
-
-	if (!s)
-		return false;
-
-	has = sdp_media_rformat(s->sdp, NULL) != NULL;
-	if (has)
-		return sdp_media_rport(s->sdp) != 0;
-
-	return false;
 }
 
 

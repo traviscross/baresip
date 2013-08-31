@@ -22,8 +22,7 @@
 
 
 /*
- * TODO: add option to select a specific X window
- * TODO: how to select x,y offset ?
+ * XXX: add option to select a specific X window and x,y offset
  */
 
 

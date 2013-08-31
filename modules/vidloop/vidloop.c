@@ -29,10 +29,12 @@ struct vstat {
 /** Video loop */
 struct video_loop {
 	const struct vidcodec *vc;
+	struct config_video cfg;
 	struct videnc_state *enc;
 	struct viddec_state *dec;
 	struct vidisp_st *vidisp;
 	struct vidsrc_st *vsrc;
+	struct list filtl;
 	struct vstat stat;
 	struct tmr tmr_bw;
 	uint16_t seq;
@@ -40,6 +42,30 @@ struct video_loop {
 
 
 static struct video_loop *gvl;
+
+
+static int display(struct video_loop *vl, struct vidframe *frame)
+{
+	struct le *le;
+	int err = 0;
+
+	if (!vidframe_isvalid(frame))
+		return 0;
+
+	/* Process video frame through all Video Filters */
+	for (le = vl->filtl.head; le; le = le->next) {
+
+		struct vidfilt_st *st = le->data;
+
+		if (st->vf->dech)
+			err |= st->vf->dech(st, frame);
+	}
+
+	/* display frame */
+	(void)vidisp_display(vl->vidisp, "Video Loop", frame);
+
+	return err;
+}
 
 
 static int packet_handler(bool marker, const uint8_t *hdr, size_t hdr_len,
@@ -72,9 +98,7 @@ static int packet_handler(bool marker, const uint8_t *hdr, size_t hdr_len,
 		}
 	}
 
-	/* display - if valid picture frame */
-	if (vidframe_isvalid(&frame))
-		(void)vidisp_display(vl->vidisp, "Video Loop", &frame);
+	display(vl, &frame);
 
 	mem_deref(mb);
 
@@ -86,6 +110,8 @@ static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
 {
 	struct video_loop *vl = arg;
 	struct vidframe *f2 = NULL;
+	struct le *le;
+	int err = 0;
 
 	++vl->stat.frames;
 
@@ -99,13 +125,22 @@ static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
 		frame = f2;
 	}
 
+	/* Process video frame through all Video Filters */
+	for (le = vl->filtl.head; le; le = le->next) {
+
+		struct vidfilt_st *st = le->data;
+
+		if (st->vf->ench)
+			err |= st->vf->ench(st, (struct vidframe *)frame);
+	}
+
 	if (vl->enc) {
 		(void)vl->vc->ench(vl->enc, false, frame,
 				   packet_handler, vl);
 	}
 	else {
 		vl->stat.bytes += vidframe_size(frame->fmt, &frame->size);
-		(void)vidisp_display(vl->vidisp, "Video Loop", frame);
+		(void)display(vl, (struct vidframe *)frame);
 	}
 
 	mem_deref(f2);
@@ -121,6 +156,7 @@ static void vidloop_destructor(void *arg)
 	mem_deref(vl->vidisp);
 	mem_deref(vl->enc);
 	mem_deref(vl->dec);
+	list_flush(&vl->filtl);
 }
 
 
@@ -136,9 +172,9 @@ static int enable_codec(struct video_loop *vl)
 	struct videnc_param prm;
 	int err;
 
-	prm.fps     = config.video.fps;
+	prm.fps     = vl->cfg.fps;
 	prm.pktsize = 1024;
-	prm.bitrate = config.video.bitrate;
+	prm.bitrate = vl->cfg.bitrate;
 	prm.max_fs  = -1;
 
 	/* Use the first video codec */
@@ -152,10 +188,12 @@ static int enable_codec(struct video_loop *vl)
 		return err;
 	}
 
-	err = vl->vc->decupdh(&vl->dec, vl->vc, NULL);
-	if (err) {
-		DEBUG_WARNING("update decoder: %m\n", err);
-		return err;
+	if (vl->vc->decupdh) {
+		err = vl->vc->decupdh(&vl->dec, vl->vc, NULL);
+		if (err) {
+			DEBUG_WARNING("update decoder: %m\n", err);
+			return err;
+		}
 	}
 
 	return 0;
@@ -213,41 +251,82 @@ static int vsrc_reopen(struct video_loop *vl, const struct vidsz *sz)
 	int err;
 
 	(void)re_printf("%s,%s: open video source: %u x %u\n",
-			config.video.src_mod, config.video.src_dev,
+			vl->cfg.src_mod, vl->cfg.src_dev,
 			sz->w, sz->h);
 
 	prm.orient = VIDORIENT_PORTRAIT;
-	prm.fps    = config.video.fps;
+	prm.fps    = vl->cfg.fps;
 
 	vl->vsrc = mem_deref(vl->vsrc);
-	err = vidsrc_alloc(&vl->vsrc, config.video.src_mod, NULL, &prm, sz,
-			   NULL, config.video.src_dev, vidsrc_frame_handler,
+	err = vidsrc_alloc(&vl->vsrc, vl->cfg.src_mod, NULL, &prm, sz,
+			   NULL, vl->cfg.src_dev, vidsrc_frame_handler,
 			   NULL, vl);
 	if (err) {
 		DEBUG_WARNING("vidsrc %s failed: %m\n",
-			      config.video.src_dev, err);
+			      vl->cfg.src_dev, err);
 	}
 
 	return err;
 }
 
 
+static void vidfilt_destructor(void *arg)
+{
+	struct vidfilt_st *st = arg;
+
+	list_unlink(&st->le);
+}
+
+
 static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 {
 	struct video_loop *vl;
-	int err;
+	struct config *cfg;
+	struct le *le;
+	int err = 0;
+
+	cfg = conf_config();
+	if (!cfg)
+		return EINVAL;
 
 	vl = mem_zalloc(sizeof(*vl), vidloop_destructor);
 	if (!vl)
 		return ENOMEM;
 
+	vl->cfg = cfg->video;
 	tmr_init(&vl->tmr_bw);
+
+	/* Video filters */
+	for (le = list_head(vidfilt_list()); le; le = le->next) {
+		struct vidfilt *vf = le->data;
+		struct vidfilt_st *st = NULL;
+
+		re_printf("vidloop: added video-filter `%s'\n", vf->name);
+
+		if (vf->updh) {
+			err = vf->updh(&st, vf);
+		}
+		else {
+			st = mem_zalloc(sizeof(*st), vidfilt_destructor);
+			if (!st)
+				err = ENOMEM;
+		}
+
+		if (err) {
+			DEBUG_WARNING("video-filter '%s' failed (%m)\n",
+				      vf->name, err);
+			goto out;
+		}
+
+		st->vf = vf;
+		list_append(&vl->filtl, &st->le, st);
+	}
 
 	err = vsrc_reopen(vl, size);
 	if (err)
 		goto out;
 
-	err = vidisp_alloc(&vl->vidisp, NULL, NULL, NULL, NULL,
+	err = vidisp_alloc(&vl->vidisp, NULL, NULL, NULL,
 			   vidisp_input_handler, NULL, vl);
 	if (err) {
 		DEBUG_WARNING("video display failed: %m\n", err);
@@ -272,12 +351,13 @@ static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 static int vidloop_start(struct re_printf *pf, void *arg)
 {
 	struct vidsz size;
+	struct config *cfg = conf_config();
 	int err = 0;
 
 	(void)arg;
 
-	size.w = config.video.width;
-	size.h = config.video.height;
+	size.w = cfg->video.width;
+	size.h = cfg->video.height;
 
 	if (gvl) {
 		if (gvl->vc)
@@ -291,7 +371,7 @@ static int vidloop_start(struct re_printf *pf, void *arg)
 	}
 	else {
 		(void)re_hprintf(pf, "Enable video-loop on %s,%s: %u x %u\n",
-				 config.video.src_mod, config.video.src_dev,
+				 cfg->video.src_mod, cfg->video.src_dev,
 				 size.w, size.h);
 
 		err = video_loop_alloc(&gvl, &size);

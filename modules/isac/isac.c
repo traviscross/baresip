@@ -41,10 +41,12 @@ static void decode_destructor(void *arg)
 
 
 static int encode_update(struct auenc_state **aesp,
-			 const struct aucodec *ac, const char *fmtp)
+			 const struct aucodec *ac,
+			 struct auenc_param *prm, const char *fmtp)
 {
 	struct auenc_state *st;
 	int err = 0;
+	(void)prm;
 	(void)fmtp;
 
 	if (!aesp || !ac)

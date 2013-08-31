@@ -11,11 +11,11 @@
 const char sdp_attr_crypto[] = "crypto";
 
 
-int sdes_encode_crypto(struct sdp_media *m, const char *suite,
+int sdes_encode_crypto(struct sdp_media *m, uint32_t tag, const char *suite,
 		       const char *key, size_t key_len)
 {
-	return sdp_media_set_lattr(m, true, sdp_attr_crypto, "1 %s inline:%b",
-				   suite, key, key_len);
+	return sdp_media_set_lattr(m, true, sdp_attr_crypto, "%u %s inline:%b",
+				   tag, suite, key, key_len);
 }
 
 

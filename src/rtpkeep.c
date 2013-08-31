@@ -48,27 +48,6 @@ static void destructor(void *arg)
 }
 
 
-/**
- * Find a dynamic payload type that is not used
- *
- * @param m SDP Media
- *
- * @return Unused payload type, -1 if no found
- */
-static int find_unused_pt(const struct sdp_media *m)
-{
-	int pt;
-
-	for (pt = PT_DYN_MAX; pt>=PT_DYN_MIN; pt--) {
-
-		if (!sdp_media_format(m, false, NULL, pt, NULL, -1, -1))
-			return pt;
-	}
-
-	return -1;
-}
-
-
 static int send_keepalive(struct rtpkeep *rk)
 {
 	int err = 0;
@@ -88,7 +67,7 @@ static int send_keepalive(struct rtpkeep *rk)
 	}
 	else if (!str_casecmp(rk->method, "dyna")) {
 		struct mbuf *mb = mbuf_alloc(RTP_HEADER_SIZE);
-		int pt = find_unused_pt(rk->sdp);
+		int pt = sdp_media_find_unused_pt(rk->sdp);
 		if (!mb)
 			return ENOMEM;
 		if (pt == -1)
@@ -102,8 +81,7 @@ static int send_keepalive(struct rtpkeep *rk)
 	}
 	else if (!str_casecmp(rk->method, "rtcp")) {
 
-		if (config.avt.rtcp_mux &&
-		    sdp_media_rattr(rk->sdp, "rtcp-mux")) {
+		if (sdp_media_rattr(rk->sdp, "rtcp-mux")) {
 			/* do nothing */
 			;
 		}

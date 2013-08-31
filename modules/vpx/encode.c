@@ -1,5 +1,5 @@
 /**
- * @file vp8/encode.c VP8 Encode
+ * @file vpx/encode.c VP8 Encode
  *
  * Copyright (C) 2010 Creytiv.com
  */

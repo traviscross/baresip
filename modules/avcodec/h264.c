@@ -1,5 +1,5 @@
 /**
- * @file h264.c  H.264 video codec (RFC 3984)
+ * @file avcodec/h264.c  H.264 video codec (RFC 3984)
  *
  * Copyright (C) 2010 Creytiv.com
  */

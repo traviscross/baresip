@@ -180,7 +180,11 @@ static int auloop_reset(struct audio_loop *al)
 {
 	struct auplay_prm auplay_prm;
 	struct ausrc_prm ausrc_prm;
+	const struct config *cfg = conf_config();
 	int err;
+
+	if (!cfg)
+		return ENOENT;
 
 	/* Optional audio codec */
 	if (str_isset(aucodec))
@@ -204,11 +208,11 @@ static int auloop_reset(struct audio_loop *al)
 	auplay_prm.srate      = al->srate;
 	auplay_prm.ch         = al->ch;
 	auplay_prm.frame_size = al->fs;
-	err = auplay_alloc(&al->auplay, config.audio.play_mod, &auplay_prm,
-			   config.audio.play_dev, write_handler, al);
+	err = auplay_alloc(&al->auplay, cfg->audio.play_mod, &auplay_prm,
+			   cfg->audio.play_dev, write_handler, al);
 	if (err) {
 		DEBUG_WARNING("auplay %s,%s failed: %m\n",
-			      config.audio.play_mod, config.audio.play_dev,
+			      cfg->audio.play_mod, cfg->audio.play_dev,
 			      err);
 		return err;
 	}
@@ -217,12 +221,12 @@ static int auloop_reset(struct audio_loop *al)
 	ausrc_prm.srate      = al->srate;
 	ausrc_prm.ch         = al->ch;
 	ausrc_prm.frame_size = al->fs;
-	err = ausrc_alloc(&al->ausrc, NULL, config.audio.src_mod,
-			  &ausrc_prm, config.audio.src_dev,
+	err = ausrc_alloc(&al->ausrc, NULL, cfg->audio.src_mod,
+			  &ausrc_prm, cfg->audio.src_dev,
 			  read_handler, error_handler, al);
 	if (err) {
-		DEBUG_WARNING("ausrc %s,%s failed: %m\n", config.audio.src_mod,
-			      config.audio.src_dev, err);
+		DEBUG_WARNING("ausrc %s,%s failed: %m\n", cfg->audio.src_mod,
+			      cfg->audio.src_dev, err);
 		return err;
 	}
 

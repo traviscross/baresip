@@ -99,8 +99,8 @@ static const char *af_name(int af)
 static int sip_auth_handler(char **username, char **password,
 			    const char *realm, void *arg)
 {
-	struct ua_prm *prm = arg;
-	return ua_auth(prm, username, password, realm);
+	struct account *acc = arg;
+	return account_auth(acc, username, password, realm);
 }
 
 
@@ -157,9 +157,6 @@ static void register_handler(int err, const struct sip_msg *msg, void *arg)
 		ua_event(reg->ua, UA_EVENT_REGISTER_FAIL, "%u %r",
 			 msg->scode, &msg->reason);
 	}
-
-	/* todo: avoid calling this global function */
-	uag_check_registrations();
 }
 
 

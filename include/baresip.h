@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.4"
+#define BARESIP_VERSION "0.4.5"
 
 
 /* forward declarations */
@@ -25,6 +25,20 @@ struct ua;
 struct vidframe;
 struct vidrect;
 struct vidsz;
+
+
+/*
+ * Account
+ */
+
+struct account;
+
+int account_alloc(struct account **accp, const char *sipaddr);
+int account_debug(struct re_printf *pf, const struct account *acc);
+int account_auth(const struct account *acc, char **username, char **password,
+		 const char *realm);
+struct list *account_aucodecl(const struct account *acc);
+struct list *account_vidcodecl(const struct account *acc);
 
 
 /*
@@ -42,6 +56,7 @@ bool call_has_audio(const struct call *call);
 bool call_has_video(const struct call *call);
 int  call_transfer(struct call *call, const char *uri);
 int  call_status(struct re_printf *pf, const struct call *call);
+int  call_debug(struct re_printf *pf, const struct call *call);
 uint32_t      call_duration(const struct call *call);
 const char   *call_peername(const struct call *call);
 struct audio *call_audio(const struct call *call);
@@ -50,7 +65,26 @@ struct list  *call_streaml(const struct call *call);
 
 
 /*
- * Conf
+ * Conf (utils)
+ */
+
+
+/** Defines the configuration line handler */
+typedef int (confline_h)(const struct pl *addr);
+
+int  conf_configure(void);
+int  conf_modules(void);
+void conf_path_set(const char *path);
+int  conf_path_get(char *path, size_t sz);
+int  conf_parse(const char *filename, confline_h *ch);
+int  conf_get_vidsz(const struct conf *conf, const char *name,
+		    struct vidsz *sz);
+bool conf_fileexist(const char *path);
+struct conf *conf_cur(void);
+
+
+/*
+ * Config (core configuration)
  */
 
 /** A range of numbers */
@@ -64,23 +98,32 @@ static inline bool in_range(const struct range *rng, uint32_t val)
 	return rng ? (val >= rng->min && val <= rng->max) : false;
 }
 
+/** Audio transmit mode */
+enum audio_mode {
+	AUDIO_MODE_POLL = 0,         /**< Polling mode                  */
+	AUDIO_MODE_THREAD,           /**< Use dedicated thread          */
+	AUDIO_MODE_THREAD_REALTIME,  /**< Use dedicated realtime-thread */
+	AUDIO_MODE_TMR               /**< Use timer                     */
+};
+
 /** Core configuration */
 struct config {
 	/** Input */
-	struct {
+	struct config_input {
 		char device[64];        /**< Input device name */
 		uint32_t port;          /**< Input port number */
 	} input;
 
 	/** SIP User-Agent */
-	struct {
+	struct config_sip {
 		uint32_t trans_bsize;   /**< SIP Transaction bucket size    */
+		char uuid[64];          /**< Universally Unique Identifier  */
 		char local[64];         /**< Local SIP Address              */
-		char cert[256];
+		char cert[256];         /**< SIP Certificate                */
 	} sip;
 
 	/** Audio */
-	struct {
+	struct config_audio {
 		char src_mod[16];       /**< Audio source module            */
 		char src_dev[128];      /**< Audio source device            */
 		char play_mod[16];      /**< Audio playback module          */
@@ -92,19 +135,22 @@ struct config {
 		uint32_t srate_play;    /**< Opt. sampling rate for player  */
 		uint32_t srate_src;     /**< Opt. sampling rate for source  */
 		bool src_first;         /**< Audio source opened first      */
+		enum audio_mode txmode; /**< Audio transmit mode            */
 	} audio;
 
+#ifdef USE_VIDEO
 	/** Video */
-	struct {
+	struct config_video {
 		char src_mod[16];       /**< Video source module            */
 		char src_dev[128];      /**< Video source device            */
 		int width, height;      /**< Video resolution               */
 		uint32_t bitrate;       /**< Encoder bitrate in [bit/s]     */
 		uint32_t fps;           /**< Video framerate                */
 	} video;
+#endif
 
 	/** Audio/Video Transport */
-	struct {
+	struct config_avt {
 		uint8_t rtp_tos;        /**< Type-of-Service for outg. RTP  */
 		struct range rtp_ports; /**< RTP port range                 */
 		struct range rtp_bw;    /**< RTP Bandwidth range [bit/s]    */
@@ -114,33 +160,22 @@ struct config {
 	} avt;
 
 	/* Network */
-	struct {
+	struct config_net {
 		char ifname[16];        /**< Bind to interface (optional)   */
 	} net;
 
-	struct {
+#ifdef USE_VIDEO
+	/* BFCP */
+	struct config_bfcp {
 		char proto[16];         /**< BFCP Transport (optional)      */
 	} bfcp;
+#endif
 };
 
-extern struct config config;
-
-
-/** Defines the configuration line handler */
-typedef int (confline_h)(const struct pl *addr);
-
-int  conf_accounts_get(confline_h *ch);
-int  conf_system_get(const char *path);
-int  conf_system_get_file(const char *path);
-int  conf_system_get_buf(const uint8_t *buf, size_t sz);
-int  conf_configure(void);
-int  conf_modules(void);
-void conf_path_set(const char *path);
-int  conf_path_get(char *path, size_t sz);
-int  conf_parse(const char *filename, confline_h *ch);
-int  conf_get_vidsz(struct conf *conf, const char *name, struct vidsz *sz);
-bool conf_fileexist(const char *path);
-struct conf *conf_cur(void);
+int config_parse_conf(struct config *cfg, const struct conf *conf);
+int config_print(struct re_printf *pf, const struct config *cfg);
+int config_write_template(const char *file, const struct config *cfg);
+struct config *conf_config(void);
 
 
 /*
@@ -173,6 +208,18 @@ const char      *contact_presence_str(enum presence_status status);
 struct media_ctx {
 	const char *id;  /**< Media Context identifier */
 };
+
+
+/*
+ * Message
+ */
+
+typedef void (message_recv_h)(const struct pl *peer, const struct pl *ctype,
+			      struct mbuf *body, void *arg);
+
+int  message_init(message_recv_h *recvh, void *arg);
+void message_close(void);
+int  message_send(struct ua *ua, const char *peer, const char *msg);
 
 
 /*
@@ -277,7 +324,7 @@ struct list *aufilt_list(void);
 
 
 /*
- * Menc - Media encryption
+ * Menc - Media encryption (for RTP)
  */
 
 struct menc;
@@ -291,7 +338,8 @@ typedef int  (menc_sess_h)(struct menc_sess **sessp, struct sdp_session *sdp,
 			   bool offerer, menc_error_h *errorh, void *arg);
 
 typedef int  (menc_media_h)(struct menc_media **mp, struct menc_sess *sess,
-			    int proto, void *sock1, void *sock2,
+			    struct rtp_sock *rtp, int proto,
+			    void *rtpsock, void *rtcpsock,
 			    struct sdp_media *sdpm);
 
 struct menc {
@@ -313,7 +361,7 @@ const struct menc *menc_find(const char *id);
 
 typedef void (net_change_h)(void *arg);
 
-int  net_init(void);
+int  net_init(const struct config_net *cfg, int af);
 void net_close(void);
 int  net_dnssrv_add(const struct sa *sa);
 void net_change(uint32_t interval, net_change_h *ch, void *arg);
@@ -331,8 +379,9 @@ struct dnsc     *net_dnsc(void);
 struct play;
 
 int  play_file(struct play **playp, const char *filename, int repeat);
-int  play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
-	       uint8_t ch, int repeat);
+int  play_tone(struct play **playp, struct mbuf *tone,
+	       uint32_t srate, uint8_t ch, int repeat);
+void play_init(const struct config *cfg);
 void play_close(void);
 
 
@@ -341,7 +390,6 @@ void play_close(void);
  */
 
 struct ua;
-struct ua_prm;
 
 /** Events from User-Agent */
 enum ua_event {
@@ -349,8 +397,6 @@ enum ua_event {
 	UA_EVENT_REGISTER_OK,
 	UA_EVENT_REGISTER_FAIL,
 	UA_EVENT_UNREGISTERING,
-	UA_EVENT_UNREGISTER_OK,
-	UA_EVENT_UNREGISTER_FAIL,
 	UA_EVENT_CALL_INCOMING,
 	UA_EVENT_CALL_RINGING,
 	UA_EVENT_CALL_PROGRESS,
@@ -360,14 +406,6 @@ enum ua_event {
 	UA_EVENT_MAX,
 };
 
-/** Audio transmit mode */
-enum audio_mode {
-	AUDIO_MODE_POLL = 0,         /**< Polling mode                  */
-	AUDIO_MODE_THREAD,           /**< Use dedicated thread          */
-	AUDIO_MODE_THREAD_REALTIME,  /**< Use dedicated realtime-thread */
-	AUDIO_MODE_TMR               /**< Use timer                     */
-};
-
 /** Video mode */
 enum vidmode {
 	VIDMODE_OFF = 0,    /**< Video disabled                */
@@ -375,61 +413,47 @@ enum vidmode {
 };
 
 /** Defines the User-Agent event handler */
-typedef void (ua_event_h)(struct ua *ua, enum ua_event ev, const char *prm);
-typedef void (ua_message_h)(const struct pl *peer, const struct pl *ctype,
-			    struct mbuf *body, void *arg);
+typedef void (ua_event_h)(struct ua *ua, enum ua_event ev,
+			  const char *prm, void *arg);
 typedef void (options_resp_h)(int err, const struct sip_msg *msg, void *arg);
 
 /* Multiple instances */
-int  ua_alloc(struct ua **uap, const char *aor,
-	      ua_message_h *msgh, void *arg);
-int  ua_add(const struct pl *addr);
+int  ua_alloc(struct ua **uap, const char *aor);
 int  ua_connect(struct ua *ua, const char *uri, const char *params,
-		const char *mnatid, enum vidmode vmode);
+		enum vidmode vmode);
 void ua_hangup(struct ua *ua);
-void ua_answer(struct ua *ua);
-int  ua_im_send(struct ua *ua, const char *peer, const char *msg);
-bool uag_active_calls(void);
+int  ua_answer(struct ua *ua);
 int  ua_options_send(struct ua *ua, const char *uri,
 		     options_resp_h *resph, void *arg);
-int  ua_register(struct ua *ua);
 int  ua_sipfd(const struct ua *ua);
-int  ua_auth(struct ua_prm *prm, char **username, char **password,
-	     const char *realm);
 int  ua_debug(struct re_printf *pf, const struct ua *ua);
 int  ua_print_calls(struct re_printf *pf, const struct ua *ua);
-const char    *ua_aor(const struct ua *ua);
-const char    *ua_cuser(const struct ua *ua);
-const char    *ua_outbound(const struct ua *ua);
-struct call   *ua_call(const struct ua *ua);
-struct ua_prm *ua_prm(const struct ua *ua);
+int  ua_print_status(struct re_printf *pf, const struct ua *ua);
+int  ua_print_supported(struct re_printf *pf, const struct ua *ua);
+bool ua_isregistered(const struct ua *ua);
+const char     *ua_aor(const struct ua *ua);
+const char     *ua_cuser(const struct ua *ua);
+const char     *ua_outbound(const struct ua *ua);
+struct call    *ua_call(const struct ua *ua);
+struct account *ua_prm(const struct ua *ua);
 
 
 /* One instance */
 int  ua_init(const char *software, bool udp, bool tcp, bool tls,
 	     bool prefer_ipv6);
-void ua_set_uuid(const char *uuid);
-void ua_set_aumode(enum audio_mode aumode);
 void ua_close(void);
-void ua_stack_suspend(void);
-int  ua_stack_resume(const char *software, bool udp, bool tcp, bool tls);
-int  ua_start_all(void);
 void ua_stop_all(bool forced);
-void uag_next(void);
-int  ua_reset_transp(bool reg, bool reinvite);
+int  uag_reset_transp(bool reg, bool reinvite);
+int  uag_event_register(ua_event_h *eh, void *arg);
+void uag_event_unregister(ua_event_h *eh);
 int  ua_print_sip_status(struct re_printf *pf, void *unused);
-int  ua_print_reg_status(struct re_printf *pf, void *unused);
-int  ua_print_call_status(struct re_printf *pf, void *unused);
-struct ua  *uag_cur(void);
-struct ua  *uag_find(const struct pl *cuser);
-struct ua  *uag_find_aor(const char *aor);
-struct sip *uag_sip(void);
-const char *uag_event_str(enum ua_event ev);
+struct ua   *uag_find(const struct pl *cuser);
+struct ua   *uag_find_aor(const char *aor);
+struct sip  *uag_sip(void);
+const char  *uag_event_str(enum ua_event ev);
+struct list *uag_list(void);
 struct sipsess_sock  *uag_sipsess_sock(void);
 struct sipevent_sock *uag_sipevent_sock(void);
-
-int  uag_event_register(ua_event_h *eh);
-void uag_event_unregister(ua_event_h *eh);
 
 
 /*
@@ -450,8 +474,10 @@ typedef int  (ui_alloc_h)(struct ui_st **stp, struct ui_prm *prm,
 			  ui_input_h *ih, void *arg);
 typedef int  (ui_output_h)(struct ui_st *st, const char *str);
 
+void ui_init(const struct config_input *cfg);
 void ui_input(char key);
 void ui_input_str(const char *str);
+int  ui_input_pl(struct re_printf *pf, const struct pl *pl);
 void ui_output(const char *str);
 int  ui_register(struct ui **uip, const char *name,
 		 ui_alloc_h *alloch, ui_output_h *outh);
@@ -543,7 +569,7 @@ struct vidisp_prm {
 typedef void (vidisp_input_h)(char key, void *arg);
 typedef void (vidisp_resize_h)(const struct vidsz *size, void *arg);
 
-typedef int  (vidisp_alloc_h)(struct vidisp_st **vp, struct vidisp_st *parent,
+typedef int  (vidisp_alloc_h)(struct vidisp_st **vp,
 			      struct vidisp *vd, struct vidisp_prm *prm,
 			      const char *dev, vidisp_input_h *inputh,
 			      vidisp_resize_h *resizeh, void *arg);
@@ -557,7 +583,6 @@ int vidisp_register(struct vidisp **vp, const char *name,
 		    vidisp_alloc_h *alloch, vidisp_update_h *updateh,
 		    vidisp_disp_h *disph, vidisp_hide_h *hideh);
 int vidisp_alloc(struct vidisp_st **stp, const char *name,
-		 struct vidisp_st *parent,
 		 struct vidisp_prm *prm, const char *dev,
 		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg);
 int vidisp_display(struct vidisp_st *st, const char *title,
@@ -675,7 +700,7 @@ struct vidfilt;
 
 /* Base class */
 struct vidfilt_st {
-	struct vidfilt *vf;
+	const struct vidfilt *vf;
 	struct le le;
 };
 
@@ -760,7 +785,8 @@ int realtime_enable(bool enable, int fps);
  */
 
 bool sdp_media_has_media(const struct sdp_media *m);
-int  sdp_fingerprint_decode(const char *attr, const char *hash,
+int  sdp_media_find_unused_pt(const struct sdp_media *m);
+int  sdp_fingerprint_decode(const char *attr, struct pl *hash,
 			    uint8_t *md, size_t *sz);
 uint32_t sdp_media_rattr_u32(const struct sdp_media *sdpm, const char *name);
 const char *sdp_rattr(const struct sdp_session *s, const struct sdp_media *m,

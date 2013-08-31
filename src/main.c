@@ -119,11 +119,6 @@ int main(int argc, char *argv[])
 	if (err)
 		goto out;
 
-	/* Populate SIP accounts */
-	err = conf_accounts_get(ua_add);
-	if (err)
-		goto out;
-
 	if (run_daemon) {
 		err = sys_daemon();
 		if (err)

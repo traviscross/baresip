@@ -76,7 +76,7 @@ static int encode_win(struct vidfilt_st *st, struct vidframe *frame)
 
 	if (!pip->disp) {
 
-		err = vidisp_alloc(&pip->disp, NULL, NULL,
+		err = vidisp_alloc(&pip->disp, NULL,
 				   NULL, NULL, NULL, NULL, NULL);
 		if (err)
 			return err;

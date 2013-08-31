@@ -1,5 +1,5 @@
 /**
- * @file play.c  Audio-file player
+ * @file src/play.c  Audio-file player
  *
  * Copyright (C) 2010 Creytiv.com
  */
@@ -32,6 +32,7 @@ struct play {
 
 
 static struct list playl;
+static struct config_audio cfg_audio;
 
 
 static void tmr_polling(void *arg);
@@ -228,8 +229,8 @@ int play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
 	wprm.srate      = srate;
 	wprm.frame_size = srate * ch * 100 / 1000;
 
-	err = auplay_alloc(&play->auplay, config.audio.alert_mod, &wprm,
-			   config.audio.alert_dev, write_handler, play);
+	err = auplay_alloc(&play->auplay, cfg_audio.alert_mod, &wprm,
+			   cfg_audio.alert_dev, write_handler, play);
 	if (err)
 		goto out;
 
@@ -292,6 +293,15 @@ int play_file(struct play **playp, const char *filename, int repeat)
 	mem_deref(mb);
 
 	return err;
+}
+
+
+void play_init(const struct config *cfg)
+{
+	if (!cfg)
+		return;
+
+	cfg_audio = cfg->audio;
 }
 
 

@@ -178,7 +178,7 @@ static void destructor(void *arg)
 static int auth_handler(char **username, char **password,
 			const char *realm, void *arg)
 {
-	return ua_auth(arg, username, password, realm);
+	return account_auth(arg, username, password, realm);
 }
 
 
@@ -204,7 +204,8 @@ static int subscribe(struct presence *pres)
 				 ua_aor(ua), "presence", NULL, 600,
 				 ua_cuser(ua), routev, routev[0] ? 1 : 0,
 				 auth_handler, ua_prm(ua), true, NULL,
-				 notify_handler, close_handler, pres, NULL);
+				 notify_handler, close_handler, pres,
+				 "%H", ua_print_supported, ua);
 	if (err) {
 		(void)re_fprintf(stderr,
 				 "presence: sipevent_subscribe failed: %m\n",

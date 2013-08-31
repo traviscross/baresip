@@ -31,7 +31,6 @@
 enum {
 	PTIME           = 20,    /**< Packet time for audio               */
 	LOCAL_TIMEOUT   = 120,   /**< Incoming call timeout in [seconds]  */
-	AUDIO_BANDWIDTH = 128000 /**< Bandwidth for audio in bits/s       */
 };
 
 
@@ -51,6 +50,7 @@ struct call {
 	MAGIC_DECL                /**< Magic number for debugging           */
 	struct le le;             /**< Linked list element                  */
 	struct ua *ua;            /**< SIP User-agent                       */
+	struct account *acc;      /**< Account (ref.)                       */
 	struct sipsess *sess;     /**< SIP Session                          */
 	struct sdp_session *sdp;  /**< SDP Session                          */
 	struct sipsub *sub;       /**< Call transfer REFER subscription     */
@@ -58,11 +58,11 @@ struct call {
 	struct play *play;        /**< Playback of ringtones etc.           */
 	struct list streaml;      /**< List of mediastreams (struct stream) */
 	struct audio *audio;      /**< Audio stream                         */
+#ifdef USE_VIDEO
 	struct video *video;      /**< Video stream                         */
 	struct bfcp *bfcp;        /**< BFCP Client                          */
+#endif
 	enum state state;         /**< Call state                           */
-	char *local_name;         /**< Local Display name                   */
-	char *local_uri;          /**< Local SIP uri                        */
 	char *peer_uri;           /**< Peer SIP Address                     */
 	char *peer_name;          /**< Peer display name                    */
 	struct tmr tmr_inv;       /**< Timer for incoming calls             */
@@ -70,9 +70,7 @@ struct call {
 	time_t time_stop;         /**< Time when call stopped               */
 	bool got_offer;           /**< Got SDP Offer from Peer              */
 	struct mnat_sess *mnats;  /**< Media NAT session                    */
-	const struct mnat *mnat;  /**< Media NAT object                     */
 	bool mnat_wait;           /**< Waiting for MNAT to establish        */
-	const struct menc *menc;  /**< Media encryption object              */
 	struct menc_sess *mencs;  /**< Media encryption session state       */
 	int af;                   /**< Preferred Address Family             */
 	call_event_h *eh;         /**< Event handler                        */
@@ -146,9 +144,7 @@ static void call_stream_start(struct call *call, bool active)
 		err |= video_decoder_set(call->video, sc->data, sc->pt,
 					 sc->rparams);
 		if (!err) {
-			err = video_start(call->video, config.video.src_mod,
-					  config.video.src_dev,
-					  call->peer_uri);
+			err = video_start(call->video, call->peer_uri);
 		}
 		if (err) {
 			DEBUG_WARNING("video stream: %m\n", err);
@@ -157,7 +153,6 @@ static void call_stream_start(struct call *call, bool active)
 	else {
 		(void)re_printf("video stream is disabled..\n");
 	}
-#endif
 
 	if (call->bfcp) {
 		err = bfcp_start(call->bfcp);
@@ -165,6 +160,7 @@ static void call_stream_start(struct call *call, bool active)
 			DEBUG_WARNING("bfcp_start() error: %m\n", err);
 		}
 	}
+#endif
 
 	if (active) {
 		struct le *le;
@@ -174,7 +170,6 @@ static void call_stream_start(struct call *call, bool active)
 
 		FOREACH_STREAM {
 			stream_reset(le->data);
-			stream_start_keepalive(le->data);
 		}
 	}
 }
@@ -250,7 +245,7 @@ static void mnat_handler(int err, uint16_t scode, const char *reason,
 
 	if (err) {
 		DEBUG_WARNING("medianat '%s' failed: %m\n",
-			      call->mnat->id, err);
+			      call->acc->mnatid, err);
 		call_event_handler(call, CALL_EVENT_CLOSED, "%m", err);
 		return;
 	}
@@ -302,11 +297,11 @@ static int update_media(struct call *call)
 
 	/* Update each stream */
 	FOREACH_STREAM {
-		stream_update(le->data, call->local_uri);
+		stream_update(le->data, call->acc->aor);
 	}
 
-	if (call->mnat && call->mnat->updateh && call->mnats)
-		err = call->mnat->updateh(call->mnats);
+	if (call->acc->mnat && call->acc->mnat->updateh && call->mnats)
+		err = call->acc->mnat->updateh(call->mnats);
 
 	sc = sdp_media_rformat(stream_sdpmedia(audio_strm(call->audio)), NULL);
 	if (sc) {
@@ -350,7 +345,8 @@ static void print_summary(const struct call *call)
 		return;
 
 	(void)re_fprintf(stderr, "\n%s: Call with %s terminated"
-			 " (duration: %H)\n", call->local_uri, call->peer_uri,
+			 " (duration: %H)\n",
+			 call->acc->aor, call->peer_uri,
 			 fmt_human_time, &dur);
 }
 
@@ -369,16 +365,17 @@ static void call_destructor(void *arg)
 	mem_deref(call->sess);
 	mem_deref(call->peer_uri);
 	mem_deref(call->peer_name);
-	mem_deref(call->local_uri);
-	mem_deref(call->local_name);
 	mem_deref(call->audio);
+#ifdef USE_VIDEO
 	mem_deref(call->video);
 	mem_deref(call->bfcp);
+#endif
 	mem_deref(call->sdp);
 	mem_deref(call->mnats);
 	mem_deref(call->mencs);
 	mem_deref(call->sub);
 	mem_deref(call->not);
+	mem_deref(call->acc);
 }
 
 
@@ -421,17 +418,11 @@ static void menc_error_handler(int err, void *arg)
  * Allocate a new Call state object
  *
  * @param callp       Pointer to allocated Call state object
+ * @param cfg         Global configuration
  * @param lst         List of call objects
+ * @param acc         Account parameters
  * @param ua          User-Agent
  * @param prm         Call parameters
- * @param mnat        Media NAT traversal (optional)
- * @param stun_user   STUN username
- * @param stun_pass   STUN password
- * @param stun_host   STUN server hostname
- * @param stun_port   STUN server port number
- * @param menc        Media encryption (optional)
- * @param local_name  Local SIP name
- * @param local_uri   Local SIP uri
  * @param msg         SIP message for incoming calls
  * @param xcall       Optional call to inherit properties from
  * @param eh          Call event handler
@@ -439,25 +430,18 @@ static void menc_error_handler(int err, void *arg)
  *
  * @return 0 if success, otherwise errorcode
  */
-int call_alloc(struct call **callp, struct list *lst,
-	       struct ua *ua, const struct call_prm *prm,
-	       const struct mnat *mnat,
-	       const char *stun_user, const char *stun_pass,
-	       const char *stun_host, uint16_t stun_port,
-	       const struct menc *menc, const char *local_name,
-	       const char *local_uri,
+int call_alloc(struct call **callp, const struct config *cfg, struct list *lst,
+	       struct account *acc, struct ua *ua, const struct call_prm *prm,
 	       const struct sip_msg *msg, struct call *xcall,
 	       call_event_h *eh, void *arg)
 {
 	struct call *call;
-	const uint32_t ptime = prm ? prm->ptime : 0;
-	enum audio_mode aumode = prm ? prm->aumode : AUDIO_MODE_POLL;
 	enum vidmode vidmode = prm ? prm->vidmode : VIDMODE_OFF;
 	bool use_video = true, got_offer = false;
 	int label = 0;
 	int err = 0;
 
-	if (!ua)
+	if (!cfg || !acc || !ua)
 		return EINVAL;
 
 	call = mem_zalloc(sizeof(*call), call_destructor);
@@ -468,17 +452,12 @@ int call_alloc(struct call **callp, struct list *lst,
 
 	tmr_init(&call->tmr_inv);
 
+	call->acc    = mem_ref(acc);
 	call->ua     = ua;
-	call->mnat   = mnat;
 	call->state  = STATE_IDLE;
 	call->eh     = eh;
 	call->arg    = arg;
 	call->af     = prm ? prm->af : AF_INET;
-
-	err |= str_dup(&call->local_name, local_name);
-	err |= str_dup(&call->local_uri, local_uri);
-	if (err)
-		goto out;
 
 	/* Init SDP info */
 	err = sdp_session_alloc(&call->sdp, net_laddr_af(call->af));
@@ -495,12 +474,12 @@ int call_alloc(struct call **callp, struct list *lst,
 		got_offer = true;
 
 	/* Initialise media NAT handling */
-	if (mnat) {
-		err = call->mnat->sessh(&call->mnats, net_dnsc(),
-					stun_host, stun_port,
-					stun_user, stun_pass,
-					call->sdp, !got_offer,
-					mnat_handler, call);
+	if (acc->mnat) {
+		err = acc->mnat->sessh(&call->mnats, net_dnsc(),
+				       acc->stun_host, acc->stun_port,
+				       acc->stun_user, acc->stun_pass,
+				       call->sdp, !got_offer,
+				       mnat_handler, call);
 		if (err) {
 			DEBUG_WARNING("mnat session: %m\n", err);
 			goto out;
@@ -509,11 +488,9 @@ int call_alloc(struct call **callp, struct list *lst,
 	call->mnat_wait = true;
 
 	/* Media encryption */
-	if (menc) {
-		call->menc = menc;
-
-		if (call->menc->sessh) {
-			err = call->menc->sessh(&call->mencs, call->sdp,
+	if (acc->menc) {
+		if (acc->menc->sessh) {
+			err = acc->menc->sessh(&call->mencs, call->sdp,
 						!got_offer,
 						menc_error_handler, call);
 			if (err) {
@@ -524,10 +501,10 @@ int call_alloc(struct call **callp, struct list *lst,
 	}
 
 	/* Audio stream */
-	err = audio_alloc(&call->audio, call, call->sdp, ++label,
-			  mnat, call->mnats, menc, call->mencs,
-			  ptime ? ptime : PTIME, aumode,
-			  ua_aucodecl(ua),
+	err = audio_alloc(&call->audio, cfg, call,
+			  call->sdp, ++label,
+			  acc->mnat, call->mnats, acc->menc, call->mencs,
+			  acc->ptime, account_aucodecl(call->acc),
 			  audio_event_handler, audio_error_handler, call);
 	if (err)
 		goto out;
@@ -536,54 +513,33 @@ int call_alloc(struct call **callp, struct list *lst,
 	/* We require at least one video codec, and at least one
 	   video source or video display */
 	use_video = (vidmode != VIDMODE_OFF)
-		&& (list_head(ua_vidcodecl(call->ua)) != NULL)
+		&& (list_head(account_vidcodecl(call->acc)) != NULL)
 		&& (NULL != vidsrc_find(NULL) || NULL != vidisp_find(NULL));
 
 	/* Video stream */
 	if (use_video) {
- 		err = video_alloc(&call->video, call, call->sdp, ++label,
-				  mnat, call->mnats, menc, call->mencs,
+ 		err = video_alloc(&call->video, cfg,
+				  call, call->sdp, ++label,
+				  acc->mnat, call->mnats,
+				  acc->menc, call->mencs,
 				  "main",
-				  ua_vidcodecl(ua));
+				  account_vidcodecl(call->acc));
 		if (err)
 			goto out;
  	}
+
+	if (str_isset(cfg->bfcp.proto)) {
+
+		err = bfcp_alloc(&call->bfcp, call->sdp,
+				 cfg->bfcp.proto, !got_offer,
+				 acc->mnat, call->mnats);
+		if (err)
+			goto out;
+	}
 #else
 	(void)use_video;
 	(void)vidmode;
 #endif
-
-	if (str_isset(config.bfcp.proto)) {
-
-		err = bfcp_alloc(&call->bfcp, call->sdp,
-				 config.bfcp.proto, !got_offer,
-				 mnat, call->mnats);
-		if (err)
-			goto out;
-	}
-
-	/* Bandwidth management [bit/s] */
-
-#if 0
-	/* todo: needed to full H.264 spec */
-	sdp_session_set_lbandwidth(call->sdp, SDP_BANDWIDTH_CT, 4096);
-#endif
-
-	if (config.avt.rtp_bw.max >= AUDIO_BANDWIDTH) {
-		uint32_t bwa = AUDIO_BANDWIDTH;
-#ifdef USE_VIDEO
-		uint32_t bwv = config.avt.rtp_bw.max - AUDIO_BANDWIDTH;
-#endif
-
-		stream_set_bw(audio_strm(call->audio), bwa);
-#ifdef USE_VIDEO
-		stream_set_bw(video_strm(call->video), bwv);
-#endif
-	}
-	else {
-		DEBUG_WARNING("bandwidth too low (%u bit/s)\n",
-			      config.avt.rtp_bw.max);
-	}
 
 	/* inherit certain properties from original call */
 	if (xcall) {
@@ -625,7 +581,7 @@ int call_connect(struct call *call, const struct pl *paddr)
 
 	/* If we are using asyncronous medianat like STUN/TURN, then
 	 * wait until completed before sending the INVITE */
-	if (!call->mnat)
+	if (!call->acc->mnat)
 		err = send_invite(call);
 
 	return err;
@@ -762,7 +718,7 @@ bool call_has_audio(const struct call *call)
 	if (!call)
 		return false;
 
-	return stream_has_media(audio_strm(call->audio));
+	return sdp_media_has_media(stream_sdpmedia(audio_strm(call->audio)));
 }
 
 
@@ -779,7 +735,7 @@ bool call_has_video(const struct call *call)
 		return false;
 
 #ifdef USE_VIDEO
-	return stream_has_media(video_strm(call->video));
+	return sdp_media_has_media(stream_sdpmedia(video_strm(call->video)));
 #else
 	return false;
 #endif
@@ -844,30 +800,6 @@ const char *call_peername(const struct call *call)
 }
 
 
-static const struct sdp_format *sdp_media_format_cycle(struct sdp_media *m)
-{
-	struct sdp_format *sf;
-	struct list *lst;
-
- again:
-	sf = (struct sdp_format *)sdp_media_rformat(m, NULL);
-	if (!sf)
-		return NULL;
-
-	lst = sf->le.list;
-
-	/* move top-most codec to end of list */
-	list_unlink(&sf->le);
-	list_append(lst, &sf->le, sf);
-
-	sf = (struct sdp_format *)sdp_media_rformat(m, NULL);
-	if (!str_casecmp(sf->name, telev_rtpfmt))
-		goto again;
-
-	return sf;
-}
-
-
 /**
  * Use the next audio encoder in the local list of negotiated codecs
  *
@@ -926,9 +858,7 @@ int call_debug(struct re_printf *pf, const struct call *call)
 
 	/* SIP Session debug */
 	err |= re_hprintf(pf, "*** ");
-	err |= re_hprintf(pf, " mnat=%s peer=%s\n",
-			  call->mnat ? call->mnat->id : "none",
-			  call->peer_uri);
+	err |= re_hprintf(pf, " peer=%s\n", call->peer_uri);
 
 	/* SDP debug */
 	err |= sdp_session_debug(pf, call->sdp);
@@ -1032,7 +962,8 @@ struct ua *call_get_ua(const struct call *call)
 static int auth_handler(char **username, char **password,
 			const char *realm, void *arg)
 {
-	return ua_auth(arg, username, password, realm);
+	struct account *acc = arg;
+	return account_auth(acc, username, password, realm);
 }
 
 
@@ -1064,66 +995,6 @@ static int sipsess_offer_handler(struct mbuf **descp,
 }
 
 
-static void decode_part(const struct pl *part, struct mbuf *mb)
-{
-	struct pl hdrs, body;
-
-	if (re_regex(part->p, part->l, "\r\n\r\n[^]+", &body))
-		return;
-
-	hdrs.p = part->p;
-	hdrs.l = body.p - part->p - 2;
-
-	if (0 == re_regex(hdrs.p, hdrs.l, "application/sdp")) {
-
-		mb->pos += (body.p - (char *)mbuf_buf(mb));
-		mb->end  = mb->pos + body.l;
-	}
-}
-
-
-/** Decode a multipart/mixed message and find the part with application/sdp */
-static int decode_multipart_sdp(const struct pl *ctype, struct mbuf *mb)
-{
-	struct pl bnd, s, e, p;
-	char expr[64];
-	int err;
-
-	/* fetch the boundary tag, excluding quotes */
-	err = re_regex(ctype->p, ctype->l,
-		       "multipart/mixed;[ \t]*boundary=[~]+", NULL, &bnd);
-	if (err)
-		return err;
-
-	if (re_snprintf(expr, sizeof(expr), "--%r[^]+", &bnd) < 0)
-		return ENOMEM;
-
-	/* find 1st boundary */
-	err = re_regex((char *)mbuf_buf(mb), mbuf_get_left(mb), expr, &s);
-	if (err) {
-		DEBUG_NOTICE("multipart: could not find 1st boundary (%s)\n",
-			      expr);
-		return err;
-	}
-
-	/* iterate over each part */
-	while (s.l > 2) {
-		if (re_regex(s.p, s.l, expr, &e))
-			return 0;
-
-		p.p = s.p + 2;
-		p.l = e.p - p.p - bnd.l - 2;
-
-		/* valid part in "p" */
-		decode_part(&p, mb);
-
-		s = e;
-	}
-
-	return 0;
-}
-
-
 static int sipsess_answer_handler(const struct sip_msg *msg, void *arg)
 {
 	struct call *call = arg;
@@ -1131,7 +1002,7 @@ static int sipsess_answer_handler(const struct sip_msg *msg, void *arg)
 
 	MAGIC_CHECK(call);
 
-	(void)decode_multipart_sdp(&msg->ctype, msg->mb);
+	(void)sdp_decode_multipart(&msg->ctype, msg->mb);
 
 	err = sdp_decode(call->sdp, msg->mb, false);
 	if (err) {
@@ -1161,8 +1032,9 @@ static void sipsess_estab_handler(const struct sip_msg *msg, void *arg)
 	set_state(call, STATE_ESTABLISHED);
 
 	call->play = mem_deref(call->play);
-	call_stream_start(call, true);
 	call_event_handler(call, CALL_EVENT_ESTABLISHED, call->peer_uri);
+
+	call_stream_start(call, true);
 
 	/* the transferor will hangup this call */
 	if (call->not) {
@@ -1171,6 +1043,7 @@ static void sipsess_estab_handler(const struct sip_msg *msg, void *arg)
 }
 
 
+#ifdef USE_VIDEO
 static void call_handle_info_req(struct call *call, const struct sip_msg *req)
 {
 	struct pl body;
@@ -1185,23 +1058,45 @@ static void call_handle_info_req(struct call *call, const struct sip_msg *req)
 	if (err)
 		return;
 
-#ifdef USE_VIDEO
 	if (pfu) {
 		video_update_picture(call->video);
 	}
-#endif
 }
+#endif
 
 
 static void sipsess_info_handler(struct sip *sip, const struct sip_msg *msg,
 				 void *arg)
 {
 	struct call *call = arg;
+	(void)call;
 
-	if (!pl_strcasecmp(&msg->ctype, "application/media_control+xml")) {
+	if (!pl_strcasecmp(&msg->ctype, "application/dtmf-relay")) {
+
+		struct pl body, sig, dur;
+		int err;
+
+		pl_set_mbuf(&body, msg->mb);
+
+		err  = re_regex(body.p, body.l, "Signal=[^\r\n]1", &sig);
+		err |= re_regex(body.p, body.l, "Duration=[0-9]+", &dur);
+
+		if (err) {
+			(void)sip_reply(sip, msg, 400, "Bad Request");
+		}
+		else {
+			(void)re_printf("received DTMF: '%r' (duration=%r)\n",
+					&sig, &dur);
+			(void)sip_reply(sip, msg, 200, "OK");
+		}
+	}
+#ifdef USE_VIDEO
+	else if (!pl_strcasecmp(&msg->ctype,
+				"application/media_control+xml")) {
 		call_handle_info_req(call, msg);
 		(void)sip_reply(sip, msg, 200, "OK");
 	}
+#endif
 	else {
 		(void)sip_reply(sip, msg, 488, "Not Acceptable Here");
 	}
@@ -1246,7 +1141,7 @@ static void sipsess_refer_handler(struct sip *sip, const struct sip_msg *msg,
 			      sipsess_dialog(call->sess), NULL,
 			      202, "Accepted", 60, 60, 60,
 			      ua_cuser(call->ua), "message/sipfrag",
-			      auth_handler, ua_prm(call->ua), true,
+			      auth_handler, call->acc, true,
 			      sipnot_close_handler, call,
 	                      "Allow: %s\r\n", uag_allowed_methods());
 	if (err) {
@@ -1334,7 +1229,7 @@ int call_accept(struct call *call, struct sipsess_sock *sess_sock,
 
 	err = sipsess_accept(&call->sess, sess_sock, msg, 180, "Ringing",
 			     ua_cuser(call->ua), "application/sdp", NULL,
-			     auth_handler, ua_prm(call->ua), true,
+			     auth_handler, call->acc, true,
 			     sipsess_offer_handler, sipsess_answer_handler,
 			     sipsess_estab_handler, sipsess_info_handler,
 			     sipsess_refer_handler, sipsess_close_handler,
@@ -1349,7 +1244,7 @@ int call_accept(struct call *call, struct sipsess_sock *sess_sock,
 	/* New call */
 	tmr_start(&call->tmr_inv, LOCAL_TIMEOUT*1000, invite_timeout, call);
 
-	if (!call->mnat)
+	if (!call->acc->mnat)
 		call_event_handler(call, CALL_EVENT_INCOMING, call->peer_uri);
 
 	return err;
@@ -1382,7 +1277,7 @@ static void sipsess_progr_handler(const struct sip_msg *msg, void *arg)
 	    && !sdp_decode(call->sdp, msg->mb, false)) {
 		media = true;
 	}
-	else if (!decode_multipart_sdp(&msg->ctype, msg->mb) &&
+	else if (!sdp_decode_multipart(&msg->ctype, msg->mb) &&
 		 !sdp_decode(call->sdp, msg->mb, false)) {
 		media = true;
 	}
@@ -1429,18 +1324,19 @@ static int send_invite(struct call *call)
 
 	err = sipsess_connect(&call->sess, uag_sipsess_sock(),
 			      call->peer_uri,
-			      call->local_name,
-			      call->local_uri,
+			      call->acc->dispname,
+			      call->acc->aor,
 			      ua_cuser(call->ua),
 			      routev[0] ? routev : NULL,
 			      routev[0] ? 1 : 0,
 			      "application/sdp", desc,
-			      auth_handler, ua_prm(call->ua), true,
+			      auth_handler, call->acc, true,
 			      sipsess_offer_handler, sipsess_answer_handler,
 			      sipsess_progr_handler, sipsess_estab_handler,
 			      sipsess_info_handler, sipsess_refer_handler,
 			      sipsess_close_handler, call,
-			      "Allow: %s\r\n", uag_allowed_methods());
+			      "Allow: %s\r\n%H", uag_allowed_methods(),
+			      ua_print_supported, call->ua);
 	if (err) {
 		DEBUG_WARNING("sipsess_connect: %m\n", err);
 	}
@@ -1489,7 +1385,12 @@ struct audio *call_audio(const struct call *call)
  */
 struct video *call_video(const struct call *call)
 {
+#ifdef USE_VIDEO
 	return call ? call->video : NULL;
+#else
+	(void)call;
+	return NULL;
+#endif
 }
 
 
@@ -1620,7 +1521,7 @@ int call_transfer(struct call *call, const char *uri)
 	call->sub = mem_deref(call->sub);
 	err = sipevent_drefer(&call->sub, uag_sipevent_sock(),
 			      sipsess_dialog(call->sess), ua_cuser(call->ua),
-			      auth_handler, ua_prm(call->ua), true,
+			      auth_handler, call->acc, true,
 			      sipsub_notify_handler, sipsub_close_handler,
 			      call,
 			      "Refer-To: %s\r\n", uri);

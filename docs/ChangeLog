@@ -1,3 +1,45 @@
+2013-08-31 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.5
+
+	* new modules:
+	  - account      Account loader module
+	  - natpmp	 NAT-PMP client (RFC 6886)
+	  - sdl2         Video display using libSDL2
+	
+	* baresip:
+	  - account: added SIP account parser and container
+	  - config: split conf.c into conf.c and config.c
+	  - config: move enum audio_mode to struct config
+	  - config: move uuid to struct config
+	  - more usage of the #ifdef USE_VIDEO macro
+	  - message: add handling of SIP MESSAGE send/recv
+	  - mediaenc: added rtp_sock parameter to media-handler
+	  - ua: cleanup public struct ua API
+	  - vidisp api: remove unused 'parent' parameter
+	  - call: handle incoming DTMF in SIP INFO (application/dtmf-relay)
+	  - sdp: added sdp_decode_multipart()
+	  - net: fix bug on IP-refresh when 'net_interface' is used
+	  - video: minor cleanups
+		   handle incoming RTCP_RTPFB_GNACK
+	
+	* isac: fix encode_update() signature
+
+	* menu: move dialbuffer here from ua.c
+		added command 'g' to print current config
+
+	* mwi: multiple MWIs for multiple UAs
+
+	* presence: include supported methods in SIP messages
+
+	* srtp: improved interop and debugging
+		handle incoming RTP/RTCP-demultiplexing
+
+	* uuid: write loaded UUID directly to struct config
+
+	* vidloop: added video-filters
+
+
 2013-05-18 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.4.4

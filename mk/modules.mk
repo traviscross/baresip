@@ -68,6 +68,9 @@ USE_CAIRO  := $(shell [ -f $(SYSROOT)/include/cairo/cairo.h ] || \
 #USE_CELT  := $(shell [ -f $(SYSROOT)/include/celt/celt.h ] || \
 	[ -f $(SYSROOT)/local/include/celt/celt.h ] || \
 	[ -f $(SYSROOT_ALT)/include/celt/celt.h ] && echo "yes")
+USE_DTLS := $(shell [ -f $(SYSROOT)/include/openssl/dtls1.h ] || \
+	[ -f $(SYSROOT)/local/include/openssl/dtls1.h ] || \
+	[ -f $(SYSROOT_ALT)/include/openssl/dtls1.h ] && echo "yes")
 USE_FFMPEG := $(shell [ -f $(SYSROOT)/include/libavcodec/avcodec.h ] || \
 	[ -f $(SYSROOT)/local/include/libavcodec/avcodec.h ] || \
 	[ -f $(SYSROOT)/include/ffmpeg/libavcodec/avcodec.h ] || \
@@ -109,6 +112,9 @@ USE_PORTAUDIO := $(shell [ -f $(SYSROOT)/local/include/portaudio.h ] || \
 USE_SDL  := $(shell [ -f $(SYSROOT)/include/SDL/SDL.h ] || \
 	[ -f $(SYSROOT)/local/include/SDL/SDL.h ] || \
 	[ -f $(SYSROOT_ALT)/include/SDL/SDl.h ] && echo "yes")
+USE_SDL2  := $(shell [ -f $(SYSROOT)/include/SDL2/SDL.h ] || \
+	[ -f $(SYSROOT)/local/include/SDL2/SDL.h ] || \
+	[ -f $(SYSROOT_ALT)/include/SDL2/SDl.h ] && echo "yes")
 USE_SILK := $(shell [ -f $(SYSROOT)/include/silk/SKP_Silk_SDK_API.h ] || \
 	[ -f $(SYSROOT_ALT)/include/silk/SKP_Silk_SDK_API.h ] || \
 	[ -f $(SYSROOT)/local/include/silk/SKP_Silk_SDK_API.h ] && echo "yes")
@@ -188,8 +194,13 @@ endif
 
 # ------------------------------------------------------------------------- #
 
-MODULES   += $(EXTRA_MODULES) stun turn ice natbd auloop vidloop presence
-MODULES   += menu contact vumeter selfview mwi
+MODULES   += $(EXTRA_MODULES)
+MODULES   += stun turn ice natbd auloop presence
+MODULES   += menu contact vumeter mwi account natpmp
+ifneq ($(USE_VIDEO),)
+MODULES   += vidloop selfview
+endif
+
 
 ifneq ($(USE_ALSA),)
 MODULES   += alsa
@@ -278,6 +289,9 @@ MODULES   += portaudio
 endif
 ifneq ($(USE_SDL),)
 MODULES   += sdl
+endif
+ifneq ($(USE_SDL2),)
+MODULES   += sdl2
 endif
 ifneq ($(USE_SILK),)
 MODULES   += silk

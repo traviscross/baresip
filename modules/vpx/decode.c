@@ -1,5 +1,5 @@
 /**
- * @file vp8/decode.c VP8 Decode
+ * @file vpx/decode.c VP8 Decode
  *
  * Copyright (C) 2010 Creytiv.com
  */
@@ -217,8 +217,8 @@ int vp8_decode(struct viddec_state *vds, struct vidframe *frame,
 	res = vpx_codec_decode(&vds->ctx, vds->mb->buf,
 			       (unsigned int)vds->mb->end, NULL, 0);
 	if (res) {
-		re_printf("vp8: decode error: %s\n",
-			  vpx_codec_err_to_string(res));
+		re_printf("vp8: decode error (%u bytes): %s\n",
+			  vds->mb->end, vpx_codec_err_to_string(res));
 		err = EPROTO;
 		goto out;
 	}

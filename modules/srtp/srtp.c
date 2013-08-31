@@ -1,5 +1,5 @@
 /**
- * @file srtp.c Secure Real-time Transport Protocol (RFC 3711)
+ * @file modules/srtp/srtp.c Secure Real-time Transport Protocol (RFC 3711)
  *
  * Copyright (C) 2010 Creytiv.com
  */
@@ -24,6 +24,7 @@ struct menc_st {
 	srtp_t srtp_tx, srtp_rx;
 	srtp_policy_t policy_tx, policy_rx;
 	bool use_srtp;
+	char *crypto_suite;
 
 	void *rtpsock;
 	void *rtcpsock;
@@ -42,6 +43,7 @@ static void destructor(void *arg)
 	struct menc_st *st = arg;
 
 	mem_deref(st->sdpm);
+	mem_deref(st->crypto_suite);
 
 	/* note: must be done before freeing socket */
 	mem_deref(st->uh_rtp);
@@ -56,6 +58,125 @@ static void destructor(void *arg)
 }
 
 
+static bool cryptosuite_issupported(const struct pl *suite)
+{
+	if (0 == pl_strcasecmp(suite, aes_cm_128_hmac_sha1_32)) return true;
+	if (0 == pl_strcasecmp(suite, aes_cm_128_hmac_sha1_80)) return true;
+
+	return false;
+}
+
+
+static int errstatus_print(struct re_printf *pf, err_status_t e)
+{
+	const char *s;
+
+	switch (e) {
+
+	case err_status_ok:          s = "ok";          break;
+	case err_status_fail:        s = "fail";        break;
+	case err_status_auth_fail:   s = "auth_fail";   break;
+	case err_status_cipher_fail: s = "cipher_fail"; break;
+	case err_status_replay_fail: s = "replay_fail"; break;
+
+	default:
+		return re_hprintf(pf, "err=%d", e);
+	}
+
+	return re_hprintf(pf, "%s", s);
+}
+
+
+/*
+ * See RFC 5764 figure 3:
+ *
+ *                  +----------------+
+ *                  | 127 < B < 192 -+--> forward to RTP
+ *                  |                |
+ *      packet -->  |  19 < B < 64  -+--> forward to DTLS
+ *                  |                |
+ *                  |       B < 2   -+--> forward to STUN
+ *                  +----------------+
+ *
+ */
+static bool is_rtp_or_rtcp(const struct mbuf *mb)
+{
+	uint8_t b;
+
+	if (mbuf_get_left(mb) < 1)
+		return false;
+
+	b = mbuf_buf(mb)[0];
+
+	return 127 < b && b < 192;
+}
+
+
+static bool is_rtcp_packet(const struct mbuf *mb)
+{
+	uint8_t pt;
+
+	if (mbuf_get_left(mb) < 2)
+		return false;
+
+	pt = mbuf_buf(mb)[1] & 0x7f;
+
+	return 64 <= pt && pt <= 95;
+}
+
+
+static int start_srtp(struct menc_st *st, const char *suite)
+{
+	crypto_policy_t policy;
+	err_status_t e;
+
+	if (0 == str_casecmp(suite, aes_cm_128_hmac_sha1_32)) {
+		crypto_policy_set_aes_cm_128_hmac_sha1_32(&policy);
+	}
+	else if (0 == str_casecmp(suite, aes_cm_128_hmac_sha1_80)) {
+		crypto_policy_set_aes_cm_128_hmac_sha1_80(&policy);
+	}
+	else {
+		DEBUG_WARNING("unknown SRTP crypto suite (%s)\n", suite);
+		return ENOENT;
+	}
+
+	/* transmit policy */
+	st->policy_tx.rtp = policy;
+	st->policy_tx.rtcp = policy;
+	st->policy_tx.ssrc.type = ssrc_any_outbound;
+	st->policy_tx.key = st->key_tx;
+	st->policy_tx.next = NULL;
+
+	/* receive policy */
+	st->policy_rx.rtp = policy;
+	st->policy_rx.rtcp = policy;
+	st->policy_rx.ssrc.type = ssrc_any_inbound;
+	st->policy_rx.key = st->key_rx;
+	st->policy_rx.next = NULL;
+
+	/* allocate and initialize the SRTP session */
+	e = srtp_create(&st->srtp_tx, &st->policy_tx);
+	if (e != err_status_ok) {
+		DEBUG_WARNING("srtp_create TX failed (%H)\n",
+			      errstatus_print, e);
+		return EPROTO;
+	}
+
+	e = srtp_create(&st->srtp_rx, &st->policy_rx);
+	if (err_status_ok != e) {
+		DEBUG_WARNING("srtp_create RX failed (%H)\n",
+			      errstatus_print, e);
+		return EPROTO;
+	}
+
+	/* use SRTP for this stream/session */
+	st->use_srtp = true;
+
+	return 0;
+}
+
+
 static int setup_srtp(struct menc_st *st)
 {
 	err_status_t e;
@@ -63,207 +184,89 @@ static int setup_srtp(struct menc_st *st)
 	/* init SRTP */
 	e = crypto_get_random(st->key_tx, SRTP_MASTER_KEY_LEN);
 	if (err_status_ok != e) {
-		DEBUG_WARNING("crypto_get_random() failed %d\n", e);
+		DEBUG_WARNING("crypto_get_random() failed (%H)\n",
+			      errstatus_print, e);
 		return ENOSYS;
 	}
-
-	/* transmit policy */
-	crypto_policy_set_rtp_default(&st->policy_tx.rtp);
-	crypto_policy_set_rtcp_default(&st->policy_tx.rtcp);
-	st->policy_tx.ssrc.type = ssrc_any_outbound;
-	st->policy_tx.key = st->key_tx;
-	st->policy_tx.next = NULL;
-
-	/* receive policy */
-	crypto_policy_set_rtp_default(&st->policy_rx.rtp);
-	crypto_policy_set_rtcp_default(&st->policy_rx.rtcp);
-	st->policy_rx.ssrc.type = ssrc_any_inbound;
-	st->policy_rx.key = st->key_rx;
-	st->policy_rx.next = NULL;
-
-	/* allocate and initialize the SRTP session */
-	srtp_create(&st->srtp_tx, &st->policy_tx);
 
 	return 0;
 }
 
 
-static int rtp_enc(struct menc_st *st, struct mbuf *mb)
+static bool send_handler(int *err, struct sa *dst, struct mbuf *mb, void *arg)
 {
-	uint32_t srtp_len;
+	struct menc_st *st = arg;
 	err_status_t e;
-	int len = (int)mbuf_get_left(mb);
+	int len;
+	(void)dst;
 
-	if (!st->use_srtp)
-		return 0;
+	if (!st->use_srtp || !is_rtp_or_rtcp(mb))
+		return false;
 
-	srtp_len = len + SRTP_MAX_TRAILER_LEN;
-	if (srtp_len > mbuf_get_space(mb)) {
-		mbuf_resize(mb, mb->pos + srtp_len);
+	len = (int)mbuf_get_left(mb);
+
+	if (mbuf_get_space(mb) < ((size_t)len + SRTP_MAX_TRAILER_LEN)) {
+		mbuf_resize(mb, mb->pos + len + SRTP_MAX_TRAILER_LEN);
 	}
 
-	e = srtp_protect(st->srtp_tx, mbuf_buf(mb), &len);
+	if (is_rtcp_packet(mb)) {
+		e = srtp_protect_rtcp(st->srtp_tx, mbuf_buf(mb), &len);
+	}
+	else {
+		e = srtp_protect(st->srtp_tx, mbuf_buf(mb), &len);
+	}
+
 	if (err_status_ok != e) {
-		DEBUG_WARNING("srtp_protect: err=%d\n", e);
-		return EPROTO;
+		DEBUG_WARNING("send: failed to protect %s-packet"
+			      " with %d bytes (%H)\n",
+			      is_rtcp_packet(mb) ? "RTCP" : "RTP",
+			      len, errstatus_print, e);
+		*err = EPROTO;
+		return false;
 	}
 
 	mbuf_set_end(mb, mb->pos + len);
 
-	return 0;
+	return false;  /* continue processing */
 }
 
 
-static int rtp_dec(struct menc_st *st, struct mbuf *mb)
+static bool recv_handler(struct sa *src, struct mbuf *mb, void *arg)
 {
-	err_status_t r;
-	int len = (int)mbuf_get_left(mb);
-
-	if (!st->use_srtp)
-		return 0;
-
-	r = srtp_unprotect(st->srtp_rx, mbuf_buf(mb), &len);
-
-	switch (r) {
-
-	case err_status_ok:
-		mbuf_set_end(mb, mb->pos + len);
-		break;
-
-	case err_status_auth_fail:
-		DEBUG_WARNING("srtp_unprotect: auth check fail\n");
-		return EINVAL;
-
-	case err_status_replay_fail:
-		DEBUG_WARNING("srtp_unprotect: replay error\n");
-		return ENOENT;
-
-	default:
-		DEBUG_WARNING("srtp_unprotect: unknown err %d\n", r);
-		return ENOSYS;
-	}
-
-	return 0;
-}
-
-
-static int rtcp_enc(struct menc_st *st, struct mbuf *mb)
-{
-	uint32_t srtp_len;
+	struct menc_st *st = arg;
 	err_status_t e;
-	int len = (int)mbuf_get_left(mb);
+	int len;
+	(void)src;
 
-	if (!st->use_srtp)
-		return 0;
+	if (!st->use_srtp || !is_rtp_or_rtcp(mb))
+		return false;
 
-	srtp_len = len + SRTP_MAX_TRAILER_LEN;
-	if (srtp_len > mbuf_get_space(mb)) {
-		mbuf_resize(mb, mb->pos + srtp_len);
+	len = (int)mbuf_get_left(mb);
+
+	if (is_rtcp_packet(mb)) {
+		e = srtp_unprotect_rtcp(st->srtp_rx, mbuf_buf(mb), &len);
+	}
+	else {
+		e = srtp_unprotect(st->srtp_rx, mbuf_buf(mb), &len);
 	}
 
-	e = srtp_protect_rtcp(st->srtp_tx, mbuf_buf(mb), &len);
-	if (err_status_ok != e) {
-		DEBUG_WARNING("srtp_protect_rtcp: err=%d\n", e);
-		return EPROTO;
+	if (e != err_status_ok) {
+		DEBUG_WARNING("recv: failed to unprotect %s-packet"
+			      " with %d bytes (%H)\n",
+			      is_rtcp_packet(mb) ? "RTCP" : "RTP",
+			      len, errstatus_print, e);
+		return true;   /* error - drop packet */
 	}
 
 	mbuf_set_end(mb, mb->pos + len);
-
-	return 0;
-}
-
-
-static int rtcp_dec(struct menc_st *st, struct mbuf *mb)
-{
-	err_status_t r;
-	int len = (int)mbuf_get_left(mb);
-
-	if (!st->use_srtp)
-		return 0;
-
-	r = srtp_unprotect_rtcp(st->srtp_rx, mbuf_buf(mb), &len);
-
-	switch (r) {
-
-	case err_status_ok:
-		mbuf_set_end(mb, mb->pos + len);
-		break;
-
-	case err_status_auth_fail:
-		DEBUG_WARNING("srtp_unprotect_rtcp: auth check fail\n");
-		return EINVAL;
-
-	case err_status_replay_fail:
-		DEBUG_WARNING("srtp_unprotect_rtcp: replay error\n");
-		return ENOENT;
-
-	default:
-		DEBUG_WARNING("srtp_unprotect_rtcp: unknown err %d\n", r);
-		return ENOSYS;
-	}
-
-	return 0;
-}
-
-
-/** Media Encryption - Encode */
-static bool menc_send_handler(int *err, struct sa *dst,
-			      struct mbuf *mb, void *arg)
-{
-	struct menc_st *st = arg;
-
-	if (sa_cmp(dst, sdp_media_raddr(st->sdpm), SA_ALL))
-		*err = rtp_enc(st, mb);
-
-	return false;  /* continue processing */
-}
-
-
-/** Media Encryption - Decode */
-static bool menc_recv_handler(struct sa *src, struct mbuf *mb, void *arg)
-{
-	struct menc_st *st = arg;
-
-	(void)src;
-
-	if (rtp_dec(st, mb))
-		return true;  /* error - drop packet */
-
-	return false;  /* continue processing */
-}
-
-
-static bool menc_send_rtcp(int *err, struct sa *dst,
-			   struct mbuf *mb, void *arg)
-{
-	struct menc_st *st = arg;
-	struct sa rrtcp;
-
-	sdp_media_raddr_rtcp(st->sdpm, &rrtcp);
-
-	if (sa_cmp(dst, &rrtcp, SA_ALL))
-		*err = rtcp_enc(st, mb);
-
-	return false;  /* continue processing */
-}
-
-
-static bool menc_recv_rtcp(struct sa *src,
-			      struct mbuf *mb, void *arg)
-{
-	struct menc_st *st = arg;
-
-	(void)src;
-
-	if (rtcp_dec(st, mb))
-		return true;  /* error - drop packet */
 
 	return false;  /* continue processing */
 }
 
 
 /* a=crypto:<tag> <crypto-suite> <key-params> [<session-params>] */
-static int sdp_enc(struct menc_st *st, struct sdp_media *m)
+static int sdp_enc(struct menc_st *st, struct sdp_media *m,
+		   uint32_t tag, const char *suite)
 {
 	char key[128] = "";
 	size_t olen;
@@ -274,25 +277,19 @@ static int sdp_enc(struct menc_st *st, struct sdp_media *m)
 	if (err)
 		return err;
 
-	return sdes_encode_crypto(m, aes_cm_128_hmac_sha1_80, key, olen);
+	return sdes_encode_crypto(m, tag, suite, key, olen);
 }
 
 
-static int decode_crypto(struct menc_st *st, const char *value)
+static int start_crypto(struct menc_st *st, const struct pl *key_info)
 {
-	struct crypto c;
-	err_status_t e;
 	size_t olen;
 	int err;
-
-	err = sdes_decode_crypto(&c, value);
-	if (err)
-		return err;
 
 	/* key-info is BASE64 encoded */
 
 	olen = sizeof(st->key_rx);
-	err = base64_decode(c.key_info.p, c.key_info.l, st->key_rx, &olen);
+	err = base64_decode(key_info->p, key_info->l, st->key_rx, &olen);
 	if (err)
 		return err;
 
@@ -300,93 +297,110 @@ static int decode_crypto(struct menc_st *st, const char *value)
 		DEBUG_WARNING("srtp keylen is %u (should be 30)\n", olen);
 	}
 
-	if (0 != pl_strcmp(&c.key_method, "inline")) {
-		DEBUG_WARNING("only key method 'inline' supported\n");
-		return EINVAL;
-	}
+	err = start_srtp(st, st->crypto_suite);
+	if (err)
+		return err;
 
-	if (0 == pl_strcasecmp(&c.suite, aes_cm_128_hmac_sha1_32)) {
-		crypto_policy_set_aes_cm_128_hmac_sha1_32(&st->policy_rx.rtp);
-	}
-	else if (0 == pl_strcasecmp(&c.suite, aes_cm_128_hmac_sha1_80)) {
-		crypto_policy_set_aes_cm_128_hmac_sha1_80(&st->policy_rx.rtp);
-	}
-	else {
-		DEBUG_WARNING("unknown SRTP crypto suite (%r)\n", &c.suite);
-		return ENOENT;
-	}
-
-	e = srtp_create(&st->srtp_rx, &st->policy_rx);
-	if (err_status_ok != e) {
-		DEBUG_WARNING("srtp_create rx failed: %d\n", e);
-	}
-
-	/* use SRTP for this stream/session */
-	st->use_srtp = true;
-
-	(void)re_fprintf(stderr, "%s: SRTP is Enabled\n",
-			 sdp_media_name(st->sdpm));
+	(void)re_fprintf(stderr, "%s: SRTP is Enabled (cryptosuite=%s)\n",
+			 sdp_media_name(st->sdpm), st->crypto_suite);
 
 	return 0;
 }
 
 
-static int update(struct menc_st *st)
+static bool sdp_attr_handler(const char *name, const char *value, void *arg)
 {
-	const char *attr;
+	struct menc_st *st = arg;
+	struct crypto c;
+	(void)name;
 
-	attr = sdp_media_rattr(st->sdpm, sdp_attr_crypto);
-	if (attr)
-		return decode_crypto(st, attr);
+	if (sdes_decode_crypto(&c, value))
+		return false;
 
-	return 0;
+	if (0 != pl_strcmp(&c.key_method, "inline"))
+		return false;
+
+	if (!cryptosuite_issupported(&c.suite))
+		return false;
+
+	st->crypto_suite = mem_deref(st->crypto_suite);
+	pl_strdup(&st->crypto_suite, &c.suite);
+
+	if (start_crypto(st, &c.key_info))
+		return false;
+
+	sdp_enc(st, st->sdpm, c.tag, st->crypto_suite);
+
+	return true;
 }
 
 
 static int alloc(struct menc_media **stp, struct menc_sess *sess,
+		 struct rtp_sock *rtp,
 		 int proto, void *rtpsock, void *rtcpsock,
 		 struct sdp_media *sdpm)
 {
 	struct menc_st *st;
+	const char *rattr = NULL;
 	int layer = 10; /* above zero */
 	int err = 0;
+	bool mux = (rtpsock == rtcpsock);
 	(void)sess;
+	(void)rtp;
 
 	if (!stp || !sdpm)
 		return EINVAL;
 	if (proto != IPPROTO_UDP)
 		return EPROTONOSUPPORT;
 
-	if (*stp) {
-		return update((struct menc_st *)*stp);
+	st = (struct menc_st *)*stp;
+	if (!st) {
+
+		st = mem_zalloc(sizeof(*st), destructor);
+		if (!st)
+			return ENOMEM;
+
+		st->sdpm = mem_ref(sdpm);
+
+		if (rtpsock) {
+			st->rtpsock = mem_ref(rtpsock);
+			err |= udp_register_helper(&st->uh_rtp, rtpsock,
+						   layer, send_handler,
+						   recv_handler, st);
+		}
+		if (rtcpsock && !mux) {
+			st->rtcpsock = mem_ref(rtcpsock);
+			err |= udp_register_helper(&st->uh_rtcp, rtcpsock,
+						   layer, send_handler,
+						   recv_handler, st);
+		}
+		if (err)
+			goto out;
+
+		/* set our preferred crypto-suite */
+		err |= str_dup(&st->crypto_suite, aes_cm_128_hmac_sha1_80);
+		if (err)
+			goto out;
+
+		err = setup_srtp(st);
+		if (err)
+			goto out;
 	}
 
-	st = mem_zalloc(sizeof(*st), destructor);
-	if (!st)
-		return ENOMEM;
+	/* SDP handling */
 
-	st->sdpm = mem_ref(sdpm);
+	if (sdp_media_rattr(st->sdpm, "crypto")) {
 
-	if (rtpsock) {
-		st->rtpsock = mem_ref(rtpsock);
-		err |= udp_register_helper(&st->uh_rtp, rtpsock, layer,
-					   menc_send_handler,
-					   menc_recv_handler, st);
+		rattr = sdp_media_rattr_apply(st->sdpm, "crypto",
+					      sdp_attr_handler, st);
+		if (!rattr) {
+			DEBUG_WARNING("no valid a=crypto attribute from"
+				      " remote peer\n");
+		}
 	}
-	if (rtcpsock) {
-		st->rtcpsock = mem_ref(rtcpsock);
-		err |= udp_register_helper(&st->uh_rtcp, rtcpsock, layer,
-					   menc_send_rtcp,
-					   menc_recv_rtcp, st);
-	}
-	if (err)
-		goto out;
 
-	err = setup_srtp(st);
-	if (err)
-		goto out;
-
-	err = sdp_enc(st, sdpm);
+	if (!rattr)
+		err = sdp_enc(st, sdpm, 0, st->crypto_suite);
 
  out:
 	if (err)
@@ -413,8 +427,12 @@ static struct menc menc_srtp_mandf = {
 
 static int mod_srtp_init(void)
 {
-	if (err_status_ok != srtp_init()) {
-		DEBUG_WARNING("srtp_init() failed\n");
+	err_status_t err;
+
+	err = srtp_init();
+	if (err_status_ok != err) {
+		DEBUG_WARNING("srtp_init() failed (%H)\n",
+			      errstatus_print, err);
 		return ENOSYS;
 	}
 

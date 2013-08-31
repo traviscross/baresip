@@ -25,10 +25,74 @@ static time_t start_time;             /**< Start time of application      */
 static struct tmr tmr_alert;          /**< Incoming call alert timer      */
 static struct tmr tmr_stat;           /**< Call status timer              */
 static enum statmode statmode;        /**< Status mode                    */
+static struct mbuf *dialbuf;          /**< Buffer for dialled number      */
+static struct le *le_cur;             /**< Current User-Agent (struct ua) */
 
 
 static void menu_set_incall(bool incall);
 static void update_callstatus(void);
+
+
+static void check_registrations(void)
+{
+	static bool ual_ready = false;
+	struct le *le;
+	uint32_t n;
+
+	if (ual_ready)
+		return;
+
+	for (le = list_head(uag_list()); le; le = le->next) {
+		struct ua *ua = le->data;
+
+		if (!ua_isregistered(ua))
+			return;
+	}
+
+	n = list_count(uag_list());
+
+	/* We are ready */
+	(void)re_printf("\x1b[32mAll %u useragent%s registered successfully!"
+			" (%u ms)\x1b[;m\n",
+			n, n==1 ? "" : "s",
+			(uint32_t)(tmr_jiffies() - start_ticks));
+
+	ual_ready = true;
+}
+
+
+/**
+ * Return the current User-Agent in focus
+ *
+ * @return Current User-Agent
+ */
+static struct ua *uag_cur(void)
+{
+	if (list_isempty(uag_list()))
+		return NULL;
+
+	if (!le_cur)
+		le_cur = list_head(uag_list());
+
+	return list_ledata(le_cur);
+}
+
+
+/* Return TRUE if there are any active calls for any UAs */
+static bool have_active_calls(void)
+{
+	struct le *le;
+
+	for (le = list_head(uag_list()); le; le = le->next) {
+
+		struct ua *ua = le->data;
+
+		if (ua_call(ua))
+			return true;
+	}
+
+	return false;
+}
 
 
 static int print_system_info(struct re_printf *pf, void *arg)
@@ -44,7 +108,8 @@ static int print_system_info(struct re_printf *pf, void *arg)
 
 	err |= re_hprintf(pf, " Machine:  %s/%s\n", sys_arch_get(),
 			  sys_os_get());
-	err |= re_hprintf(pf, " Version:  %s\n", sys_libre_version_get());
+	err |= re_hprintf(pf, " Version:  %s (libre v%s)\n",
+			  BARESIP_VERSION, sys_libre_version_get());
 	err |= re_hprintf(pf, " Build:    %H\n", sys_build_get, NULL);
 	err |= re_hprintf(pf, " Kernel:   %H\n", sys_kernel_get, NULL);
 	err |= re_hprintf(pf, " Uptime:   %H\n", fmt_human_time, &uptime);
@@ -58,6 +123,66 @@ static int print_system_info(struct re_printf *pf, void *arg)
 }
 
 
+/**
+ * Print the SIP Registration for all User-Agents
+ *
+ * @param pf     Print handler for debug output
+ * @param unused Unused parameter
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+static int ua_print_reg_status(struct re_printf *pf, void *unused)
+{
+	struct le *le;
+	int err;
+
+	(void)unused;
+
+	err = re_hprintf(pf, "\n--- Useragents: %u ---\n",
+			 list_count(uag_list()));
+
+	for (le = list_head(uag_list()); le && !err; le = le->next) {
+		const struct ua *ua = le->data;
+
+		err  = re_hprintf(pf, "%s ", ua == uag_cur() ? ">" : " ");
+		err |= ua_print_status(pf, ua);
+	}
+
+	err |= re_hprintf(pf, "\n");
+
+	return err;
+}
+
+
+/**
+ * Print the current SIP Call status for the current User-Agent
+ *
+ * @param pf     Print handler for debug output
+ * @param unused Unused parameter
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+static int ua_print_call_status(struct re_printf *pf, void *unused)
+{
+	struct call *call;
+	int err;
+
+	(void)unused;
+
+	call = ua_call(uag_cur());
+	if (call) {
+		err  = re_hprintf(pf, "\n--- Call status: ---\n");
+		err |= call_debug(pf, call);
+		err |= re_hprintf(pf, "\n");
+	}
+	else {
+		err  = re_hprintf(pf, "\n(no active calls)\n");
+	}
+
+	return err;
+}
+
+
 static int dial_handler(struct re_printf *pf, void *arg)
 {
 	const struct cmd_arg *carg = arg;
@@ -65,7 +190,27 @@ static int dial_handler(struct re_printf *pf, void *arg)
 
 	(void)pf;
 
-	err = ua_connect(uag_cur(), carg->prm, NULL, NULL, VIDMODE_ON);
+	if (str_isset(carg->prm)) {
+
+		mbuf_rewind(dialbuf);
+		(void)mbuf_write_str(dialbuf, carg->prm);
+
+		err = ua_connect(uag_cur(), carg->prm, NULL, VIDMODE_ON);
+	}
+	else if (dialbuf->end > 0) {
+
+		char *uri;
+
+		dialbuf->pos = 0;
+		err = mbuf_strdup(dialbuf, &uri, dialbuf->end);
+		if (err)
+			return err;
+
+		err = ua_connect(uag_cur(), uri, NULL, VIDMODE_ON);
+
+		mem_deref(uri);
+	}
+
 	if (err) {
 		DEBUG_WARNING("connect failed: %m\n", err);
 	}
@@ -93,7 +238,7 @@ static int cmd_hangup(struct re_printf *pf, void *unused)
 	ua_hangup(uag_cur());
 
 	/* note: must be called after ua_hangup() */
-	menu_set_incall(uag_active_calls());
+	menu_set_incall(have_active_calls());
 
 	return 0;
 }
@@ -104,7 +249,13 @@ static int cmd_ua_next(struct re_printf *pf, void *unused)
 	(void)pf;
 	(void)unused;
 
-	uag_next();
+	if (!le_cur)
+		le_cur = list_head(uag_list());
+
+	le_cur = le_cur->next ? le_cur->next : list_head(uag_list());
+
+	(void)re_fprintf(stderr, "ua: %s\n", ua_aor(list_ledata(le_cur)));
+
 	update_callstatus();
 
 	return 0;
@@ -122,6 +273,13 @@ static int cmd_print_calls(struct re_printf *pf, void *unused)
 {
 	(void)unused;
 	return ua_print_calls(pf, uag_cur());
+}
+
+
+static int cmd_config_print(struct re_printf *pf, void *unused)
+{
+	(void)unused;
+	return config_print(pf, conf_config());
 }
 
 
@@ -143,6 +301,7 @@ static const struct cmd cmdv[] = {
 	{'y',       0, "Memory status",            mem_status           },
 	{0x1b,      0, "Hangup call",              cmd_hangup           },
 	{' ',       0, "Toggle UAs",               cmd_ua_next          },
+	{'g',       0, "Print configuration",      cmd_config_print     },
 
 	{'#', CMD_PRM, NULL,   dial_handler },
 	{'*', CMD_PRM, NULL,   dial_handler },
@@ -330,7 +489,7 @@ static void tmrstat_handler(void *arg)
 static void update_callstatus(void)
 {
 	/* if there are any active calls, enable the call status view */
-	if (uag_active_calls())
+	if (have_active_calls())
 		tmr_start(&tmr_stat, 100, tmrstat_handler, 0);
 	else
 		tmr_cancel(&tmr_stat);
@@ -356,10 +515,12 @@ static void alert_stop(void)
 }
 
 
-static void ua_event_handler(struct ua *ua, enum ua_event ev, const char *prm)
+static void ua_event_handler(struct ua *ua, enum ua_event ev,
+			     const char *prm, void *arg)
 {
 	(void)ua;
 	(void)prm;
+	(void)arg;
 
 	switch (ev) {
 
@@ -372,12 +533,29 @@ static void ua_event_handler(struct ua *ua, enum ua_event ev, const char *prm)
 		alert_stop();
 		break;
 
+	case UA_EVENT_REGISTER_OK:
+		check_registrations();
+		break;
+
 	default:
 		break;
 	}
 
-	menu_set_incall(uag_active_calls());
+	menu_set_incall(have_active_calls());
 	update_callstatus();
+}
+
+
+static void message_handler(const struct pl *peer, const struct pl *ctype,
+			    struct mbuf *body, void *arg)
+{
+	(void)ctype;
+	(void)arg;
+
+	(void)re_fprintf(stderr, "\r%r: \"%b\"\n", peer,
+			 mbuf_buf(body), mbuf_get_left(body));
+
+	(void)play_file(NULL, "message.wav", 0);
 }
 
 
@@ -385,13 +563,19 @@ static int module_init(void)
 {
 	int err;
 
+	dialbuf = mbuf_alloc(64);
+	if (!dialbuf)
+		return ENOMEM;
+
 	start_ticks = tmr_jiffies();
 	(void)time(&start_time);
 	tmr_init(&tmr_alert);
 	statmode = STATMODE_CALL;
 
 	err  = cmd_register(cmdv, ARRAY_SIZE(cmdv));
-	err |= uag_event_register(ua_event_handler);
+	err |= uag_event_register(ua_event_handler, NULL);
+
+	err |= message_init(message_handler, NULL);
 
 	return err;
 }
@@ -399,12 +583,16 @@ static int module_init(void)
 
 static int module_close(void)
 {
+	message_close();
 	uag_event_unregister(ua_event_handler);
 	cmd_unregister(cmdv);
 
 	menu_set_incall(false);
 	tmr_cancel(&tmr_alert);
 	tmr_cancel(&tmr_stat);
+	dialbuf = mem_deref(dialbuf);
+
+	le_cur = NULL;
 
 	return 0;
 }

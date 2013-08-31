@@ -4,6 +4,7 @@
  * Copyright (C) 2010 Creytiv.com
  */
 #define _POSIX_SOURCE 1
+#include <sys/types.h>
 #include <sys/time.h>
 #include <stdlib.h>
 #include <unistd.h>
