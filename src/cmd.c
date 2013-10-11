@@ -123,7 +123,7 @@ static const char *cmd_name(char *buf, size_t sz, const struct cmd *cmd)
 	buf[1] = '\0';
 
 	if (cmd->flags & CMD_PRM)
-		strncat(buf, " ..", sz);
+		strncat(buf, " ..", sz-1);
 
 	return buf;
 }
@@ -189,9 +189,14 @@ static int cmd_report(const struct cmd *cmd, struct re_printf *pf,
 static int cmd_process_edit(struct cmd_ctx **ctxp, char key,
 			    struct re_printf *pf)
 {
-	struct cmd_ctx *ctx = *ctxp;
+	struct cmd_ctx *ctx;
 	bool compl = (key == '\n'), del = false;
 	int err;
+
+	if (!ctxp)
+		return EINVAL;
+
+	ctx = *ctxp;
 
 	err = editor_input(ctx->mb, key, pf, &del);
 	if (err)

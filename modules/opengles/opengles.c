@@ -216,7 +216,7 @@ static void destructor(void *arg)
 
 static int opengles_alloc(struct vidisp_st **stp, struct vidisp *vd,
 			  struct vidisp_prm *prm, const char *dev,
-			  vidisp_input_h *inputh, vidisp_resize_h *resizeh,
+			  vidisp_resize_h *resizeh,
 			  void *arg)
 {
 	struct vidisp_st *st;
@@ -224,7 +224,6 @@ static int opengles_alloc(struct vidisp_st **stp, struct vidisp *vd,
 
 	(void)prm;
 	(void)dev;
-	(void)inputh;
 	(void)resizeh;
 	(void)arg;
 

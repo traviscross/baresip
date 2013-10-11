@@ -171,9 +171,7 @@ static int ua_print_call_status(struct re_printf *pf, void *unused)
 
 	call = ua_call(uag_cur());
 	if (call) {
-		err  = re_hprintf(pf, "\n--- Call status: ---\n");
-		err |= call_debug(pf, call);
-		err |= re_hprintf(pf, "\n");
+		err  = re_hprintf(pf, "\n%H\n", call_debug, call);
 	}
 	else {
 		err  = re_hprintf(pf, "\n(no active calls)\n");
@@ -195,7 +193,8 @@ static int dial_handler(struct re_printf *pf, void *arg)
 		mbuf_rewind(dialbuf);
 		(void)mbuf_write_str(dialbuf, carg->prm);
 
-		err = ua_connect(uag_cur(), carg->prm, NULL, VIDMODE_ON);
+		err = ua_connect(uag_cur(), NULL, NULL,
+				 carg->prm, NULL, VIDMODE_ON);
 	}
 	else if (dialbuf->end > 0) {
 
@@ -206,7 +205,7 @@ static int dial_handler(struct re_printf *pf, void *arg)
 		if (err)
 			return err;
 
-		err = ua_connect(uag_cur(), uri, NULL, VIDMODE_ON);
+		err = ua_connect(uag_cur(), NULL, NULL, uri, NULL, VIDMODE_ON);
 
 		mem_deref(uri);
 	}
@@ -224,7 +223,7 @@ static int cmd_answer(struct re_printf *pf, void *unused)
 	(void)pf;
 	(void)unused;
 
-	ua_answer(uag_cur());
+	ua_answer(uag_cur(), NULL);
 
 	return 0;
 }
@@ -235,7 +234,7 @@ static int cmd_hangup(struct re_printf *pf, void *unused)
 	(void)pf;
 	(void)unused;
 
-	ua_hangup(uag_cur());
+	ua_hangup(uag_cur(), NULL, 0, NULL);
 
 	/* note: must be called after ua_hangup() */
 	menu_set_incall(have_active_calls());
@@ -329,7 +328,7 @@ static int call_audioenc_cycle(struct re_printf *pf, void *unused)
 {
 	(void)pf;
 	(void)unused;
-	call_audioencoder_cycle(ua_call(uag_cur()));
+	audio_encoder_cycle(call_audio(ua_call(uag_cur())));
 	return 0;
 }
 
@@ -358,12 +357,22 @@ static int call_mute(struct re_printf *pf, void *unused)
 static int call_xfer(struct re_printf *pf, void *arg)
 {
 	const struct cmd_arg *carg = arg;
+	static bool xfer_inprogress;
 
-	(void)pf;
+	if (!xfer_inprogress && !carg->complete) {
+		statmode = STATMODE_OFF;
+		re_hprintf(pf, "\rPlease enter transfer target SIP uri:\n");
+	}
 
-	statmode = STATMODE_OFF;
+	xfer_inprogress = true;
 
-	return call_transfer(ua_call(uag_cur()), carg->prm);
+	if (carg->complete) {
+		statmode = STATMODE_CALL;
+		xfer_inprogress = false;
+		return call_transfer(ua_call(uag_cur()), carg->prm);
+	}
+
+	return 0;
 }
 
 
@@ -381,7 +390,7 @@ static int call_videoenc_cycle(struct re_printf *pf, void *unused)
 {
 	(void)pf;
 	(void)unused;
-	call_videoencoder_cycle(ua_call(uag_cur()));
+	video_encoder_cycle(call_video(ua_call(uag_cur())));
 	return 0;
 }
 
@@ -430,7 +439,7 @@ static const struct cmd callcmdv[] = {
 	{'a',       0, "Audio stream",        call_audio_debug      },
 	{'e',       0, "Cycle audio encoder", call_audioenc_cycle   },
 	{'m',       0, "Call mute/un-mute",   call_mute             },
-	{'r', CMD_PRM, "Transfer call",       call_xfer             },
+	{'r', CMD_IPRM,"Transfer call",       call_xfer             },
 	{'x',       0, "Call hold",           call_holdresume       },
 
 #ifdef USE_VIDEO
@@ -516,15 +525,18 @@ static void alert_stop(void)
 
 
 static void ua_event_handler(struct ua *ua, enum ua_event ev,
-			     const char *prm, void *arg)
+			     struct call *call, const char *prm, void *arg)
 {
-	(void)ua;
+	(void)call;
 	(void)prm;
 	(void)arg;
 
 	switch (ev) {
 
 	case UA_EVENT_CALL_INCOMING:
+		re_printf("%s: Incoming call from: %s %s -"
+			  " (press ENTER to accept)\n",
+			  ua_aor(ua), call_peername(call), call_peeruri(call));
 		alert_start(0);
 		break;
 
@@ -536,6 +548,9 @@ static void ua_event_handler(struct ua *ua, enum ua_event ev,
 	case UA_EVENT_REGISTER_OK:
 		check_registrations();
 		break;
+
+	case UA_EVENT_UNREGISTERING:
+		return;
 
 	default:
 		break;

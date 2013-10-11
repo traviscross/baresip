@@ -10,9 +10,6 @@
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
-#if defined(DARWIN) && defined(USE_SDL)
-#include <SDL/SDL_main.h>
-#endif
 #ifdef HAVE_GETOPT
 #include <getopt.h>
 #endif
@@ -124,6 +121,8 @@ int main(int argc, char *argv[])
 		if (err)
 			goto out;
 	}
+
+	re_printf("baresip is ready.\n");
 
 	if (exec)
 		ui_input_str(exec);

@@ -10,47 +10,10 @@
 #include "png_vf.h"
 
 
-struct snapshot {
-	struct vidfilt_st vf;    /**< Inheritance      */
-};
-
-
 static bool flag_enc, flag_dec;
 
 
-static void destructor(void *arg)
-{
-	struct snapshot *st = arg;
-
-	list_unlink(&st->vf.le);
-}
-
-
-static int update(struct vidfilt_st **stp, struct vidfilt *vf)
-{
-	struct snapshot *st;
-	int err = 0;
-
-	if (!stp || !vf)
-		return EINVAL;
-
-	if (*stp)
-		return 0;
-
-	st = mem_zalloc(sizeof(*st), destructor);
-	if (!st)
-		return ENOMEM;
-
-	if (err)
-		mem_deref(st);
-	else
-		*stp = (struct vidfilt_st *)st;
-
-	return err;
-}
-
-
-static int encode(struct vidfilt_st *st, struct vidframe *frame)
+static int encode(struct vidfilt_enc_st *st, struct vidframe *frame)
 {
 	(void)st;
 
@@ -66,7 +29,7 @@ static int encode(struct vidfilt_st *st, struct vidframe *frame)
 }
 
 
-static int decode(struct vidfilt_st *st, struct vidframe *frame)
+static int decode(struct vidfilt_dec_st *st, struct vidframe *frame)
 {
 	(void)st;
 
@@ -95,7 +58,7 @@ static int do_snapshot(struct re_printf *pf, void *arg)
 
 
 static struct vidfilt snapshot = {
-	LE_INIT, "snapshot", update, encode, decode,
+	LE_INIT, "snapshot", NULL, encode, NULL, decode,
 };
 
 

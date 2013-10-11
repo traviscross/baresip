@@ -100,11 +100,14 @@ static int request(struct sip_req *sr)
 int sip_req_send(struct ua *ua, const char *method, const char *uri,
 		 sip_resp_h *resph, void *arg, const char *fmt, ...)
 {
+	const char *routev[1];
 	struct sip_req *sr;
 	int err;
 
 	if (!ua || !method || !uri || !resph || !fmt)
 		return EINVAL;
+
+	routev[0] = ua_outbound(ua);
 
 	sr = mem_zalloc(sizeof(*sr), destructor);
 	if (!sr)
@@ -126,7 +129,9 @@ int sip_req_send(struct ua *ua, const char *method, const char *uri,
 	if (err)
 		goto out;
 
-	err = sip_dialog_alloc(&sr->dlg, uri, uri, NULL, ua_aor(ua), NULL, 0);
+	err = sip_dialog_alloc(&sr->dlg, uri, uri, NULL, ua_aor(ua),
+			       routev[0] ? routev : NULL,
+			       routev[0] ? 1 : 0);
 	if (err)
 		goto out;
 

@@ -33,6 +33,8 @@ celt          CELT audio codec
 cons          UDP console
 contact       Contacts module
 coreaudio     Apple Coreaudio driver
+directfb      DirectFB video display module
+dshow         Windows DirectShow video source
 evdev         Linux input driver
 g711          G.711 audio codec
 g722          G.722 audio codec
@@ -81,6 +83,7 @@ v4l2          Video4Linux2 video source
 vidloop       Video-loop test module
 vpx           VP8/VPX video codec
 vumeter       Display audio levels in console
+wincons       Console input driver for Windows
 winwave       Audio driver for Windows
 x11           X11 video output driver
 x11grab       X11 grabber video source
@@ -113,6 +116,7 @@ IETF RFC/I-Ds:
 * RFC 5577  RTP Payload Format for ITU-T Recommendation G.722.1
 * RFC 5626  Managing Client-Initiated Connections in SIP
 * RFC 5761  Multiplexing RTP Data and Control Packets on a Single Port
+* RFC 5780  NAT Behaviour Discovery Using STUN
 * RFC 6263  App. Mechanism for Keeping Alive NAT Associated with RTP / RTCP
 * RFC 6716  Definition of the Opus Audio Codec
 * RFC 6886  NAT Port Mapping Protocol (NAT-PMP)

@@ -88,6 +88,7 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 	AVPicture pict;
 	struct vidframe vf;
 	struct vidsz sz;
+	unsigned i;
 
 	if (st->codec) {
 		AVFrame frame;
@@ -143,24 +144,24 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 				0, st->sz.h, pict.data, pict.linesize);
 		if (ret <= 0)
 			goto end;
-
-		vidframe_init(&vf, VID_FMT_YUV420P, &st->app_sz,
-			      (void *)pict.data, pict.linesize);
-
-		st->frameh(&vf, st->arg);
-
-	end:
-		avpicture_free(&pict);
 	}
 	else {
 		avpicture_fill(&pict, pkt->data, PIX_FMT_YUV420P,
 			       st->sz.w, st->sz.h);
-
-		vidframe_init(&vf, VID_FMT_YUV420P, &st->app_sz,
-			      (void *)pict.data, pict.linesize);
-
-		st->frameh(&vf, st->arg);
 	}
+
+	vf.size = st->app_sz;
+	vf.fmt  = VID_FMT_YUV420P;
+	for (i=0; i<4; i++) {
+		vf.data[i]     = pict.data[i];
+		vf.linesize[i] = pict.linesize[i];
+	}
+
+	st->frameh(&vf, st->arg);
+
+ end:
+	if (st->codec)
+		avpicture_free(&pict);
 }
 
 

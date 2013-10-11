@@ -242,7 +242,7 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 	st->sz.h = fmt.fmt.pix.height;
 
 	if (!vidsz_cmp(&st->sz, &st->app_sz)) {
-		re_printf("v4l2: scaling %ux%u ---> %ux%u\n",
+		re_printf("v4l2: scaling %u x %u  --->  %u x %u\n",
 			  st->sz.w, st->sz.h, st->app_sz.w, st->app_sz.h);
 	}
 

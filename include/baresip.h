@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.5"
+#define BARESIP_VERSION "0.4.6"
 
 
 /* forward declarations */
@@ -45,20 +45,36 @@ struct list *account_vidcodecl(const struct account *acc);
  * Call
  */
 
+enum call_event {
+	CALL_EVENT_INCOMING,
+	CALL_EVENT_RINGING,
+	CALL_EVENT_PROGRESS,
+	CALL_EVENT_ESTABLISHED,
+	CALL_EVENT_CLOSED,
+	CALL_EVENT_TRANSFER,
+};
+
 struct call;
+
+typedef void (call_event_h)(struct call *call, enum call_event ev,
+			    const char *str, void *arg);
+typedef void (call_dtmf_h)(struct call *call, char key, void *arg);
 
 int  call_modify(struct call *call);
 int  call_hold(struct call *call, bool hold);
 int  call_send_digit(struct call *call, char key);
-void call_audioencoder_cycle(struct call *call);
-void call_videoencoder_cycle(struct call *call);
 bool call_has_audio(const struct call *call);
 bool call_has_video(const struct call *call);
 int  call_transfer(struct call *call, const char *uri);
 int  call_status(struct re_printf *pf, const struct call *call);
 int  call_debug(struct re_printf *pf, const struct call *call);
+void call_set_handlers(struct call *call, call_event_h *eh,
+		       call_dtmf_h *dtmfh, void *arg);
+uint16_t      call_scode(const struct call *call);
 uint32_t      call_duration(const struct call *call);
+const char   *call_peeruri(const struct call *call);
 const char   *call_peername(const struct call *call);
+const char   *call_localuri(const struct call *call);
 struct audio *call_audio(const struct call *call);
 struct video *call_video(const struct call *call);
 struct list  *call_streaml(const struct call *call);
@@ -143,7 +159,7 @@ struct config {
 	struct config_video {
 		char src_mod[16];       /**< Video source module            */
 		char src_dev[128];      /**< Video source device            */
-		int width, height;      /**< Video resolution               */
+		unsigned width, height; /**< Video resolution               */
 		uint32_t bitrate;       /**< Encoder bitrate in [bit/s]     */
 		uint32_t fps;           /**< Video framerate                */
 	} video;
@@ -290,8 +306,13 @@ int auplay_alloc(struct auplay_st **stp, const char *name,
 struct aufilt;
 
 /* Base class */
-struct aufilt_st {
-	struct aufilt *af;
+struct aufilt_enc_st {
+	const struct aufilt *af;
+	struct le le;
+};
+
+struct aufilt_dec_st {
+	const struct aufilt *af;
 	struct le le;
 };
 
@@ -302,19 +323,22 @@ struct aufilt_prm {
 	uint32_t frame_size;  /**< Number of samples per frame  */
 };
 
-typedef int (aufilt_update_h)(struct aufilt_st **stp, struct aufilt *af,
-			      const struct aufilt_prm *encprm,
-			      const struct aufilt_prm *decprm);
-typedef int (aufilt_encode_h)(struct aufilt_st *st,
+typedef int (aufilt_encupd_h)(struct aufilt_enc_st **stp, void **ctx,
+			      const struct aufilt *af, struct aufilt_prm *prm);
+typedef int (aufilt_encode_h)(struct aufilt_enc_st *st,
 			      int16_t *sampv, size_t *sampc);
-typedef int (aufilt_decode_h)(struct aufilt_st *st,
+
+typedef int (aufilt_decupd_h)(struct aufilt_dec_st **stp, void **ctx,
+			      const struct aufilt *af, struct aufilt_prm *prm);
+typedef int (aufilt_decode_h)(struct aufilt_dec_st *st,
 			      int16_t *sampv, size_t *sampc);
 
 struct aufilt {
 	struct le le;
 	const char *name;
-	aufilt_update_h *updh;
+	aufilt_encupd_h *encupdh;
 	aufilt_encode_h *ench;
+	aufilt_decupd_h *decupdh;
 	aufilt_decode_h *dech;
 };
 
@@ -366,6 +390,7 @@ void net_close(void);
 int  net_dnssrv_add(const struct sa *sa);
 void net_change(uint32_t interval, net_change_h *ch, void *arg);
 bool net_check(void);
+int  net_af(void);
 int  net_debug(struct re_printf *pf, void *unused);
 const struct sa *net_laddr_af(int af);
 const char      *net_domain(void);
@@ -414,15 +439,17 @@ enum vidmode {
 
 /** Defines the User-Agent event handler */
 typedef void (ua_event_h)(struct ua *ua, enum ua_event ev,
-			  const char *prm, void *arg);
+			  struct call *call, const char *prm, void *arg);
 typedef void (options_resp_h)(int err, const struct sip_msg *msg, void *arg);
 
 /* Multiple instances */
 int  ua_alloc(struct ua **uap, const char *aor);
-int  ua_connect(struct ua *ua, const char *uri, const char *params,
-		enum vidmode vmode);
-void ua_hangup(struct ua *ua);
-int  ua_answer(struct ua *ua);
+int  ua_connect(struct ua *ua, struct call **callp,
+		const char *from_uri, const char *uri,
+		const char *params, enum vidmode vmode);
+void ua_hangup(struct ua *ua, struct call *call,
+	       uint16_t scode, const char *reason);
+int  ua_answer(struct ua *ua, struct call *call);
 int  ua_options_send(struct ua *ua, const char *uri,
 		     options_resp_h *resph, void *arg);
 int  ua_sipfd(const struct ua *ua);
@@ -531,7 +558,7 @@ struct vidsrc_prm {
 	int fps;          /**< Wanted framerate                            */
 };
 
-typedef void (vidsrc_frame_h)(const struct vidframe *frame, void *arg);
+typedef void (vidsrc_frame_h)(struct vidframe *frame, void *arg);
 typedef void (vidsrc_error_h)(int err, void *arg);
 
 typedef int  (vidsrc_alloc_h)(struct vidsrc_st **vsp, struct vidsrc *vs,
@@ -566,12 +593,11 @@ struct vidisp_prm {
 	void *view;  /**< Optional view (set by application or module) */
 };
 
-typedef void (vidisp_input_h)(char key, void *arg);
 typedef void (vidisp_resize_h)(const struct vidsz *size, void *arg);
 
 typedef int  (vidisp_alloc_h)(struct vidisp_st **vp,
 			      struct vidisp *vd, struct vidisp_prm *prm,
-			      const char *dev, vidisp_input_h *inputh,
+			      const char *dev,
 			      vidisp_resize_h *resizeh, void *arg);
 typedef int  (vidisp_update_h)(struct vidisp_st *st, bool fullscreen,
 			       int orient, const struct vidrect *window);
@@ -584,7 +610,7 @@ int vidisp_register(struct vidisp **vp, const char *name,
 		    vidisp_disp_h *disph, vidisp_hide_h *hideh);
 int vidisp_alloc(struct vidisp_st **stp, const char *name,
 		 struct vidisp_prm *prm, const char *dev,
-		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg);
+		 vidisp_resize_h *resizeh, void *arg);
 int vidisp_display(struct vidisp_st *st, const char *title,
 		   const struct vidframe *frame);
 const struct vidisp *vidisp_find(const char *name);
@@ -699,26 +725,42 @@ struct list *vidcodec_list(void);
 struct vidfilt;
 
 /* Base class */
-struct vidfilt_st {
+struct vidfilt_enc_st {
 	const struct vidfilt *vf;
 	struct le le;
 };
 
-typedef int (vidfilt_update_h)(struct vidfilt_st **stp, struct vidfilt *vf);
-typedef int (vidfilt_encode_h)(struct vidfilt_st *st, struct vidframe *frame);
-typedef int (vidfilt_decode_h)(struct vidfilt_st *st, struct vidframe *frame);
+struct vidfilt_dec_st {
+	const struct vidfilt *vf;
+	struct le le;
+};
+
+typedef int (vidfilt_encupd_h)(struct vidfilt_enc_st **stp, void **ctx,
+			       const struct vidfilt *vf);
+typedef int (vidfilt_encode_h)(struct vidfilt_enc_st *st,
+			       struct vidframe *frame);
+
+typedef int (vidfilt_decupd_h)(struct vidfilt_dec_st **stp, void **ctx,
+			       const struct vidfilt *vf);
+typedef int (vidfilt_decode_h)(struct vidfilt_dec_st *st,
+			       struct vidframe *frame);
 
 struct vidfilt {
 	struct le le;
 	const char *name;
-	vidfilt_update_h *updh;
+	vidfilt_encupd_h *encupdh;
 	vidfilt_encode_h *ench;
+	vidfilt_decupd_h *decupdh;
 	vidfilt_decode_h *dech;
 };
 
 void vidfilt_register(struct vidfilt *vf);
 void vidfilt_unregister(struct vidfilt *vf);
 struct list *vidfilt_list(void);
+int vidfilt_enc_append(struct list *filtl, void **ctx,
+		       const struct vidfilt *vf);
+int vidfilt_dec_append(struct list *filtl, void **ctx,
+		       const struct vidfilt *vf);
 
 
 /*
@@ -728,6 +770,8 @@ struct list *vidfilt_list(void);
 struct audio;
 
 void audio_mute(struct audio *a, bool muted);
+void audio_set_devicename(struct audio *a, const char *src, const char *play);
+void audio_encoder_cycle(struct audio *audio);
 int  audio_debug(struct re_printf *pf, const struct audio *a);
 
 
@@ -743,6 +787,8 @@ int   video_set_fullscreen(struct video *v, bool fs);
 int   video_set_orient(struct video *v, int orient);
 void  video_vidsrc_set_device(struct video *v, const char *dev);
 int   video_set_source(struct video *v, const char *name, const char *dev);
+void  video_set_devicename(struct video *v, const char *src, const char *disp);
+void  video_encoder_cycle(struct video *video);
 int   video_debug(struct re_printf *pf, const struct video *v);
 
 

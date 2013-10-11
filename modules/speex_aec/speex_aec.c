@@ -17,11 +17,38 @@
 
 
 struct speex_st {
-	struct aufilt af;    /* base class */
 	uint32_t nsamp;
 	int16_t *out;
 	SpeexEchoState *state;
 };
+
+struct enc_st {
+	struct aufilt_enc_st af;  /* base class */
+	struct speex_st *st;
+};
+
+struct dec_st {
+	struct aufilt_dec_st af;  /* base class */
+	struct speex_st *st;
+};
+
+
+static void enc_destructor(void *arg)
+{
+	struct enc_st *st = arg;
+
+	list_unlink(&st->af.le);
+	mem_deref(st->st);
+}
+
+
+static void dec_destructor(void *arg)
+{
+	struct dec_st *st = arg;
+
+	list_unlink(&st->af.le);
+	mem_deref(st->st);
+}
 
 
 #ifdef SPEEX_SET_VBR_MAX_BITRATE
@@ -33,40 +60,27 @@ static void speex_aec_destructor(void *arg)
 		speex_echo_state_destroy(st->state);
 
 	mem_deref(st->out);
-	list_unlink(&st->af.le);
 }
 
 
-static int update(struct aufilt_st **stp, struct aufilt *af,
-		  const struct aufilt_prm *encprm,
-		  const struct aufilt_prm *decprm)
+static int aec_alloc(struct speex_st **stp, void **ctx, struct aufilt_prm *prm)
 {
 	struct speex_st *st;
 	int err, tmp, fl;
 
-	(void)af;
-
-	if (!stp)
+	if (!stp || !ctx || !prm)
 		return EINVAL;
 
-	if (*stp)
+	if (*ctx) {
+		*stp = mem_ref(*ctx);
 		return 0;
-
-	/* Check config */
-	if (encprm->srate != decprm->srate) {
-		DEBUG_WARNING("symm srate required for AEC\n");
-		return EINVAL;
-	}
-	if (encprm->ch != decprm->ch) {
-		DEBUG_WARNING("symm channels required for AEC\n");
-		return EINVAL;
 	}
 
 	st = mem_zalloc(sizeof(*st), speex_aec_destructor);
 	if (!st)
 		return ENOMEM;
 
-	st->nsamp = encprm->ch * encprm->frame_size;
+	st->nsamp = prm->ch * prm->frame_size;
 
 	st->out = mem_alloc(2 * st->nsamp, NULL);
 	if (!st->out) {
@@ -75,34 +89,89 @@ static int update(struct aufilt_st **stp, struct aufilt *af,
 	}
 
 	/* Echo canceller with 200 ms tail length */
-	fl = 10 * encprm->frame_size;
-	st->state = speex_echo_state_init(encprm->frame_size, fl);
+	fl = 10 * prm->frame_size;
+	st->state = speex_echo_state_init(prm->frame_size, fl);
 	if (!st->state) {
 		err = ENOMEM;
 		goto out;
 	}
 
-	tmp = encprm->srate;
+	tmp = prm->srate;
 	err = speex_echo_ctl(st->state, SPEEX_ECHO_SET_SAMPLING_RATE, &tmp);
 	if (err < 0) {
 		DEBUG_WARNING("speex_echo_ctl: err=%d\n", err);
 	}
 
-	DEBUG_NOTICE("Speex AEC loaded: enc=%uHz\n", encprm->srate);
+	DEBUG_NOTICE("Speex AEC loaded: enc=%uHz\n", prm->srate);
 
  out:
 	if (err)
 		mem_deref(st);
 	else
-		*stp = (struct aufilt_st *)st;
+		*ctx = *stp = st;
 
 	return err;
 }
 
 
-static int encode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
+static int encode_update(struct aufilt_enc_st **stp, void **ctx,
+			 const struct aufilt *af, struct aufilt_prm *prm)
 {
-	struct speex_st *sp = (struct speex_st *)st;
+	struct enc_st *st;
+	int err;
+
+	if (!stp || !ctx || !af || !prm)
+		return EINVAL;
+
+	if (*stp)
+		return 0;
+
+	st = mem_zalloc(sizeof(*st), enc_destructor);
+	if (!st)
+		return ENOMEM;
+
+	err = aec_alloc(&st->st, ctx, prm);
+
+	if (err)
+		mem_deref(st);
+	else
+		*stp = (struct aufilt_enc_st *)st;
+
+	return err;
+}
+
+
+static int decode_update(struct aufilt_dec_st **stp, void **ctx,
+			 const struct aufilt *af, struct aufilt_prm *prm)
+{
+	struct dec_st *st;
+	int err;
+
+	if (!stp || !ctx || !af || !prm)
+		return EINVAL;
+
+	if (*stp)
+		return 0;
+
+	st = mem_zalloc(sizeof(*st), dec_destructor);
+	if (!st)
+		return ENOMEM;
+
+	err = aec_alloc(&st->st, ctx, prm);
+
+	if (err)
+		mem_deref(st);
+	else
+		*stp = (struct aufilt_dec_st *)st;
+
+	return err;
+}
+
+
+static int encode(struct aufilt_enc_st *st, int16_t *sampv, size_t *sampc)
+{
+	struct enc_st *est = (struct enc_st *)st;
+	struct speex_st *sp = est->st;
 
 	if (*sampc) {
 		speex_echo_capture(sp->state, sampv, sp->out);
@@ -113,9 +182,10 @@ static int encode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 }
 
 
-static int decode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
+static int decode(struct aufilt_dec_st *st, int16_t *sampv, size_t *sampc)
 {
-	struct speex_st *sp = (struct speex_st *)st;
+	struct dec_st *dst = (struct dec_st *)st;
+	struct speex_st *sp = dst->st;
 
 	if (*sampc)
 		speex_echo_playback(sp->state, sampv);
@@ -126,7 +196,7 @@ static int decode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 
 
 static struct aufilt speex_aec = {
-	LE_INIT, "speex_aec", update, encode, decode
+	LE_INIT, "speex_aec", encode_update, encode, decode_update, decode
 };
 
 

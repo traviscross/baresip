@@ -1,3 +1,48 @@
+2013-10-11 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.6
+
+	* new modules:
+	  - directfb   DirectFB video display module (thanks Andreas Shimokawa)
+	  - dshow      Windows DirectShow vidsrc (thanks Dusan Stevanovic)
+	  - wincons    Console input driver for Windows
+
+	* baresip:
+	  - audio: print audio-pipelines in console/debug
+	  - aufilt: split into separate encoder+decoder states
+	  - call: add local uri/name, dtmf-handler
+	  - call: fix decoding of DTMF/SIP-INFO for '*' and '#'
+	  - export CALL_EVENT_* in public API
+	  - fix various clang warnings
+	  - sipreq: use outbound proxy if specified (thanks EJC Lindner)
+	  - ua: add possibility to specify 'struct call' for hangup/answer
+	  - ua: move SIP extensions into a dynamic vector container
+	  - ua: move playing of tones from call.c to ua.c
+	  - vidfilt: split into separate encoder+decoder states
+	  - vidisp: remove input handler
+
+	* menu: improve call-transfer handling
+
+	* plc: update to separate encoder/decoder states
+
+	* selfview: update to separate encoder/decoder states
+
+	* snapshot: remove state which was not needed
+
+	* sndfile: update to separate encoder/decoder states
+                   print unique timestamp to saved files
+
+	* speex_aec: update to separate encoder/decoder states
+
+	* speex_pp: update to separate encoder/decoder states
+
+	* vidloop: update to separate encoder/decoder vidfilt states
+
+	* vumeter: update to separate encoder/decoder states
+
+	* wincons: new module for Console input on Win32
+
+
 2013-08-31 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.4.5

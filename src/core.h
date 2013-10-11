@@ -73,6 +73,10 @@ struct account {
  * Audio Player
  */
 
+struct auplay_st {
+	struct auplay *ap;
+};
+
 struct auplay {
 	struct le        le;
 	const char      *name;
@@ -83,6 +87,10 @@ struct auplay {
 /*
  * Audio Source
  */
+
+struct ausrc_st {
+	struct ausrc *as;
+};
 
 struct ausrc {
 	struct le        le;
@@ -134,36 +142,24 @@ int bfcp_start(struct bfcp *bfcp);
 
 struct call;
 
-enum call_event {
-	CALL_EVENT_INCOMING,
-	CALL_EVENT_RINGING,
-	CALL_EVENT_PROGRESS,
-	CALL_EVENT_ESTABLISHED,
-	CALL_EVENT_CLOSED,
-	CALL_EVENT_TRANSFER,
-};
-
 /** Call parameters */
 struct call_prm {
 	enum vidmode vidmode;
 	int af;
 };
 
-typedef void (call_event_h)(struct call *call, enum call_event ev,
-			    const char *str, void *arg);
-
 int  call_alloc(struct call **callp, const struct config *cfg,
 		struct list *lst,
+		const char *local_name, const char *local_uri,
 		struct account *acc, struct ua *ua, const struct call_prm *prm,
 		const struct sip_msg *msg, struct call *xcall,
 		call_event_h *eh, void *arg);
 int  call_connect(struct call *call, const struct pl *paddr);
 int  call_accept(struct call *call, struct sipsess_sock *sess_sock,
 		 const struct sip_msg *msg);
-int  call_hangup(struct call *call);
+int  call_hangup(struct call *call, uint16_t scode, const char *reason);
 int  call_progress(struct call *call);
 int  call_answer(struct call *call, uint16_t scode);
-int  call_ringtone(struct call *call, const char *ringtone, int repeat);
 int  call_sdp_get(const struct call *call, struct mbuf **descp, bool offer);
 int  call_jbuf_stat(struct re_printf *pf, const struct call *call);
 int  call_info(struct re_printf *pf, const struct call *call);
@@ -171,7 +167,6 @@ int  call_reset_transp(struct call *call);
 int  call_notify_sipfrag(struct call *call, uint16_t scode,
 			 const char *reason, ...);
 int  call_af(const struct call *call);
-const char *call_peeruri(const struct call *call);
 struct ua  *call_get_ua(const struct call *call);
 
 
@@ -307,7 +302,8 @@ int  stream_print(struct re_printf *pf, const struct stream *s);
 
 struct ua;
 
-void         ua_event(struct ua *ua, enum ua_event ev, const char *fmt, ...);
+void         ua_event(struct ua *ua, enum ua_event ev, struct call *call,
+		      const char *fmt, ...);
 void         ua_printf(const struct ua *ua, const char *fmt, ...);
 
 struct tls  *uag_tls(void);

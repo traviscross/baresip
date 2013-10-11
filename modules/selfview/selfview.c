@@ -9,13 +9,21 @@
 #include <baresip.h>
 
 
+/* shared state */
 struct selfview {
-	struct vidfilt_st vf;    /**< Inheritance      */
+	struct lock *lock;          /**< Protect frame         */
+	struct vidframe *frame;     /**< Copy of encoded frame */
+};
 
-	struct lock *lock;       /**< Protect frame    */
-	struct vidframe *frame;
+struct selfview_enc {
+	struct vidfilt_enc_st vf;   /**< Inheritance           */
+	struct selfview *selfview;  /**< Ref. to shared state  */
+	struct vidisp_st *disp;     /**< Selfview display      */
+};
 
-	struct vidisp_st *disp;  /**< Selfview display */
+struct selfview_dec {
+	struct vidfilt_dec_st vf;   /**< Inheritance           */
+	struct selfview *selfview;  /**< Ref. to shared state  */
 };
 
 
@@ -26,10 +34,6 @@ static void destructor(void *arg)
 {
 	struct selfview *st = arg;
 
-	list_unlink(&st->vf.le);
-
-	mem_deref(st->disp);
-
 	lock_write_get(st->lock);
 	mem_deref(st->frame);
 	lock_rel(st->lock);
@@ -37,65 +41,134 @@ static void destructor(void *arg)
 }
 
 
-static int update(struct vidfilt_st **stp, struct vidfilt *vf)
+static void encode_destructor(void *arg)
 {
-	struct selfview *st;
+	struct selfview_enc *st = arg;
+
+	list_unlink(&st->vf.le);
+	mem_deref(st->selfview);
+	mem_deref(st->disp);
+}
+
+
+static void decode_destructor(void *arg)
+{
+	struct selfview_dec *st = arg;
+
+	list_unlink(&st->vf.le);
+	mem_deref(st->selfview);
+}
+
+
+static int selfview_alloc(struct selfview **selfviewp, void **ctx)
+{
+	struct selfview *selfview;
 	int err;
 
-	if (!stp || !vf)
+	if (!selfviewp || !ctx)
+		return EINVAL;
+
+	if (*ctx) {
+		*selfviewp = mem_ref(*ctx);
+	}
+	else {
+		selfview = mem_zalloc(sizeof(*selfview), destructor);
+		if (!selfview)
+			return ENOMEM;
+
+		err = lock_alloc(&selfview->lock);
+		if (err)
+			return err;
+
+		*ctx = selfview;
+		*selfviewp = selfview;
+	}
+
+	return 0;
+}
+
+
+static int encode_update(struct vidfilt_enc_st **stp, void **ctx,
+			 const struct vidfilt *vf)
+{
+	struct selfview_enc *st;
+	int err;
+
+	if (!stp || !ctx || !vf)
 		return EINVAL;
 
 	if (*stp)
 		return 0;
 
-	st = mem_zalloc(sizeof(*st), destructor);
+	st = mem_zalloc(sizeof(*st), encode_destructor);
 	if (!st)
 		return ENOMEM;
 
-	err = lock_alloc(&st->lock);
-	if (err)
-		goto out;
+	err = selfview_alloc(&st->selfview, ctx);
 
- out:
 	if (err)
 		mem_deref(st);
 	else
-		*stp = (struct vidfilt_st *)st;
+		*stp = (struct vidfilt_enc_st *)st;
 
 	return err;
 }
 
 
-static int encode_win(struct vidfilt_st *st, struct vidframe *frame)
+static int decode_update(struct vidfilt_dec_st **stp, void **ctx,
+			 const struct vidfilt *vf)
 {
-	struct selfview *pip = (struct selfview *)st;
+	struct selfview_dec *st;
+	int err;
+
+	if (!stp || !ctx || !vf)
+		return EINVAL;
+
+	st = mem_zalloc(sizeof(*st), decode_destructor);
+	if (!st)
+		return ENOMEM;
+
+	err = selfview_alloc(&st->selfview, ctx);
+
+	if (err)
+		mem_deref(st);
+	else
+		*stp = (struct vidfilt_dec_st *)st;
+
+	return err;
+}
+
+
+static int encode_win(struct vidfilt_enc_st *st, struct vidframe *frame)
+{
+	struct selfview_enc *enc = (struct selfview_enc *)st;
 	int err;
 
 	if (!frame)
 		return 0;
 
-	if (!pip->disp) {
+	if (!enc->disp) {
 
-		err = vidisp_alloc(&pip->disp, NULL,
-				   NULL, NULL, NULL, NULL, NULL);
+		err = vidisp_alloc(&enc->disp, NULL, NULL, NULL, NULL, NULL);
 		if (err)
 			return err;
 	}
 
-	return vidisp_display(pip->disp, "Selfview", frame);
+	return vidisp_display(enc->disp, "Selfview", frame);
 }
 
 
-static int encode_pip(struct vidfilt_st *st, struct vidframe *frame)
+static int encode_pip(struct vidfilt_enc_st *st, struct vidframe *frame)
 {
-	struct selfview *sv = (struct selfview *)st;
+	struct selfview_enc *enc = (struct selfview_enc *)st;
+	struct selfview *selfview = enc->selfview;
 	int err = 0;
 
 	if (!frame)
 		return 0;
 
-	lock_write_get(sv->lock);
-	if (!sv->frame) {
+	lock_write_get(selfview->lock);
+	if (!selfview->frame) {
 		struct vidsz sz;
 
 		/* Use size if configured, or else 20% of main window */
@@ -107,19 +180,20 @@ static int encode_pip(struct vidfilt_st *st, struct vidframe *frame)
 			sz.h = frame->size.h / 5;
 		}
 
-		err = vidframe_alloc(&sv->frame, VID_FMT_YUV420P, &sz);
+		err = vidframe_alloc(&selfview->frame, VID_FMT_YUV420P, &sz);
 	}
 	if (!err)
-		vidconv(sv->frame, frame, NULL);
-	lock_rel(sv->lock);
+		vidconv(selfview->frame, frame, NULL);
+	lock_rel(selfview->lock);
 
 	return err;
 }
 
 
-static int decode_pip(struct vidfilt_st *st, struct vidframe *frame)
+static int decode_pip(struct vidfilt_dec_st *st, struct vidframe *frame)
 {
-	struct selfview *sv = (struct selfview *)st;
+	struct selfview_dec *dec = (struct selfview_dec *)st;
+	struct selfview *sv = dec->selfview;
 
 	if (!frame)
 		return 0;
@@ -128,12 +202,21 @@ static int decode_pip(struct vidfilt_st *st, struct vidframe *frame)
 	if (sv->frame) {
 		struct vidrect rect;
 
-		rect.w = sv->frame->size.w;
-		rect.h = sv->frame->size.h;
-		rect.x = frame->size.w - rect.w - 10;
-		rect.y = frame->size.h - rect.h - 10;
+		rect.w = min(sv->frame->size.w, frame->size.w/2);
+		rect.h = min(sv->frame->size.h, frame->size.h/2);
+		if (rect.w <= (frame->size.w - 10))
+			rect.x = frame->size.w - rect.w - 10;
+		else
+			rect.x = frame->size.w/2;
+		if (rect.h <= (frame->size.h - 10))
+			rect.y = frame->size.h - rect.h - 10;
+		else
+			rect.y = frame->size.h/2;
 
 		vidconv(frame, sv->frame, &rect);
+
+		vidframe_draw_rect(frame, rect.x, rect.y, rect.w, rect.h,
+				   127, 127, 127);
 	}
 	lock_rel(sv->lock);
 
@@ -142,10 +225,11 @@ static int decode_pip(struct vidfilt_st *st, struct vidframe *frame)
 
 
 static struct vidfilt selfview_win = {
-	LE_INIT, "window", update, encode_win, NULL
+	LE_INIT, "selfview_window", encode_update, encode_win, NULL, NULL
 };
 static struct vidfilt selfview_pip = {
-	LE_INIT, "pip", update, encode_pip, decode_pip,
+	LE_INIT, "selfview_pip",
+	encode_update, encode_pip, decode_update, decode_pip
 };
 
 

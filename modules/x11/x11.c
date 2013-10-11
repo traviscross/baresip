@@ -218,13 +218,11 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 /* prm->view points to the XWINDOW ID */
 static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 		 struct vidisp_prm *prm, const char *dev,
-		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
+		 vidisp_resize_h *resizeh, void *arg)
 {
 	struct vidisp_st *st;
 	int err = 0;
-
 	(void)dev;
-	(void)inputh;
 	(void)resizeh;
 	(void)arg;
 
@@ -268,7 +266,7 @@ static int display(struct vidisp_st *st, const char *title,
 		char capt[256];
 
 		if (st->size.w && st->size.h) {
-			re_printf("x11: reset: %ux%u ---> %ux%u\n",
+			re_printf("x11: reset: %u x %u  --->  %u x %u\n",
 				  st->size.w, st->size.h,
 				  frame->size.w, frame->size.h);
 		}

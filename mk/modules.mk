@@ -149,8 +149,8 @@ USE_SYSLOG := $(shell [ -f $(SYSROOT)/include/syslog.h ] || \
 	[ -f $(SYSROOT_ALT)/include/syslog.h ] || \
 	[ -f $(SYSROOT)/local/include/syslog.h ] && echo "yes")
 USE_UUID  := $(shell [ -f $(SYSROOT)/include/uuid/uuid.h ] && echo "yes")
-USE_V4L  := $(shell [ -f $(SYSROOT)/include/linux/videodev.h ] || \
-	[ -f $(SYSROOT)/local/include/linux/videodev.h ] \
+USE_V4L  := $(shell [ -f $(SYSROOT)/include/libv4l1.h ] || \
+	[ -f $(SYSROOT)/local/include/libv4l1.h ] \
 	&& echo "yes")
 USE_V4L2  := $(shell [ -f $(SYSROOT)/include/libv4l2.h ] || \
 	[ -f $(SYSROOT)/local/include/libv4l2.h ] \
@@ -188,6 +188,7 @@ USE_EVDEV := $(shell [ -f $(SYSROOT)/include/linux/input.h ] && echo "yes")
 endif
 ifeq ($(OS),win32)
 USE_WINWAVE := yes
+MODULES   += wincons
 endif
 
 endif

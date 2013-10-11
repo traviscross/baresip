@@ -12,7 +12,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #undef __STRICT_ANSI__ /* needed for RHEL4 kernel 2.6.9 */
-#include <linux/videodev.h>
+#include <libv4l1-videodev.h>
 #include <pthread.h>
 #include <re.h>
 #include <rem.h>

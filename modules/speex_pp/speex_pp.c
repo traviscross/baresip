@@ -17,7 +17,7 @@
 
 
 struct preproc {
-	struct aufilt_st af;    /* base class */
+	struct aufilt_enc_st af;    /* base class */
 	uint32_t psize;
 	SpeexPreprocessState *state;
 };
@@ -50,29 +50,22 @@ static void speexpp_destructor(void *arg)
 }
 
 
-static int update(struct aufilt_st **stp, struct aufilt *af,
-		  const struct aufilt_prm *encprm,
-		  const struct aufilt_prm *decprm)
+static int encode_update(struct aufilt_enc_st **stp, void **ctx,
+			 const struct aufilt *af, struct aufilt_prm *prm)
 {
 	struct preproc *st;
+	(void)ctx;
 
-	(void)af;
-	(void)decprm;
-
-	if (!stp)
-		return EINVAL;
-
-	if (!encprm || encprm->ch != 1)
+	if (!stp || !af || !prm || prm->ch != 1)
 		return EINVAL;
 
 	st = mem_zalloc(sizeof(*st), speexpp_destructor);
 	if (!st)
 		return ENOMEM;
 
-	st->psize = 2 * encprm->frame_size;
+	st->psize = 2 * prm->frame_size;
 
-	st->state = speex_preprocess_state_init(encprm->frame_size,
-						encprm->srate);
+	st->state = speex_preprocess_state_init(prm->frame_size, prm->srate);
 	if (!st->state)
 		goto error;
 
@@ -94,9 +87,9 @@ static int update(struct aufilt_st **stp, struct aufilt *af,
 	speex_preprocess_ctl(st->state, SPEEX_PREPROCESS_SET_DEREVERB,
 			     &pp_conf.dereverb_enabled);
 
-	DEBUG_NOTICE("Speex preprocessor loaded: enc=%uHz\n", encprm->srate);
+	DEBUG_NOTICE("Speex preprocessor loaded: enc=%uHz\n", prm->srate);
 
-	*stp = (struct aufilt_st *)st;
+	*stp = (struct aufilt_enc_st *)st;
 	return 0;
 
  error:
@@ -105,7 +98,7 @@ static int update(struct aufilt_st **stp, struct aufilt *af,
 }
 
 
-static int encode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
+static int encode(struct aufilt_enc_st *st, int16_t *sampv, size_t *sampc)
 {
 	struct preproc *pp = (struct preproc *)st;
 	int is_speech = 1;
@@ -139,7 +132,7 @@ static void config_parse(struct conf *conf)
 
 
 static struct aufilt preproc = {
-	LE_INIT, "speex_pp", update, encode, NULL
+	LE_INIT, "speex_pp", encode_update, encode, NULL, NULL
 };
 
 static int module_init(void)

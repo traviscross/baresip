@@ -9,7 +9,7 @@
 
 
 struct plc_st {
-	struct aufilt_st af; /* base class */
+	struct aufilt_dec_st af; /* base class */
 	plc_state_t plc;
 	size_t nsamp;
 };
@@ -23,15 +23,13 @@ static void destructor(void *arg)
 }
 
 
-static int update(struct aufilt_st **stp, struct aufilt *af,
-		  const struct aufilt_prm *encprm,
-		  const struct aufilt_prm *decprm)
+static int update(struct aufilt_dec_st **stp, void **ctx,
+		  const struct aufilt *af, struct aufilt_prm *decprm)
 {
 	struct plc_st *st;
 	int err = 0;
-
+	(void)ctx;
 	(void)af;
-	(void)encprm;
 
 	if (!stp || !decprm)
 		return EINVAL;
@@ -61,7 +59,7 @@ static int update(struct aufilt_st **stp, struct aufilt *af,
 	if (err)
 		mem_deref(st);
 	else
-		*stp = (struct aufilt_st *)st;
+		*stp = (struct aufilt_dec_st *)st;
 
 	return err;
 }
@@ -72,7 +70,7 @@ static int update(struct aufilt_st **stp, struct aufilt *af,
  *
  * NOTE: sampc_in==0 , means Packet loss
  */
-static int decode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
+static int decode(struct aufilt_dec_st *st, int16_t *sampv, size_t *sampc)
 {
 	struct plc_st *plc = (struct plc_st *)st;
 
@@ -86,7 +84,7 @@ static int decode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
 
 
 static struct aufilt plc = {
-	LE_INIT, "plc", update, NULL, decode
+	LE_INIT, "plc", NULL, NULL, update, decode
 };
 
 

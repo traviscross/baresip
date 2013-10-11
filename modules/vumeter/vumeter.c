@@ -9,17 +9,31 @@
 #include <baresip.h>
 
 
-struct vumeter {
-	struct aufilt_st af;  /* inheritance */
+struct vumeter_enc {
+	struct aufilt_enc_st af;  /* inheritance */
 	struct tmr tmr;
 	int16_t avg_rec;
+};
+
+struct vumeter_dec {
+	struct aufilt_dec_st af;  /* inheritance */
+	struct tmr tmr;
 	int16_t avg_play;
 };
 
 
-static void destructor(void *arg)
+static void enc_destructor(void *arg)
 {
-	struct vumeter *st = arg;
+	struct vumeter_enc *st = arg;
+
+	list_unlink(&st->af.le);
+	tmr_cancel(&st->tmr);
+}
+
+
+static void dec_destructor(void *arg)
+{
+	struct vumeter_dec *st = arg;
 
 	list_unlink(&st->af.le);
 	tmr_cancel(&st->tmr);
@@ -43,41 +57,54 @@ static int16_t calc_avg_s16(const int16_t *sampv, size_t sampc)
 
 static int audio_print_vu(struct re_printf *pf, int16_t *avg)
 {
-	char avg_buf[16];
-	size_t i, res;
+	char buf[16];
+	size_t res;
 
-	res = min(2 * sizeof(avg_buf) * (*avg)/0x8000,
-		  sizeof(avg_buf)-1);
-	memset(avg_buf, 0, sizeof(avg_buf));
-	for (i=0; i<res; i++) {
-		avg_buf[i] = '=';
-	}
+	res = min(2 * sizeof(buf) * (*avg)/0x8000,
+		  sizeof(buf)-1);
 
-	return re_hprintf(pf, "[%-16s]", avg_buf);
+	memset(buf, '=', res);
+	buf[res] = '\0';
+
+	return re_hprintf(pf, "[%-16s]", buf);
 }
 
 
-static void tmr_handler(void *arg)
+static void print_vumeter(int pos, int color, int value)
 {
-	struct vumeter *st = arg;
-
-	tmr_start(&st->tmr, 100, tmr_handler, st);
-
 	/* move cursor to a fixed position */
-	re_fprintf(stderr, "\x1b[66G");
+	re_fprintf(stderr, "\x1b[%dG", pos);
 
 	/* print VU-meter in Nice colors */
-	re_fprintf(stderr, " \x1b[31m%H\x1b[;m \x1b[32m%H\x1b[;m\r",
-		   audio_print_vu, &st->avg_rec,
-		   audio_print_vu, &st->avg_play);
+	re_fprintf(stderr, " \x1b[%dm%H\x1b[;m\r",
+		   color, audio_print_vu, &value);
 }
 
 
-static int update(struct aufilt_st **stp, struct aufilt *af,
-		  const struct aufilt_prm *encprm,
-		  const struct aufilt_prm *decprm)
+static void enc_tmr_handler(void *arg)
 {
-	struct vumeter *st;
+	struct vumeter_enc *st = arg;
+
+	tmr_start(&st->tmr, 100, enc_tmr_handler, st);
+	print_vumeter(60, 31, st->avg_rec);
+}
+
+
+static void dec_tmr_handler(void *arg)
+{
+	struct vumeter_dec *st = arg;
+
+	tmr_start(&st->tmr, 100, dec_tmr_handler, st);
+	print_vumeter(80, 32, st->avg_play);
+}
+
+
+static int encode_update(struct aufilt_enc_st **stp, void **ctx,
+			 const struct aufilt *af, struct aufilt_prm *prm)
+{
+	struct vumeter_enc *st;
+	(void)ctx;
+	(void)prm;
 
 	if (!stp || !af)
 		return EINVAL;
@@ -85,39 +112,67 @@ static int update(struct aufilt_st **stp, struct aufilt *af,
 	if (*stp)
 		return 0;
 
-	(void)encprm;
-	(void)decprm;
-
-	st = mem_zalloc(sizeof(*st), destructor);
+	st = mem_zalloc(sizeof(*st), enc_destructor);
 	if (!st)
 		return ENOMEM;
 
-	tmr_start(&st->tmr, 10, tmr_handler, st);
-
-	*stp = (struct aufilt_st *)st;
+	*stp = (struct aufilt_enc_st *)st;
 
 	return 0;
 }
 
 
-static int encode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
+static int decode_update(struct aufilt_dec_st **stp, void **ctx,
+			 const struct aufilt *af, struct aufilt_prm *prm)
 {
-	struct vumeter *vu = (struct vumeter *)st;
+	struct vumeter_dec *st;
+	(void)ctx;
+	(void)prm;
+
+	if (!stp || !af)
+		return EINVAL;
+
+	if (*stp)
+		return 0;
+
+	st = mem_zalloc(sizeof(*st), dec_destructor);
+	if (!st)
+		return ENOMEM;
+
+	*stp = (struct aufilt_dec_st *)st;
+
+	return 0;
+}
+
+
+static int encode(struct aufilt_enc_st *st, int16_t *sampv, size_t *sampc)
+{
+	struct vumeter_enc *vu = (struct vumeter_enc *)st;
+
 	vu->avg_rec = calc_avg_s16(sampv, *sampc);
+
+	if (!tmr_isrunning(&vu->tmr))
+		tmr_start(&vu->tmr, 1, enc_tmr_handler, vu);
+
 	return 0;
 }
 
 
-static int decode(struct aufilt_st *st, int16_t *sampv, size_t *sampc)
+static int decode(struct aufilt_dec_st *st, int16_t *sampv, size_t *sampc)
 {
-	struct vumeter *vu = (struct vumeter *)st;
+	struct vumeter_dec *vu = (struct vumeter_dec *)st;
+
 	vu->avg_play = calc_avg_s16(sampv, *sampc);
+
+	if (!tmr_isrunning(&vu->tmr))
+		tmr_start(&vu->tmr, 1, dec_tmr_handler, vu);
+
 	return 0;
 }
 
 
 static struct aufilt vumeter = {
-	LE_INIT, "vumeter", update, encode, decode
+	LE_INIT, "vumeter", encode_update, encode, decode_update, decode
 };
 
 

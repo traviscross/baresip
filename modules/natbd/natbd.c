@@ -75,6 +75,9 @@ static int natbd_status(struct re_printf *pf, void *arg)
 	const struct natbd *natbd = arg;
 	int err;
 
+	if (!pf || !natbd)
+		return 0;
+
 	err  = re_hprintf(pf, "NAT Binding Discovery (using %s:%J)\n",
 			  net_proto2name(natbd->proto),
 			  &natbd->stun_srv);
@@ -263,7 +266,7 @@ static int natbd_start(struct natbd *natbd)
 	}
 
 	if (!natbd->nm) {
-		err |= nat_mapping_alloc(&natbd->nm, net_laddr_af(AF_INET),
+		err |= nat_mapping_alloc(&natbd->nm, net_laddr_af(net_af()),
 					 &natbd->stun_srv, natbd->proto, NULL,
 					 nat_mapping_handler, natbd);
 		err |= nat_mapping_start(natbd->nm);
@@ -329,6 +332,9 @@ static void dns_handler(int err, const struct sa *addr, void *arg)
 		goto out;
 	}
 
+	re_printf("natbd: resolved STUN-server for %s -- %J\n",
+		  net_proto2name(natbd->proto), addr);
+
 	sa_cpy(&natbd->stun_srv, addr);
 
 	natbd_start(natbd);
@@ -374,7 +380,7 @@ static void timeout_init(void *arg)
 
 	err = stun_server_discover(&natbd->dns, net_dnsc(),
 				   stun_usage_binding,
-				   proto_str, sa_af(net_laddr_af(AF_INET)),
+				   proto_str, net_af(),
 				   natbd->host, natbd->port,
 				   dns_handler, natbd);
 	if (err)
@@ -441,7 +447,9 @@ static int status(struct re_printf *pf, void *unused)
 	(void)unused;
 
 	for (i=0; i<ARRAY_SIZE(natbdv); i++) {
-		err |= natbd_status(pf, natbdv[i]);
+
+		if (natbdv[i])
+			err |= natbd_status(pf, natbdv[i]);
 	}
 
 	return err;
@@ -456,7 +464,7 @@ static const struct cmd cmdv[] = {
 static int module_init(void)
 {
 	char server[256] = "";
-	uint32_t interval = 600;
+	uint32_t interval = 3600;
 	int err;
 
 	err = cmd_register(cmdv, ARRAY_SIZE(cmdv));
@@ -476,6 +484,9 @@ static int module_init(void)
 
 	err |= natbd_alloc(&natbdv[0], interval, IPPROTO_UDP, server);
 	err |= natbd_alloc(&natbdv[1], interval, IPPROTO_TCP, server);
+	if (err) {
+		DEBUG_WARNING("failed to allocate natbd state: %m\n", err);
+	}
 
 	return err;
 }

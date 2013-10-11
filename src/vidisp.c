@@ -90,7 +90,6 @@ const struct vidisp *vidisp_find(const char *name)
  * @param name    Name of video display
  * @param prm     Video display parameters (optional)
  * @param dev     Display device
- * @param inputh  Keyboard input handler
  * @param resizeh Window resize handler
  * @param arg     Handler argument
  *
@@ -98,13 +97,13 @@ const struct vidisp *vidisp_find(const char *name)
  */
 int vidisp_alloc(struct vidisp_st **stp, const char *name,
 		 struct vidisp_prm *prm, const char *dev,
-		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
+		 vidisp_resize_h *resizeh, void *arg)
 {
 	struct vidisp *vd = (struct vidisp *)vidisp_find(name);
 	if (!vd)
 		return ENOENT;
 
-	return vd->alloch(stp, vd, prm, dev, inputh, resizeh, arg);
+	return vd->alloch(stp, vd, prm, dev, resizeh, arg);
 }
 
 

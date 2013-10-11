@@ -334,6 +334,12 @@ static int dns_debug(struct re_printf *pf, void *unused)
 }
 
 
+int net_af(void)
+{
+	return net.af;
+}
+
+
 /**
  * Print networking debug information
  *
@@ -349,6 +355,7 @@ int net_debug(struct re_printf *pf, void *unused)
 	(void)unused;
 
 	err  = re_hprintf(pf, "--- Network debug ---\n");
+	err |= re_hprintf(pf, " Preferred AF:  %s\n", net_af2name(net.af));
 	err |= re_hprintf(pf, " Local IPv4: %9s - %j\n",
 			  net.ifname, &net.laddr);
 #ifdef HAVE_INET6

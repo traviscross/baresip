@@ -172,7 +172,7 @@ static int setup_shader(struct vidisp_st *st, int width, int height)
 
 static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 		 struct vidisp_prm *prm, const char *dev,
-		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
+		 vidisp_resize_h *resizeh, void *arg)
 {
 	NSOpenGLPixelFormatAttribute attr[] = {
 		NSOpenGLPFAColorSize, 32,
@@ -187,7 +187,6 @@ static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 	int err = 0;
 
 	(void)dev;
-	(void)inputh;
 	(void)resizeh;
 	(void)arg;
 
@@ -396,7 +395,7 @@ static int display(struct vidisp_st *st, const char *title,
 
 	if (!vidsz_cmp(&st->size, &frame->size)) {
 		if (st->size.w && st->size.h) {
-			re_printf("opengl: reset: %ux%u ---> %ux%u\n",
+			re_printf("opengl: reset: %u x %u  --->  %u x %u\n",
 				  st->size.w, st->size.h,
 				  frame->size.w, frame->size.h);
 		}

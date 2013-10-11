@@ -57,7 +57,21 @@ enum {
  *</pre>
  */
 
-/** Video stream - transmitter/encoder direction */
+/**
+ * Video stream - transmitter/encoder direction
+
+ \verbatim
+
+ Processing encoder pipeline:
+
+ .         .--------.   .- - - - -.   .---------.   .---------.
+ | ._O_.   |        |   !         !   |         |   |         |
+ | |___|-->| vidsrc |-->! vidconv !-->| vidfilt |-->| encoder |---> RTP
+ |         |        |   !         !   |         |   |         |
+ '         '--------'   '- - - - -'   '---------'   '---------'
+                         (optional)
+ \endverbatim
+ */
 struct vtx {
 	struct video *video;               /**< Parent                    */
 	const struct vidcodec *vc;         /**< Current Video encoder     */
@@ -69,6 +83,8 @@ struct vtx {
 	struct vidframe *frame;            /**< Source frame              */
 	struct vidframe *mute_frame;       /**< Frame with muted video    */
 	struct mbuf *mb;                   /**< Packetization buffer      */
+	struct list filtl;                 /**< Filters in encoding order */
+	char device[64];
 	int muted_frames;                  /**< # of muted frames sent    */
 	uint32_t ts_tx;                    /**< Outgoing RTP timestamp    */
 	bool picup;                        /**< Send picture update       */
@@ -78,7 +94,22 @@ struct vtx {
 };
 
 
-/** Video stream - receiver/decoder direction */
+/**
+ * Video stream - receiver/decoder direction
+
+ \verbatim
+
+ Processing decoder pipeline:
+
+ .~~~~~~~~.   .--------.   .---------.   .---------.
+ |  _o_   |   |        |   |         |   |         |
+ |   |    |<--| vidisp |<--| vidfilt |<--| decoder |<--- RTP
+ |  /'\   |   |        |   |         |   |         |
+ '~~~~~~~~'   '--------'   '---------'   '---------'
+
+ \endverbatim
+
+ */
 struct vrx {
 	struct video *video;               /**< Parent                    */
 	const struct vidcodec *vc;         /**< Current video decoder     */
@@ -86,7 +117,9 @@ struct vrx {
 	struct vidisp_prm vidisp_prm;      /**< Video display parameters  */
 	struct vidisp_st *vidisp;          /**< Video display             */
 	struct lock *lock;                 /**< Lock for decoder          */
+	struct list filtl;                 /**< Filters in decoding order */
 	enum vidorient orient;             /**< Display orientation       */
+	char device[64];
 	bool fullscreen;                   /**< Fullscreen flag           */
 	int pt_rx;                         /**< Incoming RTP payload type */
 	int frames;                        /**< Number of frames received */
@@ -101,7 +134,6 @@ struct video {
 	struct stream *strm;    /**< Generic media stream                 */
 	struct vtx vtx;         /**< Transmit/encoder direction           */
 	struct vrx vrx;         /**< Receive/decoder direction            */
-	struct list filtl;      /**< Filters in order (struct vidfilt_st) */
 	struct tmr tmr;         /**< Timer for frame-rate estimation      */
 	char *peer;             /**< Peer URI                             */
 	bool nack_pli;          /**< Send NACK/PLI to peer                */
@@ -121,6 +153,7 @@ static void video_destructor(void *arg)
 	mem_deref(vtx->mute_frame);
 	mem_deref(vtx->enc);
 	mem_deref(vtx->mb);
+	list_flush(&vtx->filtl);
 	lock_rel(vtx->lock);
 	mem_deref(vtx->lock);
 
@@ -128,10 +161,10 @@ static void video_destructor(void *arg)
 	lock_write_get(vrx->lock);
 	mem_deref(vrx->dec);
 	mem_deref(vrx->vidisp);
+	list_flush(&vrx->filtl);
 	lock_rel(vrx->lock);
 	mem_deref(vrx->lock);
 
-	list_flush(&v->filtl);
 	tmr_cancel(&v->tmr);
 	mem_deref(v->strm);
 	mem_deref(v->peer);
@@ -181,7 +214,7 @@ static int packet_handler(bool marker, const uint8_t *hdr, size_t hdr_len,
  *
  * @note This function has REAL-TIME properties
  */
-static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
+static void encode_rtp_send(struct vtx *vtx, struct vidframe *frame)
 {
 	struct le *le;
 	int err = 0;
@@ -192,8 +225,9 @@ static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
 	lock_write_get(vtx->lock);
 
 	/* Convert image */
-	if (frame->fmt != VID_FMT_YUV420P ||
-	    !vidsz_cmp(&frame->size, &vtx->vsrc_size)) {
+	if (frame->fmt != VID_FMT_YUV420P) {
+
+		vtx->vsrc_size = frame->size;
 
 		if (!vtx->frame) {
 
@@ -208,12 +242,12 @@ static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
 	}
 
 	/* Process video frame through all Video Filters */
-	for (le = vtx->video->filtl.head; le; le = le->next) {
+	for (le = vtx->filtl.head; le; le = le->next) {
 
-		struct vidfilt_st *st = le->data;
+		struct vidfilt_enc_st *st = le->data;
 
-		if (st->vf->ench)
-			err |= st->vf->ench(st, (struct vidframe *)frame);
+		if (st->vf && st->vf->ench)
+			err |= st->vf->ench(st, frame);
 	}
 
  unlock:
@@ -239,7 +273,7 @@ static void encode_rtp_send(struct vtx *vtx, const struct vidframe *frame)
  *
  * @note This function has REAL-TIME properties
  */
-static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
+static void vidsrc_frame_handler(struct vidframe *frame, void *arg)
 {
 	struct vtx *vtx = arg;
 
@@ -282,6 +316,8 @@ static int vtx_alloc(struct vtx *vtx, struct video *video)
 
 	vtx->video = video;
 	vtx->ts_tx = 160;
+
+	str_ncpy(vtx->device, video->cfg.src_dev, sizeof(vtx->device));
 
 	return err;
 }
@@ -352,11 +388,11 @@ static int video_stream_decode(struct vrx *vrx, const struct rtp_header *hdr,
 		goto out;
 
 	/* Process video frame through all Video Filters */
-	for (le = v->filtl.head; le; le = le->next) {
+	for (le = vrx->filtl.head; le; le = le->next) {
 
-		struct vidfilt_st *st = le->data;
+		struct vidfilt_dec_st *st = le->data;
 
-		if (st->vf->dech)
+		if (st->vf && st->vf->dech)
 			err |= st->vf->dech(st, &frame);
 	}
 
@@ -440,11 +476,49 @@ static void rtcp_handler(struct rtcp_msg *msg, void *arg)
 }
 
 
-static void vidfilt_destructor(void *arg)
+static int vtx_print_filters(struct re_printf *pf, const struct vtx *vtx)
 {
-	struct vidfilt_st *st = arg;
+	struct le *le;
+	int err;
 
-	list_unlink(&st->le);
+	if (!vtx)
+		return 0;
+
+	err = re_hprintf(pf, "video filters:  (src)");
+
+	for (le = list_head(&vtx->filtl); le; le = le->next) {
+		struct vidfilt_enc_st *st = le->data;
+
+		if (st->vf->ench)
+			err |= re_hprintf(pf, "--->[%s]", st->vf->name);
+	}
+
+	err |= re_hprintf(pf, "--->(encoder)\n");
+
+	return err;
+}
+
+
+static int vrx_print_filters(struct re_printf *pf, const struct vrx *vrx)
+{
+	struct le *le;
+	int err;
+
+	if (!vrx)
+		return 0;
+
+	err = re_hprintf(pf, "video filters: (disp)");
+
+	for (le = list_head(&vrx->filtl); le; le = le->next) {
+		struct vidfilt_dec_st *st = le->data;
+
+		if (st->vf->dech)
+			err |= re_hprintf(pf, "<---[%s]", st->vf->name);
+	}
+
+	err |= re_hprintf(pf, "<---(decoder)\n");
+
+	return err;
 }
 
 
@@ -517,25 +591,21 @@ int video_alloc(struct video **vp, const struct config *cfg,
 	/* Video filters */
 	for (le = list_head(vidfilt_list()); le; le = le->next) {
 		struct vidfilt *vf = le->data;
-		struct vidfilt_st *st = NULL;
+		void *ctx = NULL;
 
-		if (vf->updh) {
-			err = vf->updh(&st, vf);
-		}
-		else {
-			st = mem_zalloc(sizeof(*st), vidfilt_destructor);
-			if (!st)
-				err = ENOMEM;
-		}
-
+		err |= vidfilt_enc_append(&v->vtx.filtl, &ctx, vf);
+		err |= vidfilt_dec_append(&v->vrx.filtl, &ctx, vf);
 		if (err) {
 			DEBUG_WARNING("video-filter '%s' failed (%m)\n",
 				      vf->name, err);
-			goto out;
+			break;
 		}
+	}
 
-		st->vf = vf;
-		list_append(&v->filtl, &st->le, st);
+	if (!list_isempty(vidfilt_list())) {
+		(void)re_printf("%H%H",
+				vtx_print_filters, &v->vtx,
+				vrx_print_filters, &v->vrx);
 	}
 
  out:
@@ -545,16 +615,6 @@ int video_alloc(struct video **vp, const struct config *cfg,
 		*vp = v;
 
 	return err;
-}
-
-
-static void vidisp_input_handler(char key, void *arg)
-{
-	struct vrx *vrx = arg;
-
-	(void)vrx;
-
-	ui_input(key);
 }
 
 
@@ -581,8 +641,8 @@ static int set_vidisp(struct vrx *vrx)
 	if (!vd)
 		return ENOENT;
 
-	return vd->alloch(&vrx->vidisp, vd, &vrx->vidisp_prm, NULL,
-			  vidisp_input_handler, vidisp_resize_handler, vrx);
+	return vd->alloch(&vrx->vidisp, vd, &vrx->vidisp_prm, vrx->device,
+			  vidisp_resize_handler, vrx);
 }
 
 
@@ -666,7 +726,7 @@ int video_start(struct video *v, const char *peer)
 	size.w = v->cfg.width;
 	size.h = v->cfg.height;
 	err = set_encoder_format(&v->vtx, v->cfg.src_mod,
-				 v->cfg.src_dev, &size);
+				 v->vtx.device, &size);
 	if (err) {
 		DEBUG_WARNING("could not set encoder format to"
 			      " [%u x %u] %m\n",
@@ -846,6 +906,28 @@ int video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx,
 }
 
 
+/**
+ * Use the next video encoder in the local list of negotiated codecs
+ *
+ * @param video  Video object
+ */
+void video_encoder_cycle(struct video *video)
+{
+	const struct sdp_format *rc = NULL;
+
+	if (!video)
+		return;
+
+	rc = sdp_media_format_cycle(stream_sdpmedia(video_strm(video)));
+	if (!rc) {
+		(void)re_printf("cycle video: no remote codec found\n");
+		return;
+	}
+
+	(void)video_encoder_set(video, rc->data, rc->pt, rc->params);
+}
+
+
 struct stream *video_strm(const struct video *v)
 {
 	return v ? v->strm : NULL;
@@ -922,10 +1004,15 @@ int video_debug(struct re_printf *pf, const struct video *v)
 	vrx = &v->vrx;
 
 	err = re_hprintf(pf, "\n--- Video stream ---\n");
-	err |= re_hprintf(pf, " tx: %d x %d, fps=%d\n",
+	err |= re_hprintf(pf, " tx: %u x %u, fps=%d\n",
 			  vtx->vsrc_size.w,
 			  vtx->vsrc_size.h, vtx->vsrc_prm.fps);
 	err |= re_hprintf(pf, " rx: pt=%d\n", vrx->pt_rx);
+
+	if (!list_isempty(vidfilt_list())) {
+		err |= vtx_print_filters(pf, vtx);
+		err |= vrx_print_filters(pf, vrx);
+	}
 
 	err |= stream_debug(pf, v->strm);
 
@@ -960,4 +1047,14 @@ int video_set_source(struct video *v, const char *name, const char *dev)
 	return vs->alloch(&vtx->vsrc, vs, NULL, &vtx->vsrc_prm,
 			  &vtx->vsrc_size, NULL, dev,
 			  vidsrc_frame_handler, vidsrc_error_handler, vtx);
+}
+
+
+void video_set_devicename(struct video *v, const char *src, const char *disp)
+{
+	if (!v)
+		return;
+
+	str_ncpy(v->vtx.device, src, sizeof(v->vtx.device));
+	str_ncpy(v->vrx.device, disp, sizeof(v->vrx.device));
 }

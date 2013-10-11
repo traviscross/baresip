@@ -64,8 +64,8 @@ static int cmd_contact(struct re_printf *pf, void *arg)
 		switch (carg->key) {
 
 		case '/':
-			err = ua_connect(uag_find_aor(NULL), contact_str(cnt),
-					 NULL, VIDMODE_ON);
+			err = ua_connect(uag_find_aor(NULL), NULL, NULL,
+					 contact_str(cnt), NULL, VIDMODE_ON);
 			if (err) {
 				re_fprintf(stderr, "ua_connect failed: %m\n",
 					   err);

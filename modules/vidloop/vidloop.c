@@ -34,7 +34,8 @@ struct video_loop {
 	struct viddec_state *dec;
 	struct vidisp_st *vidisp;
 	struct vidsrc_st *vsrc;
-	struct list filtl;
+	struct list filtencl;
+	struct list filtdecl;
 	struct vstat stat;
 	struct tmr tmr_bw;
 	uint16_t seq;
@@ -53,9 +54,9 @@ static int display(struct video_loop *vl, struct vidframe *frame)
 		return 0;
 
 	/* Process video frame through all Video Filters */
-	for (le = vl->filtl.head; le; le = le->next) {
+	for (le = vl->filtdecl.head; le; le = le->next) {
 
-		struct vidfilt_st *st = le->data;
+		struct vidfilt_dec_st *st = le->data;
 
 		if (st->vf->dech)
 			err |= st->vf->dech(st, frame);
@@ -106,7 +107,7 @@ static int packet_handler(bool marker, const uint8_t *hdr, size_t hdr_len,
 }
 
 
-static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
+static void vidsrc_frame_handler(struct vidframe *frame, void *arg)
 {
 	struct video_loop *vl = arg;
 	struct vidframe *f2 = NULL;
@@ -126,12 +127,12 @@ static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
 	}
 
 	/* Process video frame through all Video Filters */
-	for (le = vl->filtl.head; le; le = le->next) {
+	for (le = vl->filtencl.head; le; le = le->next) {
 
-		struct vidfilt_st *st = le->data;
+		struct vidfilt_enc_st *st = le->data;
 
 		if (st->vf->ench)
-			err |= st->vf->ench(st, (struct vidframe *)frame);
+			err |= st->vf->ench(st, frame);
 	}
 
 	if (vl->enc) {
@@ -140,7 +141,7 @@ static void vidsrc_frame_handler(const struct vidframe *frame, void *arg)
 	}
 	else {
 		vl->stat.bytes += vidframe_size(frame->fmt, &frame->size);
-		(void)display(vl, (struct vidframe *)frame);
+		(void)display(vl, frame);
 	}
 
 	mem_deref(f2);
@@ -156,14 +157,8 @@ static void vidloop_destructor(void *arg)
 	mem_deref(vl->vidisp);
 	mem_deref(vl->enc);
 	mem_deref(vl->dec);
-	list_flush(&vl->filtl);
-}
-
-
-static void vidisp_input_handler(char key, void *arg)
-{
-	(void)arg;
-	ui_input(key);
+	list_flush(&vl->filtencl);
+	list_flush(&vl->filtdecl);
 }
 
 
@@ -270,14 +265,6 @@ static int vsrc_reopen(struct video_loop *vl, const struct vidsz *sz)
 }
 
 
-static void vidfilt_destructor(void *arg)
-{
-	struct vidfilt_st *st = arg;
-
-	list_unlink(&st->le);
-}
-
-
 static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 {
 	struct video_loop *vl;
@@ -299,35 +286,22 @@ static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 	/* Video filters */
 	for (le = list_head(vidfilt_list()); le; le = le->next) {
 		struct vidfilt *vf = le->data;
-		struct vidfilt_st *st = NULL;
+		void *ctx = NULL;
 
 		re_printf("vidloop: added video-filter `%s'\n", vf->name);
 
-		if (vf->updh) {
-			err = vf->updh(&st, vf);
-		}
-		else {
-			st = mem_zalloc(sizeof(*st), vidfilt_destructor);
-			if (!st)
-				err = ENOMEM;
-		}
-
+		err |= vidfilt_enc_append(&vl->filtencl, &ctx, vf);
+		err |= vidfilt_dec_append(&vl->filtdecl, &ctx, vf);
 		if (err) {
-			DEBUG_WARNING("video-filter '%s' failed (%m)\n",
-				      vf->name, err);
-			goto out;
+			DEBUG_WARNING("vidfilt error: %m\n", err);
 		}
-
-		st->vf = vf;
-		list_append(&vl->filtl, &st->le, st);
 	}
 
 	err = vsrc_reopen(vl, size);
 	if (err)
 		goto out;
 
-	err = vidisp_alloc(&vl->vidisp, NULL, NULL, NULL,
-			   vidisp_input_handler, NULL, vl);
+	err = vidisp_alloc(&vl->vidisp, NULL, NULL, NULL, NULL, vl);
 	if (err) {
 		DEBUG_WARNING("video display failed: %m\n", err);
 		goto out;

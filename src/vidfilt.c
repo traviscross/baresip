@@ -50,3 +50,67 @@ struct list *vidfilt_list(void)
 {
 	return &vfl;
 }
+
+
+static void vidfilt_enc_destructor(void *arg)
+{
+	struct vidfilt_enc_st *st = arg;
+
+	list_unlink(&st->le);
+}
+
+
+int vidfilt_enc_append(struct list *filtl, void **ctx,
+		       const struct vidfilt *vf)
+{
+	struct vidfilt_enc_st *st = NULL;
+	int err;
+
+	if (vf->encupdh) {
+		err = vf->encupdh(&st, ctx, vf);
+		if (err)
+			return err;
+	}
+	else {
+		st = mem_zalloc(sizeof(*st), vidfilt_enc_destructor);
+		if (!st)
+			return ENOMEM;
+	}
+
+	st->vf = vf;
+	list_append(filtl, &st->le, st);
+
+	return 0;
+}
+
+
+static void vidfilt_dec_destructor(void *arg)
+{
+	struct vidfilt_dec_st *st = arg;
+
+	list_unlink(&st->le);
+}
+
+
+int vidfilt_dec_append(struct list *filtl, void **ctx,
+		       const struct vidfilt *vf)
+{
+	struct vidfilt_dec_st *st = NULL;
+	int err;
+
+	if (vf->decupdh) {
+		err = vf->decupdh(&st, ctx, vf);
+		if (err)
+			return err;
+	}
+	else {
+		st = mem_zalloc(sizeof(*st), vidfilt_dec_destructor);
+		if (!st)
+			return ENOMEM;
+	}
+
+	st->vf = vf;
+	list_append(filtl, &st->le, st);
+
+	return 0;
+}

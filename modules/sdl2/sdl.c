@@ -54,7 +54,7 @@ static void destructor(void *arg)
 
 static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 		 struct vidisp_prm *prm, const char *dev,
-		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
+		 vidisp_resize_h *resizeh, void *arg)
 {
 	struct vidisp_st *st;
 	int err = 0;
@@ -62,7 +62,6 @@ static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 	/* Not used by SDL */
 	(void)prm;
 	(void)dev;
-	(void)inputh;
 	(void)resizeh;
 	(void)arg;
 
@@ -86,7 +85,8 @@ static int display(struct vidisp_st *st, const char *title,
 {
 	void *pixels;
 	uint8_t *p;
-	int pitch, i, h, ret;
+	int pitch, ret;
+	unsigned i, h;
 
 	if (!vidsz_cmp(&st->size, &frame->size)) {
 		if (st->size.w && st->size.h) {

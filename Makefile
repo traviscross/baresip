@@ -13,7 +13,7 @@
 USE_VIDEO := 1
 
 PROJECT	  := baresip
-VERSION   := 0.4.5
+VERSION   := 0.4.6
 
 ifndef LIBRE_MK
 LIBRE_MK  := $(shell [ -f ../re/mk/re.mk ] && \
@@ -45,6 +45,9 @@ CFLAGS    += -I$(LIBREM_PATH)/include
 CFLAGS    += -I$(SYSROOT)/local/include/rem -I$(SYSROOT)/include/rem
 
 CXXFLAGS  += -I. -Iinclude -I$(LIBRE_INC)
+CXXFLAGS  += -I$(LIBREM_PATH)/include
+CXXFLAGS  += -I$(SYSROOT)/local/include/rem -I$(SYSROOT)/include/rem
+CXXFLAGS  += $(EXTRA_CXXFLAGS)
 
 ifneq ($(LIBREM_PATH),)
 SPLINT_OPTIONS += -I$(LIBREM_PATH)/include
@@ -62,6 +65,7 @@ CFLAGS    += -DUSE_VIDEO=1
 endif
 ifneq ($(STATIC),)
 CFLAGS    += -DSTATIC=1
+CXXFLAGS  += -DSTATIC=1
 endif
 CFLAGS    += -DMODULE_CONF
 

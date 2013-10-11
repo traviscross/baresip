@@ -129,8 +129,7 @@ void ui_input(char key)
 void ui_input_str(const char *str)
 {
 	struct re_printf pf;
-	struct ui *ui = list_ledata(uil.head);
-	size_t n = str_len(str);
+	struct pl pl;
 
 	if (!str)
 		return;
@@ -138,11 +137,9 @@ void ui_input_str(const char *str)
 	pf.vph = stdout_handler;
 	pf.arg = NULL;
 
-	while (*str)
-		ui_handler(*str++, &pf, ui);
+	pl_set_str(&pl, str);
 
-	if (n > 1 && *(str-1) != '\n')
-		ui_handler('\n', &pf, ui);
+	(void)ui_input_pl(&pf, &pl);
 }
 
 

@@ -324,6 +324,7 @@ static const char *default_audio_device(void)
 }
 
 
+#ifdef USE_VIDEO
 static const char *default_video_device(void)
 {
 #ifdef DARWIN
@@ -332,6 +333,7 @@ static const char *default_video_device(void)
 	return "v4l2,/dev/video0";
 #endif
 }
+#endif
 
 
 static int default_interface_print(struct re_printf *pf, void *unused)
@@ -364,9 +366,9 @@ static int core_config_template(struct re_printf *pf, const struct config *cfg)
 			  "#sip_listen\t\t0.0.0.0:5060\n"
 			  "#sip_certificate\tcert.pem\n"
 			  "\n# Audio\n"
-			  "#audio_player\t\t%s\n"
-			  "#audio_source\t\t%s\n"
-			  "#audio_alert\t\t%s\n"
+			  "audio_player\t\t%s\n"
+			  "audio_source\t\t%s\n"
+			  "audio_alert\t\t%s\n"
 			  "audio_srate\t\t%u-%u\n"
 			  "audio_channels\t\t%u-%u\n"
 			  "#ausrc_srate\t\t48000\n"
@@ -515,7 +517,11 @@ int config_write_template(const char *file, const struct config *cfg)
 	/* todo: detect the available modules, and enable most of them .. */
 
 	(void)re_fprintf(f, "\n# UI Modules\n");
+#if defined (WIN32)
+	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "wincons" MOD_EXT "\n");
+#else
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "stdio" MOD_EXT "\n");
+#endif
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "cons" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "evdev" MOD_EXT "\n");
 
@@ -548,10 +554,9 @@ int config_write_template(const char *file, const struct config *cfg)
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "coreaudio" MOD_EXT "\n");
 #else
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "oss" MOD_EXT "\n");
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "alsa" MOD_EXT "\n");
+	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "alsa" MOD_EXT "\n");
 #endif
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "portaudio" MOD_EXT "\n");
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "gst" MOD_EXT "\n");
 
 #ifdef USE_VIDEO
 
@@ -563,7 +568,7 @@ int config_write_template(const char *file, const struct config *cfg)
 #endif
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "vpx" MOD_EXT "\n");
 
-	(void)re_fprintf(f, "\n# Video filter Modules (in order)\n");
+	(void)re_fprintf(f, "\n# Video filter Modules (in encoding order)\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "selfview" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Video source modules\n");

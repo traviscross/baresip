@@ -25,7 +25,6 @@ static struct {
 	SDL_Surface *screen;            /**< SDL Surface           */
 	SDL_Overlay *bmp;               /**< SDL YUV Overlay       */
 	struct vidsz size;              /**< Current size          */
-	vidisp_input_h *inputh;         /**< Input handler         */
 	vidisp_resize_h *resizeh;       /**< Screen resize handler */
 	void *arg;                      /**< Handler argument      */
 	bool fullscreen;
@@ -73,7 +72,7 @@ static void timeout(void *arg)
 	tmr_start(&sdl.tmr, 1, event_handler, NULL);
 
 	/* Emulate key-release */
-	sdl.inputh(0x00, sdl.arg);
+	ui_input(0x00);
 }
 
 
@@ -114,10 +113,10 @@ static void event_handler(void *arg)
 				ch = event.key.keysym.unicode & 0x7f;
 
 				/* Relay key-press to UI subsystem */
-				if (isprint(ch) && sdl.inputh) {
+				if (isprint(ch)) {
 					tmr_start(&sdl.tmr, KEY_RELEASE_VAL,
 						  timeout, NULL);
-					sdl.inputh(ch, sdl.arg);
+					ui_input(ch);
 				}
 				break;
 			}
@@ -129,8 +128,7 @@ static void event_handler(void *arg)
 			break;
 
 		case SDL_QUIT:
-			if (sdl.inputh)
-				sdl.inputh('q', sdl.arg);
+			ui_input('q');
 			break;
 
 		default:
@@ -182,7 +180,7 @@ static void destructor(void *arg)
 
 static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 		 struct vidisp_prm *prm, const char *dev,
-		 vidisp_input_h *inputh, vidisp_resize_h *resizeh, void *arg)
+		 vidisp_resize_h *resizeh, void *arg)
 {
 	struct vidisp_st *st;
 	int err;
@@ -200,7 +198,6 @@ static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 
 	st->vd = mem_ref(vd);
 
-	sdl.inputh  = inputh;
 	sdl.resizeh = resizeh;
 	sdl.arg     = arg;
 
@@ -228,7 +225,7 @@ static int display(struct vidisp_st *st, const char *title,
 
 	if (!vidsz_cmp(&sdl.size, &frame->size)) {
 		if (sdl.size.w && sdl.size.h) {
-			re_printf("SDL reset: %ux%u ---> %ux%u\n",
+			re_printf("SDL reset: %u x %u  --->  %u x %u\n",
 				  sdl.size.w, sdl.size.h,
 				  frame->size.w, frame->size.h);
 		}

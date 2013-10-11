@@ -31,6 +31,9 @@ struct ua {
 	struct account *acc;         /**< Account Parameters                 */
 	struct list regl;            /**< List of Register clients           */
 	struct list calls;           /**< List of active calls (struct call) */
+	struct play *play;           /**< Playback of ringtones etc.         */
+	struct pl extensionv[8];     /**< Vector of SIP extensions           */
+	size_t    extensionc;        /**< Number of SIP extensions           */
 	char *cuser;                 /**< SIP Contact username               */
 	int af;                      /**< Preferred Address Family           */
 };
@@ -74,17 +77,10 @@ static struct {
 };
 
 
-/* List of supported SIP extensions (option tags) */
-static const struct pl sip_extensions[] = {
-	PL("ice"),
-	PL("outbound"),
-};
-
-
 /* prototypes */
 static int  ua_call_alloc(struct call **callp, struct ua *ua,
 			  enum vidmode vidmode, const struct sip_msg *msg,
-			  struct call *xcall);
+			  struct call *xcall, const char *local_uri);
 
 
 /* This function is called when all SIP transactions are done */
@@ -111,7 +107,8 @@ void ua_printf(const struct ua *ua, const char *fmt, ...)
 }
 
 
-void ua_event(struct ua *ua, enum ua_event ev, const char *fmt, ...)
+void ua_event(struct ua *ua, enum ua_event ev, struct call *call,
+	      const char *fmt, ...)
 {
 	struct le *le;
 	char buf[256];
@@ -129,7 +126,7 @@ void ua_event(struct ua *ua, enum ua_event ev, const char *fmt, ...)
 
 		struct ua_eh *eh = le->data;
 
-		eh->h(ua, ev, buf, eh->arg);
+		eh->h(ua, ev, call, buf, eh->arg);
 	}
 }
 
@@ -181,7 +178,7 @@ static int ua_register(struct ua *ua)
 			return ENOMEM;
 	}
 
-	ua_event(ua, UA_EVENT_REGISTERING, NULL);
+	ua_event(ua, UA_EVENT_REGISTERING, NULL, NULL);
 
 	for (le = ua->regl.head, i=0; le; le = le->next, i++) {
 		struct reg *reg = le->data;
@@ -215,6 +212,18 @@ bool ua_isregistered(const struct ua *ua)
 }
 
 
+static const char *translate_errorcode(uint16_t scode)
+{
+	switch (scode) {
+
+	case 404: return "notfound.wav";
+	case 486: return "busy.wav";
+	case 487: return NULL; /* ignore */
+	default:  return "error.wav";
+	}
+}
+
+
 static void call_event_handler(struct call *call, enum call_event ev,
 			       const char *str, void *arg)
 {
@@ -226,6 +235,9 @@ static void call_event_handler(struct call *call, enum call_event ev,
 	MAGIC_CHECK(ua);
 
 	peeruri = call_peeruri(call);
+
+	/* stop any ringtones */
+	ua->play = mem_deref(ua->play);
 
 	switch (ev) {
 
@@ -243,40 +255,44 @@ static void call_event_handler(struct call *call, enum call_event ev,
 		case ANSWERMODE_MANUAL:
 		default:
 			if (list_count(&ua->calls) > 1) {
-				(void)call_ringtone(call,
+				(void)play_file(&ua->play,
 						    "callwaiting.wav", 3);
 			}
 			else {
 				/* Alert user */
-				(void)call_ringtone(call, "ring.wav", -1);
+				(void)play_file(&ua->play, "ring.wav", -1);
 			}
 
-			ua_printf(ua, "Incoming call from: %s %s -"
-				  " (press ENTER to accept)\n",
-				  call_peername(call), peeruri);
-
-			ua_event(ua, UA_EVENT_CALL_INCOMING, peeruri);
+			ua_event(ua, UA_EVENT_CALL_INCOMING, call, peeruri);
 			break;
 		}
 		break;
 
 	case CALL_EVENT_RINGING:
-		ua_event(ua, UA_EVENT_CALL_RINGING, peeruri);
+		(void)play_file(&ua->play, "ringback.wav", -1);
+
+		ua_event(ua, UA_EVENT_CALL_RINGING, call, peeruri);
 		break;
 
 	case CALL_EVENT_PROGRESS:
 		ua_printf(ua, "Call in-progress: %s\n", peeruri);
-		ua_event(ua, UA_EVENT_CALL_PROGRESS, peeruri);
+		ua_event(ua, UA_EVENT_CALL_PROGRESS, call, peeruri);
 		break;
 
 	case CALL_EVENT_ESTABLISHED:
 		ua_printf(ua, "Call established: %s\n", peeruri);
-		ua_event(ua, UA_EVENT_CALL_ESTABLISHED, peeruri);
+		ua_event(ua, UA_EVENT_CALL_ESTABLISHED, call, peeruri);
 		break;
 
 	case CALL_EVENT_CLOSED:
+		if (call_scode(call)) {
+			const char *tone;
+			tone = translate_errorcode(call_scode(call));
+			if (tone)
+				(void)play_file(&ua->play, tone, 1);
+		}
+		ua_event(ua, UA_EVENT_CALL_CLOSED, call, str);
 		mem_deref(call);
-		ua_event(ua, UA_EVENT_CALL_CLOSED, str);
 		break;
 
 	case CALL_EVENT_TRANSFER:
@@ -290,7 +306,8 @@ static void call_event_handler(struct call *call, enum call_event ev,
 
 		ua_printf(ua, "transferring call to %s\n", str);
 
-		err = ua_call_alloc(&call2, ua, VIDMODE_ON, NULL, call);
+		err = ua_call_alloc(&call2, ua, VIDMODE_ON, NULL, call,
+				    call_localuri(call));
 		if (!err) {
 			struct pl pl;
 
@@ -314,7 +331,7 @@ static void call_event_handler(struct call *call, enum call_event ev,
 
 static int ua_call_alloc(struct call **callp, struct ua *ua,
 			 enum vidmode vidmode, const struct sip_msg *msg,
-			 struct call *xcall)
+			 struct call *xcall, const char *local_uri)
 {
 	struct call_prm cprm;
 
@@ -326,8 +343,10 @@ static int ua_call_alloc(struct call **callp, struct ua *ua,
 	cprm.vidmode = vidmode;
 	cprm.af      = ua->af;
 
-	return call_alloc(callp, conf_config(),
-			  &ua->calls, ua->acc, ua, &cprm,
+	return call_alloc(callp, conf_config(), &ua->calls,
+			  ua->acc->dispname,
+			  local_uri ? local_uri : ua->acc->aor,
+			  ua->acc, ua, &cprm,
 			  msg, xcall, call_event_handler, ua);
 }
 
@@ -338,7 +357,7 @@ static void handle_options(struct ua *ua, const struct sip_msg *msg)
 	struct mbuf *desc = NULL;
 	int err;
 
-	err = ua_call_alloc(&call, ua, VIDMODE_ON, NULL, NULL);
+	err = ua_call_alloc(&call, ua, VIDMODE_ON, NULL, NULL, NULL);
 	if (err) {
 		(void)sip_treply(NULL, uag.sip, msg, 500, "Call Error");
 		return;
@@ -378,12 +397,13 @@ static void ua_destructor(void *arg)
 		ua->uap = NULL;
 	}
 
-	ua_event(ua, UA_EVENT_UNREGISTERING, NULL);
-
 	list_unlink(&ua->le);
+
+	ua_event(ua, UA_EVENT_UNREGISTERING, NULL, NULL);
 
 	list_flush(&ua->calls);
 	list_flush(&ua->regl);
+	mem_deref(ua->play);
 	mem_deref(ua->cuser);
 	mem_deref(ua->acc);
 }
@@ -407,6 +427,21 @@ static bool request_handler(const struct sip_msg *msg, void *arg)
 	handle_options(ua, msg);
 
 	return true;
+}
+
+
+static void add_extension(struct ua *ua, const char *extension)
+{
+	struct pl e;
+
+	if (ua->extensionc >= ARRAY_SIZE(ua->extensionv)) {
+		DEBUG_WARNING("maximum %u number of SIP extensions\n");
+		return;
+	}
+
+	pl_set_str(&e, extension);
+
+	ua->extensionv[ua->extensionc++] = e;
 }
 
 
@@ -457,6 +492,9 @@ int ua_alloc(struct ua **uap, const char *aor)
 	if (ua->acc->mnat) {
 		ua_printf(ua, "Using medianat `%s'\n",
 			  ua->acc->mnat->id);
+
+		if (0 == str_casecmp(ua->acc->mnat->id, "ice"))
+			add_extension(ua, "ice");
 	}
 
 	if (ua->acc->menc) {
@@ -468,6 +506,9 @@ int ua_alloc(struct ua **uap, const char *aor)
 	if (0 == str_casecmp(ua->acc->sipnat, "outbound")) {
 
 		size_t i;
+
+		add_extension(ua, "path");
+		add_extension(ua, "outbound");
 
 		if (!str_isset(uag.cfg->uuid)) {
 
@@ -513,15 +554,18 @@ int ua_alloc(struct ua **uap, const char *aor)
 /**
  * Connect an outgoing call to a given SIP uri
  *
- * @param ua      User-Agent
- * @param uri     SIP uri to connect to
- * @param params  Optional URI parameters
- * @param vmode   Video mode
+ * @param ua        User-Agent
+ * @param callp     Optional pointer to allocated call object
+ * @param from_uri  Optional From uri, or NULL for default AOR
+ * @param uri       SIP uri to connect to
+ * @param params    Optional URI parameters
+ * @param vmode     Video mode
  *
  * @return 0 if success, otherwise errorcode
  */
-int ua_connect(struct ua *ua, const char *uri, const char *params,
-	       enum vidmode vmode)
+int ua_connect(struct ua *ua, struct call **callp,
+	       const char *from_uri, const char *uri,
+	       const char *params, enum vidmode vmode)
 {
 	struct call *call = NULL;
 	struct mbuf *dialbuf;
@@ -584,7 +628,7 @@ int ua_connect(struct ua *ua, const char *uri, const char *params,
 	if (err)
 		goto out;
 
-	err = ua_call_alloc(&call, ua, vmode, NULL, NULL);
+	err = ua_call_alloc(&call, ua, vmode, NULL, NULL, from_uri);
 	if (err)
 		goto out;
 
@@ -595,6 +639,8 @@ int ua_connect(struct ua *ua, const char *uri, const char *params,
 
 	if (err)
 		mem_deref(call);
+	else if (callp)
+		*callp = call;
 
  out:
 	mem_deref(dialbuf);
@@ -606,20 +652,26 @@ int ua_connect(struct ua *ua, const char *uri, const char *params,
 /**
  * Hangup the current call
  *
- * @param ua User-Agent
+ * @param ua     User-Agent
+ * @param call   Call to hangup, or NULL for current call
+ * @param scode  Optional status code
+ * @param reason Optional reason
  */
-void ua_hangup(struct ua *ua)
+void ua_hangup(struct ua *ua, struct call *call,
+	       uint16_t scode, const char *reason)
 {
-	struct call *call;
-
 	if (!ua)
 		return;
 
-	call = ua_call(ua);
-	if (!call)
-		return;
+	if (!call) {
+		call = ua_call(ua);
+		if (!call)
+			return;
+	}
 
-	(void)call_hangup(call);
+	ua->play = mem_deref(ua->play);
+
+	(void)call_hangup(call, scode, reason);
 
 	mem_deref(call);
 }
@@ -628,24 +680,27 @@ void ua_hangup(struct ua *ua)
 /**
  * Answer an incoming call
  *
- * @param ua User-Agent
+ * @param ua   User-Agent
+ * @param call Call to hangup, or NULL for current call
  *
  * @return 0 if success, otherwise errorcode
  */
-int ua_answer(struct ua *ua)
+int ua_answer(struct ua *ua, struct call *call)
 {
-	struct call *call;
-
 	if (!ua)
 		return EINVAL;
 
-	call = ua_call(ua);
 	if (!call) {
-		DEBUG_NOTICE("answer: no incoming calls found\n");
-		return ENOENT;
+		call = ua_call(ua);
+		if (!call) {
+			DEBUG_NOTICE("answer: no incoming calls found\n");
+			return ENOENT;
+		}
 	}
 
 	/* todo: put previous call on-hold (if configured) */
+
+	ua->play = mem_deref(ua->play);
 
 	return call_answer(call, 200);
 }
@@ -771,6 +826,7 @@ int ua_debug(struct re_printf *pf, const struct ua *ua)
 	err  = re_hprintf(pf, "--- %s ---\n", ua->acc->aor);
 	err |= re_hprintf(pf, " cuser:     %s\n", ua->cuser);
 	err |= re_hprintf(pf, " af:        %s\n", net_af2name(ua->af));
+	err |= re_hprintf(pf, " %H", ua_print_supported, ua);
 
 	err |= account_debug(pf, ua->acc);
 
@@ -879,16 +935,14 @@ static int ua_add_transp(void)
 static bool require_handler(const struct sip_hdr *hdr,
 			    const struct sip_msg *msg, void *arg)
 {
+	struct ua *ua = arg;
 	bool supported = false;
 	size_t i;
-
 	(void)msg;
-	(void)arg;
 
-	/* XXX: potential slow lookup, use dynamic stringmap instead */
-	for (i=0; i<ARRAY_SIZE(sip_extensions); i++) {
+	for (i=0; i<ua->extensionc; i++) {
 
-		if (!pl_casecmp(&hdr->val, &sip_extensions[i])) {
+		if (!pl_casecmp(&hdr->val, &ua->extensionv[i])) {
 			supported = true;
 			break;
 		}
@@ -941,7 +995,7 @@ static void sipsess_conn_handler(const struct sip_msg *msg, void *arg)
 		return;
 	}
 
-	err = ua_call_alloc(&call, ua, VIDMODE_ON, msg, NULL);
+	err = ua_call_alloc(&call, ua, VIDMODE_ON, msg, NULL, NULL);
 	if (err) {
 		DEBUG_WARNING("call_alloc: %m\n", err);
 		goto error;
@@ -1099,8 +1153,9 @@ void ua_stop_all(bool forced)
 	module_app_unload();
 
 	if (!list_isempty(&uag.ual)) {
-		(void)re_fprintf(stderr, "Un-registering %u useragents.. %s\n",
-				 list_count(&uag.ual),
+		const uint32_t n = list_count(&uag.ual);
+		(void)re_fprintf(stderr, "Stopping %u useragent%s.. %s\n",
+				 n, n==1 ? "" : "s",
 				 forced ? "(Forced)" : "");
 	}
 
@@ -1373,21 +1428,21 @@ struct list *uag_list(void)
  */
 const char *uag_allowed_methods(void)
 {
-	/* todo: create a dynamic list of supported methods */
-	return "INVITE,ACK,BYE,CANCEL,REFER,NOTIFY,SUBSCRIBE,INFO";
+	return "INVITE,ACK,BYE,CANCEL,OPTIONS,REFER,NOTIFY,SUBSCRIBE,INFO";
 }
 
 
 int ua_print_supported(struct re_printf *pf, const struct ua *ua)
 {
+	size_t i;
 	int err;
 
-	err = re_hprintf(pf, "Supported: path");
+	err = re_hprintf(pf, "Supported:");
 
-	if (0 == str_casecmp(ua->acc->sipnat, "outbound"))
-		err |= re_hprintf(pf, ", outbound");
-	if (ua->acc->mnat && 0 == str_casecmp(ua->acc->mnat->id, "ice"))
-		err |= re_hprintf(pf, ", ice");
+	for (i=0; i<ua->extensionc; i++) {
+		err |= re_hprintf(pf, "%s%r",
+				  i==0 ? " " : ",", &ua->extensionv[i]);
+	}
 
 	err |= re_hprintf(pf, "\r\n");
 
