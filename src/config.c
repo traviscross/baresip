@@ -283,8 +283,8 @@ int config_print(struct re_printf *pf, const struct config *cfg)
 
 			 cfg->sip.trans_bsize, cfg->sip.local, cfg->sip.cert,
 
-			 cfg->audio.src_mod,   cfg->audio.src_dev,
 			 cfg->audio.play_mod,  cfg->audio.play_dev,
+			 cfg->audio.src_mod,   cfg->audio.src_dev,
 			 cfg->audio.alert_mod, cfg->audio.alert_dev,
 			 range_print, &cfg->audio.srate,
 			 range_print, &cfg->audio.channels,
@@ -524,6 +524,7 @@ int config_write_template(const char *file, const struct config *cfg)
 #endif
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "cons" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "evdev" MOD_EXT "\n");
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "httpd" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Audio codec Modules (in order)\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "opus" MOD_EXT "\n");

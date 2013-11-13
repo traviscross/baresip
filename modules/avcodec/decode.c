@@ -7,6 +7,7 @@
 #include <rem.h>
 #include <baresip.h>
 #include <libavcodec/avcodec.h>
+#include <libavutil/mem.h>
 #include "h26x.h"
 #include "avcodec.h"
 

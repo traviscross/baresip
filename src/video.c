@@ -476,47 +476,57 @@ static void rtcp_handler(struct rtcp_msg *msg, void *arg)
 }
 
 
-static int vtx_print_filters(struct re_printf *pf, const struct vtx *vtx)
+static int vtx_print_pipeline(struct re_printf *pf, const struct vtx *vtx)
 {
 	struct le *le;
+	struct vidsrc *vs;
 	int err;
 
 	if (!vtx)
 		return 0;
 
-	err = re_hprintf(pf, "video filters:  (src)");
+	vs = vidsrc_get(vtx->vsrc);
+
+	err = re_hprintf(pf, "video tx pipeline: %10s",
+			 vs ? vs->name : "src");
 
 	for (le = list_head(&vtx->filtl); le; le = le->next) {
 		struct vidfilt_enc_st *st = le->data;
 
 		if (st->vf->ench)
-			err |= re_hprintf(pf, "--->[%s]", st->vf->name);
+			err |= re_hprintf(pf, " ---> %s", st->vf->name);
 	}
 
-	err |= re_hprintf(pf, "--->(encoder)\n");
+	err |= re_hprintf(pf, " ---> %s\n",
+			  vtx->vc ? vtx->vc->name : "encoder");
 
 	return err;
 }
 
 
-static int vrx_print_filters(struct re_printf *pf, const struct vrx *vrx)
+static int vrx_print_pipeline(struct re_printf *pf, const struct vrx *vrx)
 {
 	struct le *le;
+	struct vidisp *vd;
 	int err;
 
 	if (!vrx)
 		return 0;
 
-	err = re_hprintf(pf, "video filters: (disp)");
+	vd = vidisp_get(vrx->vidisp);
+
+	err = re_hprintf(pf, "video rx pipeline: %10s",
+			 vd ? vd->name : "disp");
 
 	for (le = list_head(&vrx->filtl); le; le = le->next) {
 		struct vidfilt_dec_st *st = le->data;
 
 		if (st->vf->dech)
-			err |= re_hprintf(pf, "<---[%s]", st->vf->name);
+			err |= re_hprintf(pf, " <--- %s", st->vf->name);
 	}
 
-	err |= re_hprintf(pf, "<---(decoder)\n");
+	err |= re_hprintf(pf, " <--- %s\n",
+			  vrx->vc ? vrx->vc->name : "decoder");
 
 	return err;
 }
@@ -600,12 +610,6 @@ int video_alloc(struct video **vp, const struct config *cfg,
 				      vf->name, err);
 			break;
 		}
-	}
-
-	if (!list_isempty(vidfilt_list())) {
-		(void)re_printf("%H%H",
-				vtx_print_filters, &v->vtx,
-				vrx_print_filters, &v->vrx);
 	}
 
  out:
@@ -734,6 +738,12 @@ int video_start(struct video *v, const char *peer)
 	}
 
 	tmr_start(&v->tmr, TMR_INTERVAL * 1000, tmr_handler, v);
+
+	if (v->vtx.vc && v->vrx.vc) {
+		(void)re_printf("%H%H",
+				vtx_print_pipeline, &v->vtx,
+				vrx_print_pipeline, &v->vrx);
+	}
 
 	return 0;
 }
@@ -1010,8 +1020,8 @@ int video_debug(struct re_printf *pf, const struct video *v)
 	err |= re_hprintf(pf, " rx: pt=%d\n", vrx->pt_rx);
 
 	if (!list_isempty(vidfilt_list())) {
-		err |= vtx_print_filters(pf, vtx);
-		err |= vrx_print_filters(pf, vrx);
+		err |= vtx_print_pipeline(pf, vtx);
+		err |= vrx_print_pipeline(pf, vrx);
 	}
 
 	err |= stream_debug(pf, v->strm);

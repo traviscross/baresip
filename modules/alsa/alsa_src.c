@@ -32,6 +32,8 @@ struct ausrc_st {
 	ausrc_read_h *rh;
 	ausrc_error_h *errh;
 	void *arg;
+	struct ausrc_prm prm;
+	char *device;
 };
 
 
@@ -50,6 +52,7 @@ static void ausrc_destructor(void *arg)
 
 	mem_deref(st->mbr);
 	mem_deref(st->as);
+	mem_deref(st->device);
 }
 
 
@@ -57,6 +60,26 @@ static void *read_thread(void *arg)
 {
 	struct ausrc_st *st = arg;
 	int err;
+
+	err = snd_pcm_open(&st->read, st->device, SND_PCM_STREAM_CAPTURE, 0);
+	if (err < 0) {
+		DEBUG_WARNING("read open: %s %s\n",
+			      st->device, snd_strerror(err));
+		return NULL;
+	}
+
+	err = alsa_reset(st->read, st->prm.srate, st->prm.ch, st->prm.fmt,
+			 st->prm.frame_size);
+	if (err)
+		return NULL;
+
+	/* Start */
+	err = snd_pcm_start(st->read);
+	if (err) {
+		DEBUG_WARNING("snd_pcm_start on read: %s\n",
+			      snd_strerror(err));
+		return NULL;
+	}
 
 	while (st->run) {
 		err = snd_pcm_readi(st->read, st->mbr->buf, st->frame_size);
@@ -95,34 +118,20 @@ int alsa_src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	if (!st)
 		return ENOMEM;
 
+	err = str_dup(&st->device, device);
+	if (err)
+		goto out;
+
+	st->prm = *prm;
 	st->as  = mem_ref(as);
 	st->rh  = rh;
 	st->arg = arg;
 	st->sample_size = prm->ch * (prm->fmt == AUFMT_S16LE ? 2 : 1);
 	st->frame_size = prm->frame_size;
 
-	err = snd_pcm_open(&st->read, device, SND_PCM_STREAM_CAPTURE, 0);
-	if (err < 0) {
-		DEBUG_WARNING("read open: %s %s\n", device, snd_strerror(err));
-		goto out;
-	}
-
 	st->mbr = mbuf_alloc(st->sample_size * st->frame_size);
 	if (!st->mbr) {
 		err = ENOMEM;
-		goto out;
-	}
-
-	err = alsa_reset(st->read, prm->srate, prm->ch, prm->fmt,
-			 prm->frame_size);
-	if (err)
-		goto out;
-
-	/* Start */
-	err = snd_pcm_start(st->read);
-	if (err) {
-		DEBUG_WARNING("snd_pcm_start on read: %s\n",
-			      snd_strerror(err));
 		goto out;
 	}
 

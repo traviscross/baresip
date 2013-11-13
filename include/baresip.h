@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.6"
+#define BARESIP_VERSION "0.4.7"
 
 
 /* forward declarations */
@@ -78,6 +78,7 @@ const char   *call_localuri(const struct call *call);
 struct audio *call_audio(const struct call *call);
 struct video *call_video(const struct call *call);
 struct list  *call_streaml(const struct call *call);
+struct ua    *call_get_ua(const struct call *call);
 
 
 /*
@@ -95,6 +96,7 @@ int  conf_path_get(char *path, size_t sz);
 int  conf_parse(const char *filename, confline_h *ch);
 int  conf_get_vidsz(const struct conf *conf, const char *name,
 		    struct vidsz *sz);
+int  conf_get_sa(const struct conf *conf, const char *name, struct sa *sa);
 bool conf_fileexist(const char *path);
 struct conf *conf_cur(void);
 
@@ -457,12 +459,14 @@ int  ua_debug(struct re_printf *pf, const struct ua *ua);
 int  ua_print_calls(struct re_printf *pf, const struct ua *ua);
 int  ua_print_status(struct re_printf *pf, const struct ua *ua);
 int  ua_print_supported(struct re_printf *pf, const struct ua *ua);
+int  ua_register(struct ua *ua);
 bool ua_isregistered(const struct ua *ua);
 const char     *ua_aor(const struct ua *ua);
 const char     *ua_cuser(const struct ua *ua);
 const char     *ua_outbound(const struct ua *ua);
 struct call    *ua_call(const struct ua *ua);
 struct account *ua_prm(const struct ua *ua);
+struct list    *ua_calls(const struct ua *ua);
 
 
 /* One instance */
@@ -804,7 +808,7 @@ typedef void (mnat_estab_h)(int err, uint16_t scode, const char *reason,
 			    void *arg);
 
 typedef int (mnat_sess_h)(struct mnat_sess **sessp, struct dnsc *dnsc,
-			  const char *srv, uint16_t port,
+			  int af, const char *srv, uint16_t port,
 			  const char *user, const char *pass,
 			  struct sdp_session *sdp, bool offerer,
 			  mnat_estab_h *estabh, void *arg);

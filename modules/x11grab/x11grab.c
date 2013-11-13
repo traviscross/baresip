@@ -125,7 +125,7 @@ static void *read_thread(void *arg)
 	while (st->run) {
 
 		if (tmr_jiffies() < ts) {
-			usleep(4000);
+			sys_msleep(4);
 			continue;
 		}
 

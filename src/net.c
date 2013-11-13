@@ -60,7 +60,7 @@ static void dns_refresh(void)
  */
 static void ipchange_handler(void *arg)
 {
-	bool change = false;
+	bool change;
 	(void)arg;
 
 	tmr_start(&net.tmr, net.interval * 1000, ipchange_handler, NULL);

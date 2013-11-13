@@ -37,30 +37,31 @@ enum {
 	USE_ENHANCER = 1
 };
 
-struct aucodec_st {
-	struct aucodec *ac; /* inheritance */
+struct auenc_state {
 	iLBC_Enc_Inst_t enc;
-	iLBC_Dec_Inst_t dec;
-	int mode_enc;
-	int mode_dec;
+	int mode;
 	uint32_t enc_bytes;
-	uint32_t dec_nsamp;
+};
+
+struct audec_state {
+	iLBC_Dec_Inst_t dec;
+	int mode;
+	uint32_t nsamp;
 	size_t dec_bytes;
 };
 
 
-static struct aucodec *ilbc;
 static char ilbc_fmtp[32];
 
 
-static void set_encoder_mode(struct aucodec_st *st, int mode)
+static void set_encoder_mode(struct auenc_state *st, int mode)
 {
-	if (st->mode_enc == mode)
+	if (st->mode == mode)
 		return;
 
 	(void)re_printf("set iLBC encoder mode %dms\n", mode);
 
-	st->mode_enc = mode;
+	st->mode = mode;
 
 	switch (mode) {
 
@@ -81,23 +82,23 @@ static void set_encoder_mode(struct aucodec_st *st, int mode)
 }
 
 
-static void set_decoder_mode(struct aucodec_st *st, int mode)
+static void set_decoder_mode(struct audec_state *st, int mode)
 {
-	if (st->mode_dec == mode)
+	if (st->mode == mode)
 		return;
 
 	(void)re_printf("set iLBC decoder mode %dms\n", mode);
 
-	st->mode_dec = mode;
+	st->mode = mode;
 
 	switch (mode) {
 
 	case 20:
-		st->dec_nsamp = BLOCKL_20MS;
+		st->nsamp = BLOCKL_20MS;
 		break;
 
 	case 30:
-		st->dec_nsamp = BLOCKL_30MS;
+		st->nsamp = BLOCKL_30MS;
 		break;
 
 	default:
@@ -105,11 +106,11 @@ static void set_decoder_mode(struct aucodec_st *st, int mode)
 		return;
 	}
 
-	st->dec_nsamp = initDecode(&st->dec, mode, USE_ENHANCER);
+	st->nsamp = initDecode(&st->dec, mode, USE_ENHANCER);
 }
 
 
-static void fmtp_decode(struct aucodec_st *st, const char *fmtp)
+static void encoder_fmtp_decode(struct auenc_state *st, const char *fmtp)
 {
 	struct pl mode;
 
@@ -120,19 +121,38 @@ static void fmtp_decode(struct aucodec_st *st, const char *fmtp)
 		return;
 
 	set_encoder_mode(st, pl_u32(&mode));
+}
+
+
+static void decoder_fmtp_decode(struct audec_state *st, const char *fmtp)
+{
+	struct pl mode;
+
+	if (!fmtp)
+		return;
+
+	if (re_regex(fmtp, strlen(fmtp), "mode=[0-9]+", &mode))
+		return;
+
 	set_decoder_mode(st, pl_u32(&mode));
 }
 
 
-static void destructor(void *arg)
+static void encode_destructor(void *arg)
 {
-	struct aucodec_st *st = arg;
-
-	mem_deref(st->ac);
+	struct auenc_state *st = arg;
+	(void)st;
 }
 
 
-static int check_ptime(const struct aucodec_prm *prm)
+static void decode_destructor(void *arg)
+{
+	struct audec_state *st = arg;
+	(void)st;
+}
+
+
+static int check_ptime(const struct auenc_param *prm)
 {
 	if (!prm)
 		return 0;
@@ -150,110 +170,138 @@ static int check_ptime(const struct aucodec_prm *prm)
 }
 
 
-static int alloc(struct aucodec_st **stp, struct aucodec *ac,
-		 struct aucodec_prm *encp, struct aucodec_prm *decp,
-		 const char *fmtp)
+static int encode_update(struct auenc_state **aesp, const struct aucodec *ac,
+			 struct auenc_param *prm, const char *fmtp)
 {
-	struct aucodec_st *st;
+	struct auenc_state *st;
+	int err = 0;
 
-	if (check_ptime(encp) || check_ptime(decp))
+	if (!aesp || !ac || !prm)
 		return EINVAL;
+	if (check_ptime(prm))
+		return EINVAL;
+	if (*aesp)
+		return 0;
 
-	st = mem_zalloc(sizeof(*st), destructor);
+	st = mem_zalloc(sizeof(*st), encode_destructor);
 	if (!st)
 		return ENOMEM;
 
-	st->ac = mem_ref(ac);
-
 	set_encoder_mode(st, DEFAULT_MODE);
-	set_decoder_mode(st, DEFAULT_MODE);
 
 	if (str_isset(fmtp))
-		fmtp_decode(st, fmtp);
+		encoder_fmtp_decode(st, fmtp);
 
 	/* update parameters after SDP was decoded */
-	if (encp) {
-		encp->ptime = st->mode_enc;
+	if (prm) {
+		prm->ptime = st->mode;
 	}
 
-	*stp = st;
+	if (err)
+		mem_deref(st);
+	else
+		*aesp = st;
 
-	return 0;
+	return err;
 }
 
 
-static int encode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode_update(struct audec_state **adsp,
+			 const struct aucodec *ac, const char *fmtp)
 {
-	const size_t nsamp = mbuf_get_left(src)/2;
-	float buf[nsamp];
+	struct audec_state *st;
+	int err = 0;
+	(void)fmtp;
+
+	if (!adsp || !ac)
+		return EINVAL;
+	if (*adsp)
+		return 0;
+
+	st = mem_zalloc(sizeof(*st), decode_destructor);
+	if (!st)
+		return ENOMEM;
+
+	set_decoder_mode(st, DEFAULT_MODE);
+
+	if (str_isset(fmtp))
+		decoder_fmtp_decode(st, fmtp);
+
+	if (err)
+		mem_deref(st);
+	else
+		*adsp = st;
+
+	return err;
+}
+
+
+static int encode(struct auenc_state *st, uint8_t *buf,
+		  size_t *len, const int16_t *sampv, size_t sampc)
+{
+	float float_buf[sampc];
 	uint32_t i;
 
 	/* Make sure there is enough space */
-	if (mbuf_get_space(dst) < st->enc_bytes) {
-		DEBUG_WARNING("encode: dst buffer is too small (%u bytes)\n",
-			      mbuf_get_space(dst));
+	if (*len < st->enc_bytes) {
+		DEBUG_WARNING("encode: buffer is too small (%u bytes)\n",
+			      *len);
 		return ENOMEM;
 	}
 
 	/* Convert from 16-bit samples to float */
-	for (i=0; i<nsamp; i++) {
-		const int16_t v = mbuf_read_u16(src);
-		buf[i] = (float)v;
+	for (i=0; i<sampc; i++) {
+		const int16_t v = sampv[i];
+		float_buf[i] = (float)v;
 	}
 
-	iLBC_encode(mbuf_buf(dst),  /* (o) encoded data bits iLBC */
-		    buf,            /* (o) speech vector to encode */
+	iLBC_encode(buf,            /* (o) encoded data bits iLBC */
+		    float_buf,      /* (o) speech vector to encode */
 		    &st->enc);      /* (i/o) the general encoder state */
 
-	mbuf_set_end(dst, dst->end + st->enc_bytes);
+	*len = st->enc_bytes;
 
 	return 0;
 }
 
 
-static int do_dec(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int do_dec(struct audec_state *st, int16_t *sampv, size_t *sampc,
+		  const uint8_t *buf, size_t len)
 {
-	const uint32_t nsamp = st->dec_nsamp;
-	const uint32_t n = 2*nsamp;
-	float buf[st->dec_nsamp];
-	const int mode = mbuf_get_left(src) ? 1 : 0;
+	float float_buf[st->nsamp];
+	const int mode = len ? 1 : 0;
 	uint32_t i;
-	int err;
 
 	/* Make sure there is enough space in the buffer */
-	if (mbuf_get_space(dst) < n) {
-		DEBUG_NOTICE("decode: buffer too small (size=%u, need %u)\n",
-			     mbuf_get_space(dst), n);
-		err = mbuf_resize(dst, dst->pos + n);
-		if (err)
-			return err;
+	if (*sampc < st->nsamp) {
+		DEBUG_NOTICE("decode: buffer too small (sampc=%u, need %u)\n",
+			     sampc, st->nsamp);
+		return ENOMEM;
 	}
 
-	iLBC_decode(buf,            /* (o) decoded signal block */
-		    mbuf_buf(src),  /* (i) encoded signal bits */
+	iLBC_decode(float_buf,      /* (o) decoded signal block */
+		    (uint8_t *)buf, /* (i) encoded signal bits */
 		    &st->dec,       /* (i/o) the decoder state structure */
 		    mode);          /* (i) 0: bad packet, PLC, 1: normal */
 
-	if (src)
-		mbuf_advance(src, st->dec_bytes);
-
 	/* Convert from float to 16-bit samples */
-	for (i=0; i<nsamp; i++) {
-		const int16_t s = buf[i];
-		mbuf_write_u16(dst, s);
+	for (i=0; i<st->nsamp; i++) {
+		sampv[i] = (int16_t)float_buf[i];
 	}
+
+	*sampc = st->nsamp;
 
 	return 0;
 }
 
 
-/* src=NULL means lost packet */
-static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
+static int decode(struct audec_state *st, int16_t *sampv,
+		  size_t *sampc, const uint8_t *buf, size_t len)
 {
 	/* Try to detect mode */
-	if (mbuf_get_left(src) && st->dec_bytes != mbuf_get_left(src)) {
+	if (st->dec_bytes != len) {
 
-		st->dec_bytes = mbuf_get_left(src);
+		st->dec_bytes = len;
 
 		switch (st->dec_bytes) {
 
@@ -267,13 +315,25 @@ static int decode(struct aucodec_st *st, struct mbuf *dst, struct mbuf *src)
 
 		default:
 			DEBUG_WARNING("decode: expect %u, got %u\n",
-				      st->dec_bytes, mbuf_get_left(src));
+				      st->dec_bytes, len);
 			return EINVAL;
 		}
 	}
 
-	return do_dec(st, dst, src);
+	return do_dec(st, sampv, sampc, buf, len);
 }
+
+
+static int pkloss(struct audec_state *st, int16_t *sampv, size_t *sampc)
+{
+	return do_dec(st, sampv, sampc, NULL, 0);
+}
+
+
+static struct aucodec ilbc = {
+	LE_INIT, 0, "iLBC", 8000, 1, ilbc_fmtp,
+	encode_update, encode, decode_update, decode, pkloss, 0, 0
+};
 
 
 static int module_init(void)
@@ -281,14 +341,14 @@ static int module_init(void)
 	(void)re_snprintf(ilbc_fmtp, sizeof(ilbc_fmtp),
 			  "mode=%d", DEFAULT_MODE);
 
-	return aucodec_register(&ilbc, NULL, "iLBC", 8000, 1, ilbc_fmtp,
-			       alloc, encode, decode);
+	aucodec_register(&ilbc);
+	return 0;
 }
 
 
 static int module_close(void)
 {
-	ilbc = mem_deref(ilbc);
+	aucodec_unregister(&ilbc);
 	return 0;
 }
 

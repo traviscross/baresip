@@ -7,6 +7,7 @@
 #include <rem.h>
 #include <baresip.h>
 #include <libavcodec/avcodec.h>
+#include <libavutil/mem.h>
 #ifdef USE_X264
 #include <x264.h>
 #endif
@@ -496,7 +497,7 @@ int encode_x264(struct videnc_state *st, bool update,
 		re_printf("x264 picture update\n");
 	}
 
-	memset(&pic_in, 0, sizeof(pic_in));
+	x264_picture_init(&pic_in);
 
 	pic_in.i_type = update ? X264_TYPE_IDR : X264_TYPE_AUTO;
 	pic_in.i_qpplus1 = 0;
@@ -590,6 +591,8 @@ int encode(struct videnc_state *st, bool update, const struct vidframe *frame,
 	do {
 		AVPacket avpkt;
 		int got_packet;
+
+		av_init_packet(&avpkt);
 
 		avpkt.data = st->mb->buf;
 		avpkt.size = (int)st->mb->size;

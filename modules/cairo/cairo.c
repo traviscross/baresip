@@ -136,7 +136,7 @@ static void *read_thread(void *arg)
 
 		uint64_t now;
 
-		(void)usleep(2000);
+		sys_msleep(2);
 
 		now = tmr_jiffies();
 		if (!ts)

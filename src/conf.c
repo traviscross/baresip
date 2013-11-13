@@ -203,6 +203,12 @@ int conf_get_range(const struct conf *conf, const char *name,
 	rng->min = pl_u32(&min);
 	rng->max = pl_u32(&max);
 
+	if (rng->min > rng->max) {
+		DEBUG_WARNING("%s: invalid range (%u - %u)\n",
+			      name, rng->min, rng->max);
+		return EINVAL;
+	}
+
 	return 0;
 }
 
@@ -256,6 +262,22 @@ int conf_get_vidsz(const struct conf *conf, const char *name, struct vidsz *sz)
 	}
 
 	return 0;
+}
+
+
+int conf_get_sa(const struct conf *conf, const char *name, struct sa *sa)
+{
+	struct pl opt;
+	int err;
+
+	if (!conf || !name || !sa)
+		return EINVAL;
+
+	err = conf_get(conf, name, &opt);
+	if (err)
+		return err;
+
+	return sa_decode(sa, opt.p, opt.l);
 }
 
 

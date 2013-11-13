@@ -28,10 +28,10 @@ static int confline_handler(const struct pl *addr)
 static int cmd_contact(struct re_printf *pf, void *arg)
 {
 	const struct cmd_arg *carg = arg;
+	struct contact *cnt = NULL;
 	struct pl dname, user, pl;
 	struct le *le;
 	int err = 0;
-	struct contact *cnt = NULL;
 
 	pl_set_str(&pl, carg->prm);
 
@@ -46,13 +46,22 @@ static int cmd_contact(struct re_printf *pf, void *arg)
 		dname.p = contact_addr(c)->dname.p;
 		user.p  = contact_addr(c)->uri.user.p;
 
-		if (dname.p && 0 == pl_casecmp(&dname, &pl)) {
-			err |= re_hprintf(pf, "%s\n", contact_str(c));
-			cnt = c;
+		/* if displayname is set, try to match the displayname
+		 * otherwise we try to match the username only
+		 */
+		if (dname.p) {
+
+			if (0 == pl_casecmp(&dname, &pl)) {
+				err |= re_hprintf(pf, "%s\n", contact_str(c));
+				cnt = c;
+			}
 		}
-		else if (user.p && 0 == pl_casecmp(&user, &pl)) {
-			err |= re_hprintf(pf, "%s\n", contact_str(c));
-			cnt = c;
+		else if (user.p) {
+
+			if (0 == pl_casecmp(&user, &pl)) {
+				err |= re_hprintf(pf, "%s\n", contact_str(c));
+				cnt = c;
+			}
 		}
 	}
 

@@ -31,6 +31,8 @@ struct auplay_st {
 	struct mbuf *mbw;
 	auplay_write_h *wh;
 	void *arg;
+	struct auplay_prm prm;
+	char *device;
 };
 
 
@@ -49,13 +51,25 @@ static void auplay_destructor(void *arg)
 
 	mem_deref(st->mbw);
 	mem_deref(st->ap);
+	mem_deref(st->device);
 }
 
 
 static void *write_thread(void *arg)
 {
 	struct auplay_st *st = arg;
-	int n;
+	int err, n;
+
+	err = snd_pcm_open(&st->write, st->device, SND_PCM_STREAM_PLAYBACK, 0);
+	if (err < 0) {
+		DEBUG_WARNING("open: %s %s\n", st->device, snd_strerror(err));
+		return NULL;
+	}
+
+	err = alsa_reset(st->write, st->prm.srate, st->prm.ch, st->prm.fmt,
+			 st->prm.frame_size);
+	if (err)
+		return NULL;
 
 	while (st->run) {
 		const int samples = st->frame_size;
@@ -103,28 +117,22 @@ int alsa_play_alloc(struct auplay_st **stp, struct auplay *ap,
 	if (!st)
 		return ENOMEM;
 
+	err = str_dup(&st->device, device);
+	if (err)
+		goto out;
+
+	st->prm = *prm;
 	st->ap  = mem_ref(ap);
 	st->wh  = wh;
 	st->arg = arg;
 	st->sample_size = prm->ch * (prm->fmt == AUFMT_S16LE ? 2 : 1);
 	st->frame_size = prm->frame_size;
 
-	err = snd_pcm_open(&st->write, device, SND_PCM_STREAM_PLAYBACK, 0);
-	if (err < 0) {
-		DEBUG_WARNING("open: %s %s\n", device, snd_strerror(err));
-		goto out;
-	}
-
 	st->mbw = mbuf_alloc(st->sample_size * prm->frame_size);
 	if (!st->mbw) {
 		err = ENOMEM;
 		goto out;
 	}
-
-	err = alsa_reset(st->write, prm->srate, prm->ch, prm->fmt,
-			 prm->frame_size);
-	if (err)
-		goto out;
 
 	st->run = true;
 	err = pthread_create(&st->thread, NULL, write_thread, st);

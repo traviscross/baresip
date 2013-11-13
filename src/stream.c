@@ -288,6 +288,10 @@ int stream_alloc(struct stream **sp, const struct config_avt *cfg,
 					   "label", "%d", label);
 	}
 
+	/* RFC 5506 */
+	if (s->rtcp)
+		err |= sdp_media_set_lattr(s->sdp, true, "rtcp-rsize", NULL);
+
 	/* RFC 5761 */
 	if (cfg->rtcp_mux)
 		err |= sdp_media_set_lattr(s->sdp, true, "rtcp-mux", NULL);
@@ -512,7 +516,8 @@ void stream_send_fir(struct stream *s, bool pli)
 		err = rtcp_send_fir(s->rtp, rtp_sess_ssrc(s->rtp));
 
 	if (err) {
-		DEBUG_WARNING("Send FIR: %m\n", err);
+		DEBUG_WARNING("failed to send RTCP %s: %m\n",
+			      pli ? "PLI" : "FIR", err);
 	}
 }
 

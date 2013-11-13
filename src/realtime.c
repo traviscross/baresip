@@ -10,6 +10,9 @@
 #include <sys/sysctl.h>
 #include <stdio.h>
 #include <mach/mach.h>
+#ifdef __APPLE__
+#include "TargetConditionals.h"
+#endif
 #endif
 
 
@@ -48,6 +51,9 @@ int realtime_enable(bool enable, int fps)
 {
 #ifdef DARWIN
 	if (enable) {
+#if TARGET_OS_IPHONE
+		int bus_speed = 100000000;
+#else
 		int ret, bus_speed;
 		int mib[2] = { CTL_HW, HW_BUS_FREQ };
 		size_t len;
@@ -60,6 +66,7 @@ int realtime_enable(bool enable, int fps)
 
 		re_fprintf(stderr, "realtime: fps=%d bus_speed=%d\n",
 			   fps, bus_speed);
+#endif
 
 		return set_realtime(bus_speed / fps,
 				    bus_speed / 3300, bus_speed / 2200);

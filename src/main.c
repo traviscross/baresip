@@ -63,16 +63,20 @@ int main(int argc, char *argv[])
 			(void)re_fprintf(stderr,
 					 "Usage: baresip [options]\n"
 					 "options:\n"
+#if HAVE_INET6
 					 "\t-6               Prefer IPv6\n"
+#endif
 					 "\t-d               Daemon\n"
 					 "\t-e <commands>    Exec commands\n"
 					 "\t-f <path>        Config path\n"
 					 "\t-h -?            Help\n");
 			return -2;
 
+#if HAVE_INET6
 		case '6':
 			prefer_ipv6 = true;
 			break;
+#endif
 
 		case 'd':
 			run_daemon = true;

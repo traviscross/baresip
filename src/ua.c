@@ -138,7 +138,7 @@ void ua_event(struct ua *ua, enum ua_event ev, struct call *call,
  *
  * @return 0 if success, otherwise errorcode
  */
-static int ua_register(struct ua *ua)
+int ua_register(struct ua *ua)
 {
 	struct account *acc;
 	struct le *le;
@@ -519,14 +519,14 @@ int ua_alloc(struct ua **uap, const char *aor)
 
 		for (i=0; i<ARRAY_SIZE(ua->acc->outbound); i++) {
 
-			if (ua->acc->outbound[i]) {
+			if (ua->acc->outbound[i] && ua->acc->regint) {
 				err = reg_add(&ua->regl, ua, (int)i+1);
 				if (err)
 					break;
 			}
 		}
 	}
-	else {
+	else if (ua->acc->regint) {
 		err = reg_add(&ua->regl, ua, 0);
 	}
 	if (err)
@@ -1453,6 +1453,12 @@ int ua_print_supported(struct re_printf *pf, const struct ua *ua)
 struct account *ua_prm(const struct ua *ua)
 {
 	return ua ? ua->acc : NULL;
+}
+
+
+struct list *ua_calls(const struct ua *ua)
+{
+	return ua ? (struct list *)&ua->calls : NULL;
 }
 
 

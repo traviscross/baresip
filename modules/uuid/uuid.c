@@ -79,7 +79,7 @@ static int module_init(void)
 	if (err)
 		return err;
 
-	strncat(path, "/uuid", sizeof(path));
+	strncat(path, "/uuid", sizeof(path) - strlen(path) - 1);
 
 	err = uuid_init(path);
 	if (err)

@@ -1,3 +1,50 @@
+2013-11-12 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.7
+
+	* new modules:
+	  - httpd   HTTP webserver UI module
+
+	* baresip:
+	  - added RFC 5506 Support for Reduced-Size RTCP
+	  - audio: minor cleanups
+	  - cmd: ignore RELEASE key in editor mode
+	  - conf: add conf_get_sa()
+	  - mnat: add address family (af) to session handler
+	  - realtime: fixes for iOS (thanks Dimitris)
+	  - ua: make ua_register() public
+	  - ua: add ua_calls() to get list of calls
+	  - ua: only create register client if regint > 0
+
+	* debian: update dependencies (thanks Juha Heinanen)
+
+	* rpm: added RPM package spec file
+
+	* alsa: open device from thread to avoid blocking re-main loop
+
+	* avcodec: build fixes for Debian Testing
+
+	* avformat: use sys_msleep()
+
+	* contact: improve matching logic (thanks EJC Lindner)
+
+	* dshow: initialize variables (found with cppcheck)
+
+	* evdev: fix formatted printing (found with cppcheck)
+
+	* ice: use address family (AF) from call
+
+	* ilbc: update to separate encoder/decoder states (thanks Dimitris)
+	
+	* snapshot: initialize variables (found with cppcheck)
+
+	* stun: use address family (AF) from call
+
+	* turn: use address family (AF) from call
+
+	* uuid: fix usage of strncat()
+
+
 2013-10-11 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.4.6

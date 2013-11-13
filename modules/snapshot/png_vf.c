@@ -28,7 +28,7 @@ int png_save_vidframe(const struct vidframe *vf, const char *path)
 	png_byte red, green, blue;
 	png_structp png_ptr = NULL;
 	png_infop info_ptr = NULL;
-	FILE *fp;
+	FILE *fp = NULL;
 	size_t x, y;
 	unsigned int width = vf->size.w & ~1;
 	unsigned int height = vf->size.h & ~1;
@@ -155,8 +155,6 @@ static void png_save_free(png_structp png_ptr, png_byte **png_row_pointers,
 		png_free(png_ptr, png_row_pointers[y]);
 	}
 	png_free(png_ptr, png_row_pointers);
-
-	png_row_pointers = NULL;
 }
 
 

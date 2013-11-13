@@ -167,7 +167,6 @@ int  call_reset_transp(struct call *call);
 int  call_notify_sipfrag(struct call *call, uint16_t scode,
 			 const char *reason, ...);
 int  call_af(const struct call *call);
-struct ua  *call_get_ua(const struct call *call);
 
 
 /*

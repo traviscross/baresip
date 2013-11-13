@@ -2,14 +2,14 @@ Source: baresip
 Section: comm
 Priority: optional
 Maintainer: Alfred E. Heggestad <aeh@db.org>
-Build-Depends: debhelper (>= 4.0.0), librem-dev (>= 0.4.1), libre-dev (>= 0.4.1), libasound2-dev
+Build-Depends: debhelper (>= 4.0.0), librem-dev (>= 0.4.4), libre-dev (>= 0.4.5), libasound2-dev, libavformat-dev, libavdevice-dev
 Standards-Version: 3.6.2
 Homepage: http://www.creytiv.com/baresip.html
 
 Package: baresip
 Architecture: any
-Depends: ${shlibs:Depends}
-Description: Barebone SIP useragent
+Depends: ${shlibs:Depends}, librem (>= 0.4.4), libre (>= 0.4.5)
+Description: Modular SIP User-Agent with audio and video support
  .
  Design goals:
  .

@@ -175,7 +175,7 @@ static void *read_thread(void *data)
 		av_init_packet(&pkt);
 
 		if (av_read_frame(st->ic, &pkt) < 0) {
-			usleep(1000000);
+			sys_msleep(1000);
 			av_seek_frame(st->ic, -1, 0, 0);
 			continue;
 		}
@@ -186,7 +186,7 @@ static void *read_thread(void *data)
 		handle_packet(st, &pkt);
 
 		/* simulate framerate */
-		usleep(1000000/st->fps);
+		sys_msleep(1000/st->fps);
 
 	out:
 		av_free_packet(&pkt);

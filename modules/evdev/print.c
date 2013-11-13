@@ -91,7 +91,7 @@ void print_events(int fd)
 			printf(" (Force Feedback)\n");
 			break;
 		default:
-			printf(" (Unknown event type: 0x%04hx)\n", i);
+			printf(" (Unknown event type: 0x%04x)\n", i);
 			break;
 		}
 	}
@@ -512,7 +512,7 @@ void print_leds(int fd)
 			printf(" (Miscellaneous)\n");
 			break;
 		default:
-			printf(" (Unknown LED type: 0x%04hx)\n", i);
+			printf(" (Unknown LED type: 0x%04x)\n", i);
 		}
 	}
 }

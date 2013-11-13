@@ -107,7 +107,7 @@ int h263_hdr_decode(struct h263_hdr *hdr, struct mbuf *mb)
 		hdr->s    = v>>29 & 0x1;
 		hdr->a    = v>>28 & 0x1;
 
-		v = ntohl(mbuf_read_u32(mb));
+		(void)mbuf_read_u32(mb); /* ignore */
 		break;
 	}
 

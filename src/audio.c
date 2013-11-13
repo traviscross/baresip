@@ -81,7 +81,7 @@ struct autx {
 	struct ausrc_st *ausrc;       /**< Audio Source                    */
 	const struct aucodec *ac;     /**< Current audio encoder           */
 	struct auenc_state *enc;      /**< Audio encoder state (optional)  */
-	struct aubuf *ab;             /**< Packetize outgoing stream       */
+	struct aubuf *aubuf;          /**< Packetize outgoing stream       */
 	struct auresamp *resamp;      /**< Optional resampler for DSP      */
 	struct list filtl;            /**< Audio filters in encoding order */
 	struct mbuf *mb;              /**< Buffer for outgoing RTP packets */
@@ -128,7 +128,7 @@ struct aurx {
 	struct auplay_st *auplay;     /**< Audio Player                    */
 	const struct aucodec *ac;     /**< Current audio decoder           */
 	struct audec_state *dec;      /**< Audio decoder state (optional)  */
-	struct aubuf *ab;             /**< Incoming audio buffer           */
+	struct aubuf *aubuf;          /**< Incoming audio buffer           */
 	struct auresamp *resamp;      /**< Optional resampler for DSP      */
 	struct list filtl;            /**< Audio filters in decoding order */
 	char device[64];
@@ -155,19 +155,65 @@ struct audio {
 };
 
 
+static void stop_tx(struct autx *tx, struct audio *a)
+{
+	if (!tx || !a)
+		return;
+
+	switch (a->cfg.txmode) {
+
+#ifdef HAVE_PTHREAD
+	case AUDIO_MODE_THREAD:
+	case AUDIO_MODE_THREAD_REALTIME:
+		if (tx->u.thr.run) {
+			tx->u.thr.run = false;
+			pthread_join(tx->u.thr.tid, NULL);
+		}
+		break;
+#endif
+	case AUDIO_MODE_TMR:
+		tmr_cancel(&tx->u.tmr);
+		break;
+
+	default:
+		break;
+	}
+
+	/* audio source must be stopped first */
+	tx->ausrc = mem_deref(tx->ausrc);
+	tx->aubuf = mem_deref(tx->aubuf);
+
+	list_flush(&tx->filtl);
+}
+
+
+static void stop_rx(struct aurx *rx)
+{
+	if (!rx)
+		return;
+
+	/* audio player must be stopped first */
+	rx->auplay = mem_deref(rx->auplay);
+	rx->aubuf  = mem_deref(rx->aubuf);
+
+	list_flush(&rx->filtl);
+}
+
+
 static void audio_destructor(void *arg)
 {
 	struct audio *a = arg;
 
-	audio_stop(a);
+	stop_tx(&a->tx, a);
+	stop_rx(&a->rx);
 
 	mem_deref(a->tx.enc);
 	mem_deref(a->rx.dec);
-	mem_deref(a->tx.ab);
+	mem_deref(a->tx.aubuf);
 	mem_deref(a->tx.mb);
 	mem_deref(a->tx.sampv);
 	mem_deref(a->rx.sampv);
-	mem_deref(a->rx.ab);
+	mem_deref(a->rx.aubuf);
 	mem_deref(a->tx.sampv_rs);
 	mem_deref(a->tx.resamp);
 	mem_deref(a->rx.sampv_rs);
@@ -304,7 +350,7 @@ static void poll_aubuf_tx(struct audio *a)
 	sampc = tx->psize / 2;
 
 	/* timed read from audio-buffer */
-	if (aubuf_get_samp(tx->ab, tx->ptime, tx->sampv, sampc))
+	if (aubuf_get_samp(tx->aubuf, tx->ptime, tx->sampv, sampc))
 		return;
 
 	/* optional resampler */
@@ -327,6 +373,9 @@ static void poll_aubuf_tx(struct audio *a)
 
 		if (st->af && st->af->ench)
 			err |= st->af->ench(st, sampv, &sampc);
+	}
+	if (err) {
+		DEBUG_WARNING("aufilter encode: %m\n", err);
 	}
 
 	/* Encode and send */
@@ -377,7 +426,7 @@ static bool auplay_write_handler(uint8_t *buf, size_t sz, void *arg)
 {
 	struct aurx *rx = arg;
 
-	aubuf_read(rx->ab, buf, sz);
+	aubuf_read(rx->aubuf, buf, sz);
 
 	return true;
 }
@@ -398,7 +447,7 @@ static void ausrc_read_handler(const uint8_t *buf, size_t sz, void *arg)
 	if (tx->muted)
 		memset((void *)buf, 0, sz);
 
-	(void)aubuf_write(tx->ab, buf, sz);
+	(void)aubuf_write(tx->aubuf, buf, sz);
 
 	if (a->cfg.txmode == AUDIO_MODE_POLL)
 		poll_aubuf_tx(a);
@@ -494,7 +543,7 @@ static int aurx_stream_decode(struct aurx *rx, struct mbuf *mb)
 			err |= st->af->dech(st, rx->sampv, &sampc);
 	}
 
-	if (!rx->ab)
+	if (!rx->aubuf)
 		goto out;
 
 	sampv = rx->sampv;
@@ -513,7 +562,7 @@ static int aurx_stream_decode(struct aurx *rx, struct mbuf *mb)
 		sampc = sampc_rs;
 	}
 
-	err = aubuf_write_samp(rx->ab, sampv, sampc);
+	err = aubuf_write_samp(rx->aubuf, sampv, sampc);
 	if (err)
 		goto out;
 
@@ -860,10 +909,10 @@ static int start_player(struct aurx *rx, struct audio *a)
 		prm.ch         = ac->ch;
 		prm.frame_size = calc_nsamp(prm.srate, prm.ch, rx->ptime);
 
-		if (!rx->ab) {
+		if (!rx->aubuf) {
 			const size_t psize = 2 * prm.frame_size;
 
-			err = aubuf_alloc(&rx->ab, psize * 1, psize * 8);
+			err = aubuf_alloc(&rx->aubuf, psize * 1, psize * 8);
 			if (err)
 				return err;
 		}
@@ -923,8 +972,8 @@ static int start_source(struct autx *tx, struct audio *a)
 
 		tx->psize = 2 * prm.frame_size;
 
-		if (!tx->ab) {
-			err = aubuf_alloc(&tx->ab, tx->psize * 2,
+		if (!tx->aubuf) {
+			err = aubuf_alloc(&tx->aubuf, tx->psize * 2,
 					  tx->psize * 30);
 			if (err)
 				return err;
@@ -1026,42 +1075,11 @@ int audio_start(struct audio *a)
  */
 void audio_stop(struct audio *a)
 {
-	struct autx *tx;
-	struct aurx *rx;
-
 	if (!a)
 		return;
 
-	tx = &a->tx;
-	rx = &a->rx;
-
-	switch (a->cfg.txmode) {
-
-#ifdef HAVE_PTHREAD
-	case AUDIO_MODE_THREAD:
-	case AUDIO_MODE_THREAD_REALTIME:
-		if (tx->u.thr.run) {
-			tx->u.thr.run = false;
-			pthread_join(tx->u.thr.tid, NULL);
-		}
-		break;
-#endif
-	case AUDIO_MODE_TMR:
-		tmr_cancel(&tx->u.tmr);
-		break;
-
-	default:
-		break;
-	}
-
-	/* audio device must be stopped first */
-	tx->ausrc  = mem_deref(tx->ausrc);
-	rx->auplay = mem_deref(rx->auplay);
-
-	list_flush(&tx->filtl);
-	list_flush(&rx->filtl);
-	tx->ab = mem_deref(tx->ab);
-	rx->ab = mem_deref(rx->ab);
+	stop_tx(&a->tx, a);
+	stop_rx(&a->rx);
 }
 
 
@@ -1286,12 +1304,12 @@ int audio_debug(struct re_printf *pf, const struct audio *a)
 
 	err |= re_hprintf(pf, " tx:   %H %H ptime=%ums\n",
 			  aucodec_print, tx->ac,
-			  aubuf_debug, tx->ab,
+			  aubuf_debug, tx->aubuf,
 			  tx->ptime);
 
 	err |= re_hprintf(pf, " rx:   %H %H ptime=%ums pt=%d pt_tel=%d\n",
 			  aucodec_print, rx->ac,
-			  aubuf_debug, rx->ab,
+			  aubuf_debug, rx->aubuf,
 			  rx->ptime, rx->pt, rx->pt_tel);
 
 	err |= re_hprintf(pf,

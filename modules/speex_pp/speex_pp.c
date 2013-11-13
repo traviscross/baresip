@@ -112,7 +112,7 @@ static int encode(struct aufilt_enc_st *st, int16_t *sampv, size_t *sampc)
 	is_speech = speex_preprocess_run(pp->state, sampv);
 #else
 	/* Old API - not tested! */
-	is_speech = speex_preprocess(st->state, sampv, NULL);
+	is_speech = speex_preprocess(pp->state, sampv, NULL);
 #endif
 
 	/* XXX: Handle is_speech and VAD */

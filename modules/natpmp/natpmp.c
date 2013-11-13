@@ -152,13 +152,14 @@ static void natpmp_resp_handler(int err, const struct natpmp_resp *resp,
 
 
 static int session_alloc(struct mnat_sess **sessp, struct dnsc *dnsc,
-			 const char *srv, uint16_t port,
+			 int af, const char *srv, uint16_t port,
 			 const char *user, const char *pass,
 			 struct sdp_session *ss, bool offerer,
 			 mnat_estab_h *estabh, void *arg)
 {
 	struct mnat_sess *sess;
 	int err = 0;
+	(void)af;
 	(void)port;
 	(void)user;
 	(void)pass;
@@ -277,7 +278,6 @@ static bool net_rt_handler(const char *ifname, const struct sa *dst,
 
 static int module_init(void)
 {
-	struct pl pl;
 	int err;
 
 	sa_init(&natpmp_srv, AF_INET);
@@ -285,11 +285,7 @@ static int module_init(void)
 
 	net_rt_list(net_rt_handler, NULL);
 
-	if (0 == conf_get(conf_cur(), "natpmp_server", &pl)) {
-		err = sa_decode(&natpmp_srv, pl.p, pl.l);
-		if (err)
-			return err;
-	}
+	conf_get_sa(conf_cur(), "natpmp_server", &natpmp_srv);
 
 	DEBUG_NOTICE("using NAT-PMP server at %J\n", &natpmp_srv);
 

@@ -47,7 +47,7 @@ static int account_write_template(const char *file)
 			 "#    ;answermode={manual,early,auto}\n"
 			 "#    ;audio_codecs=speex/16000,pcma,...\n"
 			 "#    ;auth_user=username\n"
-			 "#    ;mediaenc={srtp,srtp-mand}\n"
+			 "#    ;mediaenc={srtp,srtp-mand,srtp-mandf}\n"
 			 "#    ;medianat={stun,turn,ice}\n"
 			 "#    ;outbound=sip:primary.example.com\n"
 			 "#    ;outbound2=sip:secondary.example.com\n"

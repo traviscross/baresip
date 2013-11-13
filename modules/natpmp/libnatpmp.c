@@ -149,7 +149,7 @@ static int natpmp_init(struct natpmp_req *np, const struct sa *srv,
 	np->resph = resph;
 	np->arg   = arg;
 
-	udp_connect(np->us, true);
+	udp_connect(np->us, srv);
 
 	np->mb = mbuf_alloc(512);
 	if (!np->mb)

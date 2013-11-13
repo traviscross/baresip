@@ -197,7 +197,7 @@ endif
 
 MODULES   += $(EXTRA_MODULES)
 MODULES   += stun turn ice natbd auloop presence
-MODULES   += menu contact vumeter mwi account natpmp
+MODULES   += menu contact vumeter mwi account natpmp httpd
 ifneq ($(USE_VIDEO),)
 MODULES   += vidloop selfview
 endif

@@ -90,7 +90,7 @@ const uint8_t *h264_find_startcode(const uint8_t *p, const uint8_t *end)
 	}
 
 	for (end -= 3; p < end; p += 4) {
-		uint32_t x = *(const uint32_t*)p;
+		uint32_t x = *(const uint32_t*)(void *)p;
 		if ( (x - 0x01010101) & (~x) & 0x80808080 ) {
 			if (p[1] == 0 ) {
 				if ( p[0] == 0 && p[2] == 1 )

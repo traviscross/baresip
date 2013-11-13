@@ -225,8 +225,8 @@ static int config_pin(struct vidsrc_st *st, IPin *pin)
 {
 	AM_MEDIA_TYPE *mt;
 	AM_MEDIA_TYPE *best_mt = NULL;
-	IEnumMediaTypes *media_enum;
-	IAMStreamConfig *stream_conf;
+	IEnumMediaTypes *media_enum = NULL;
+	IAMStreamConfig *stream_conf = NULL;
 	VIDEOINFOHEADER *vih;
 	HRESULT hr;
 	int h = st->size.h;

@@ -252,7 +252,7 @@ static void dns_handler(int err, const struct sa *srv, void *arg)
 
 
 static int session_alloc(struct mnat_sess **sessp, struct dnsc *dnsc,
-			 const char *srv, uint16_t port,
+			 int af, const char *srv, uint16_t port,
 			 const char *user, const char *pass,
 			 struct sdp_session *ss, bool offerer,
 			 mnat_estab_h *estabh, void *arg)
@@ -298,9 +298,8 @@ static int session_alloc(struct mnat_sess **sessp, struct dnsc *dnsc,
 
 	usage = ice.turn ? stun_usage_relay : stun_usage_binding;
 
-	/* todo: AF_INET is hardcoded, get from net.c instead */
 	err = stun_server_discover(&sess->dnsq, dnsc, usage, stun_proto_udp,
-				   AF_INET, srv, port, dns_handler, sess);
+				   af, srv, port, dns_handler, sess);
 
  out:
 	if (err)

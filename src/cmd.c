@@ -269,8 +269,13 @@ int cmd_process(struct cmd_ctx **ctxp, char key, struct re_printf *pf)
 	const struct cmd *cmd;
 
 	/* are we in edit-mode? */
-	if (ctxp && *ctxp)
+	if (ctxp && *ctxp) {
+
+		if (key == REL)
+			return 0;
+
 		return cmd_process_edit(ctxp, key, pf);
+	}
 
 	cmd = cmd_find_by_key(key);
 	if (cmd) {
