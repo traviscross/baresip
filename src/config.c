@@ -54,6 +54,7 @@ static struct config core_config = {
 	/** Video */
 	{
 		"", "",
+		"", "",
 		352, 288,
 		512000,
 		25,
@@ -64,10 +65,11 @@ static struct config core_config = {
 	{
 		0xb8,
 		{1024, 49152},
-		{512000, 1024000},
+		{0, 0},
 		true,
 		false,
-		{5, 10}
+		{5, 10},
+		false
 	},
 
 	/* Network */
@@ -183,6 +185,9 @@ int config_parse_conf(struct config *cfg, const struct conf *conf)
 	(void)conf_get_csv(conf, "video_source",
 			   cfg->video.src_mod, sizeof(cfg->video.src_mod),
 			   cfg->video.src_dev, sizeof(cfg->video.src_dev));
+	(void)conf_get_csv(conf, "video_display",
+			   cfg->video.disp_mod, sizeof(cfg->video.disp_mod),
+			   cfg->video.disp_dev, sizeof(cfg->video.disp_dev));
 	if (0 == conf_get_vidsz(conf, "video_size", &size)) {
 		cfg->video.width  = size.w;
 		cfg->video.height = size.h;
@@ -206,6 +211,7 @@ int config_parse_conf(struct config *cfg, const struct conf *conf)
 	(void)conf_get_bool(conf, "rtcp_mux", &cfg->avt.rtcp_mux);
 	(void)conf_get_range(conf, "jitter_buffer_delay",
 			     &cfg->avt.jbuf_del);
+	(void)conf_get_bool(conf, "rtp_stats", &cfg->avt.rtp_stats);
 
 	if (err) {
 		DEBUG_WARNING("configure parse error (%m)\n", err);
@@ -256,6 +262,7 @@ int config_print(struct re_printf *pf, const struct config *cfg)
 #ifdef USE_VIDEO
 			 "# Video\n"
 			 "video_source\t\t%s,%s\n"
+			 "video_display\t\t%s,%s\n"
 			 "video_size\t\t\"%ux%u\"\n"
 			 "video_bitrate\t\t%u\n"
 			 "video_fps\t\t%u\n"
@@ -268,6 +275,7 @@ int config_print(struct re_printf *pf, const struct config *cfg)
 			 "rtcp_enable\t\t%s\n"
 			 "rtcp_mux\t\t%s\n"
 			 "jitter_buffer_delay\t%H\n"
+			 "rtp_stats\t\t%s\n"
 			 "\n"
 			 "# Network\n"
 			 "net_interface\t\t%s\n"
@@ -292,6 +300,7 @@ int config_print(struct re_printf *pf, const struct config *cfg)
 
 #ifdef USE_VIDEO
 			 cfg->video.src_mod, cfg->video.src_dev,
+			 cfg->video.disp_mod, cfg->video.disp_dev,
 			 cfg->video.width, cfg->video.height,
 			 cfg->video.bitrate, cfg->video.fps,
 #endif
@@ -302,6 +311,7 @@ int config_print(struct re_printf *pf, const struct config *cfg)
 			 cfg->avt.rtcp_enable ? "yes" : "no",
 			 cfg->avt.rtcp_mux ? "yes" : "no",
 			 range_print, &cfg->avt.jbuf_del,
+			 cfg->avt.rtp_stats ? "yes" : "no",
 
 			 cfg->net.ifname
 
@@ -331,6 +341,16 @@ static const char *default_video_device(void)
 	return "qtcapture,nil";
 #else
 	return "v4l2,/dev/video0";
+#endif
+}
+
+
+static const char *default_video_display(void)
+{
+#ifdef DARWIN
+	return "opengl,nil";
+#else
+	return "x11,nil";
 #endif
 }
 #endif
@@ -384,10 +404,12 @@ static int core_config_template(struct re_printf *pf, const struct config *cfg)
 	err |= re_hprintf(pf,
 			  "\n# Video\n"
 			  "#video_source\t\t%s\n"
+			  "#video_display\t\t%s\n"
 			  "video_size\t\t%dx%d\n"
 			  "video_bitrate\t\t%u\n"
 			  "video_fps\t\t%u\n",
 			  default_video_device(),
+			  default_video_display(),
 			  cfg->video.width, cfg->video.height,
 			  cfg->video.bitrate, cfg->video.fps);
 #endif
@@ -400,6 +422,7 @@ static int core_config_template(struct re_printf *pf, const struct config *cfg)
 			  "rtcp_enable\t\tyes\n"
 			  "rtcp_mux\t\tno\n"
 			  "jitter_buffer_delay\t%u-%u\t\t# frames\n"
+			  "rtp_stats\t\tno\n"
 			  "\n# Network\n"
 			  "#dns_server\t\t10.0.0.1:53\n"
 			  "#net_interface\t\t%H\n",
@@ -607,6 +630,7 @@ int config_write_template(const char *file, const struct config *cfg)
 
 	(void)re_fprintf(f, "\n# Media encryption modules\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "srtp" MOD_EXT "\n");
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "dtls_srtp" MOD_EXT "\n");
 	(void)re_fprintf(f, "\n");
 
 	(void)re_fprintf(f, "\n#------------------------------------"

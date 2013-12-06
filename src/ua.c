@@ -52,6 +52,7 @@ static struct {
 	struct sip_lsnr *lsnr;         /**< SIP Listener                    */
 	struct sipsess_sock *sock;     /**< SIP Session socket              */
 	struct sipevent_sock *evsock;  /**< SIP Event socket                */
+	struct ua *ua_cur;             /**< Current User-Agent              */
 	bool use_udp;                  /**< Use UDP transport               */
 	bool use_tcp;                  /**< Use TCP transport               */
 	bool use_tls;                  /**< Use TLS transport               */
@@ -63,6 +64,7 @@ static struct {
 	NULL,
 	LIST_INIT,
 	LIST_INIT,
+	NULL,
 	NULL,
 	NULL,
 	NULL,
@@ -537,6 +539,9 @@ int ua_alloc(struct ua **uap, const char *aor)
 	if (ua->acc->regint) {
 		err = ua_register(ua);
 	}
+
+	if (!uag_current())
+		uag_current_set(ua);
 
  out:
 	if (err)
@@ -1065,7 +1070,7 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls,
 	bsize = cfg->sip.trans_bsize;
 	ui_init(&cfg->input);
 
-	play_init(cfg);
+	play_init();
 
 	/* Initialise Network */
 	err = net_init(&cfg->net, prefer_ipv6 ? AF_INET6 : AF_INET);
@@ -1502,4 +1507,19 @@ void uag_event_unregister(ua_event_h *h)
 			break;
 		}
 	}
+}
+
+
+void uag_current_set(struct ua *ua)
+{
+	uag.ua_cur = ua;
+}
+
+
+struct ua *uag_current(void)
+{
+	if (list_isempty(uag_list()))
+		return NULL;
+
+	return uag.ua_cur;
 }

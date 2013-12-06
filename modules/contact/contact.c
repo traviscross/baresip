@@ -17,6 +17,7 @@
 
 
 static const char *chat_peer;         /**< Selected chat peer             */
+static char cmd_desc[128] = "Send MESSAGE to peer";
 
 
 static int confline_handler(const struct pl *addr)
@@ -73,7 +74,7 @@ static int cmd_contact(struct re_printf *pf, void *arg)
 		switch (carg->key) {
 
 		case '/':
-			err = ua_connect(uag_find_aor(NULL), NULL, NULL,
+			err = ua_connect(uag_current(), NULL, NULL,
 					 contact_str(cnt), NULL, VIDMODE_ON);
 			if (err) {
 				re_fprintf(stderr, "ua_connect failed: %m\n",
@@ -85,6 +86,8 @@ static int cmd_contact(struct re_printf *pf, void *arg)
 			chat_peer = contact_str(cnt);
 			(void)re_hprintf(pf, "Selected chat peer: %s\n",
 					 chat_peer);
+			re_snprintf(cmd_desc, sizeof(cmd_desc),
+				    "Send MESSAGE to %s", chat_peer);
 			break;
 
 		default:
@@ -103,7 +106,7 @@ static int cmd_message(struct re_printf *pf, void *arg)
 
 	(void)pf;
 
-	err = message_send(uag_find_aor(NULL), chat_peer, carg->prm);
+	err = message_send(uag_current(), chat_peer, carg->prm);
 	if (err) {
 		(void)re_hprintf(pf, "chat: ua_im_send() failed (%m)\n", err);
 	}
@@ -116,7 +119,7 @@ static const struct cmd cmdv[] = {
 	{'/', CMD_IPRM, "Dial from contacts",       cmd_contact          },
 	{'=', CMD_IPRM, "Select chat peer",         cmd_contact          },
 	{'C',        0, "List contacts",            contacts_print       },
-	{'-',  CMD_PRM, "Send MESSAGE to peer",     cmd_message          },
+	{'-',  CMD_PRM, cmd_desc,                   cmd_message          },
 };
 
 
@@ -205,7 +208,7 @@ static int module_close(void)
 
 const struct mod_export DECL_EXPORTS(contact) = {
 	"contact",
-	"",
+	"application",
 	module_init,
 	module_close
 };

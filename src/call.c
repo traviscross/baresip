@@ -289,7 +289,7 @@ static int update_media(struct call *call)
 
 	/* Update each stream */
 	FOREACH_STREAM {
-		stream_update(le->data, call->local_uri);
+		stream_update(le->data);
 	}
 
 	if (call->acc->mnat && call->acc->mnat->updateh && call->mnats)

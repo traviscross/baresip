@@ -203,6 +203,32 @@ const struct mnat *mnat_find(const char *id);
 
 
 /*
+ * Metric
+ */
+
+struct metric {
+	/* internal stuff: */
+	struct tmr tmr;
+	uint64_t ts_start;
+	bool started;
+
+	/* counters: */
+	uint32_t n_packets;
+	uint32_t n_bytes;
+	uint32_t n_err;
+
+	/* bitrate calculation */
+	uint32_t cur_bitrate;
+	uint64_t ts_last;
+	uint32_t n_bytes_last;
+};
+
+void     metric_reset(struct metric *metric);
+void     metric_add_packet(struct metric *metric, size_t packetsize);
+uint32_t metric_avg_bitrate(const struct metric *metric);
+
+
+/*
  * Module
  */
 
@@ -278,12 +304,12 @@ int  stream_alloc(struct stream **sp, const struct config_avt *cfg,
 		  const char *name, int label,
 		  const struct mnat *mnat, struct mnat_sess *mnat_sess,
 		  const struct menc *menc, struct menc_sess *menc_sess,
+		  const char *cname,
 		  stream_rtp_h *rtph, stream_rtcp_h *rtcph, void *arg);
 struct sdp_media *stream_sdpmedia(const struct stream *s);
-int  stream_start(struct stream *s);
 int  stream_send(struct stream *s, bool marker, int pt, uint32_t ts,
 		 struct mbuf *mb);
-void stream_update(struct stream *s, const char *cname);
+void stream_update(struct stream *s);
 void stream_update_encoder(struct stream *s, int pt_enc);
 int  stream_jbuf_stat(struct re_printf *pf, const struct stream *s);
 void stream_hold(struct stream *s, bool hold);

@@ -247,7 +247,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 		goto out;
 	}
 
-	/* todo: check flags */
+	/* XXX: check flags */
 	result = SGSetChannelUsage(st->ch,
 				   seqGrabRecord |
 				   seqGrabLowLatencyCapture);

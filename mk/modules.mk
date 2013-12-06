@@ -21,6 +21,7 @@
 #   USE_GSM           GSM audio codec
 #   USE_GST           Gstreamer audio module
 #   USE_ILBC          iLBC audio codec
+#   USE_ISAC          iSAC audio codec
 #   USE_L16           L16 audio codec
 #   USE_MPG123        Use mpg123
 #   USE_OPUS          Opus audio codec
@@ -71,6 +72,9 @@ USE_CAIRO  := $(shell [ -f $(SYSROOT)/include/cairo/cairo.h ] || \
 USE_DTLS := $(shell [ -f $(SYSROOT)/include/openssl/dtls1.h ] || \
 	[ -f $(SYSROOT)/local/include/openssl/dtls1.h ] || \
 	[ -f $(SYSROOT_ALT)/include/openssl/dtls1.h ] && echo "yes")
+USE_DTLS_SRTP := $(shell [ -f $(SYSROOT)/include/openssl/srtp.h ] || \
+	[ -f $(SYSROOT)/local/include/openssl/srtp.h ] || \
+	[ -f $(SYSROOT_ALT)/include/openssl/srtp.h ] && echo "yes")
 USE_FFMPEG := $(shell [ -f $(SYSROOT)/include/libavcodec/avcodec.h ] || \
 	[ -f $(SYSROOT)/local/include/libavcodec/avcodec.h ] || \
 	[ -f $(SYSROOT)/include/ffmpeg/libavcodec/avcodec.h ] || \
@@ -95,6 +99,8 @@ USE_GST := $(shell [ -f $(SYSROOT)/include/gstreamer-0.10/gst/gst.h ] || \
 	[ -f $(SYSROOT_ALT)/include/gstreamer-0.10/gst/gst.h ] && echo "yes")
 USE_ILBC := $(shell [ -f $(SYSROOT)/include/iLBC_define.h ] || \
 	[ -f $(SYSROOT)/local/include/iLBC_define.h ] && echo "yes")
+USE_ISAC := $(shell [ -f $(SYSROOT)/include/isac.h ] || \
+	[ -f $(SYSROOT)/local/include/isac.h ] && echo "yes")
 USE_MPG123  := $(shell [ -f $(SYSROOT)/include/mpg123.h ] || \
 	[ -f $(SYSROOT_ALT)/include/mpg123.h ] && echo "yes")
 USE_OPUS := $(shell [ -f $(SYSROOT)/include/opus/opus.h ] || \
@@ -198,8 +204,11 @@ endif
 MODULES   += $(EXTRA_MODULES)
 MODULES   += stun turn ice natbd auloop presence
 MODULES   += menu contact vumeter mwi account natpmp httpd
+ifneq ($(HAVE_PTHREAD),)
+MODULES   += aubridge
+endif
 ifneq ($(USE_VIDEO),)
-MODULES   += vidloop selfview
+MODULES   += vidloop selfview vidbridge
 endif
 
 
@@ -267,6 +276,9 @@ endif
 ifneq ($(USE_ILBC),)
 MODULES   += ilbc
 endif
+ifneq ($(USE_ISAC),)
+MODULES   += isac
+endif
 ifneq ($(USE_L16),)
 MODULES   += l16
 endif
@@ -311,6 +323,9 @@ MODULES   += speex_pp
 endif
 ifneq ($(USE_SRTP),)
 MODULES   += srtp
+ifneq ($(USE_DTLS_SRTP),)
+MODULES   += dtls_srtp
+endif
 endif
 ifneq ($(USE_STDIO),)
 MODULES   += stdio

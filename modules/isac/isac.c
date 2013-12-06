@@ -9,7 +9,7 @@
 
 
 /*
- * draft-ietf-avt-rtp-isac-01
+ * draft-ietf-avt-rtp-isac-04
  */
 
 
@@ -120,12 +120,21 @@ static int encode(struct auenc_state *st, uint8_t *buf, size_t *len,
 		  const int16_t *sampv, size_t sampc)
 {
 	WebRtc_Word16 len1, len2;
+	size_t l;
+
+	if (!st || !buf || !len || !sampv || !sampc)
+		return EINVAL;
 
 	/* 10 ms audio blocks */
 	len1 = WebRtcIsac_Encode(st->inst, sampv,           (void *)buf);
 	len2 = WebRtcIsac_Encode(st->inst, &sampv[sampc/2], (void *)buf);
 
-	*len = len1 ? len1 : len2;
+	l = len1 ? len1 : len2;
+
+	if (l > *len)
+		return ENOMEM;
+
+	*len = l;
 
 	return 0;
 }
@@ -137,10 +146,16 @@ static int decode(struct audec_state *st, int16_t *sampv,
 	WebRtc_Word16 speechType;
 	int n;
 
+	if (!st || !sampv || !sampc || !buf || !len)
+		return EINVAL;
+
 	n = WebRtcIsac_Decode(st->inst, (void *)buf, len,
 			      (void *)sampv, &speechType);
 	if (n < 0)
 		return EPROTO;
+
+	if ((size_t)n > *sampc)
+		return ENOMEM;
 
 	*sampc = n;
 
@@ -152,6 +167,9 @@ static int plc(struct audec_state *st, int16_t *sampv, size_t *sampc)
 {
 	int n;
 
+	if (!st || !sampv || !sampc)
+		return EINVAL;
+
 	n = WebRtcIsac_DecodePlc(st->inst, (void *)sampv, 1);
 	if (n < 0)
 		return EPROTO;
@@ -162,13 +180,13 @@ static int plc(struct audec_state *st, int16_t *sampv, size_t *sampc)
 }
 
 
-static struct aucodec isac[2] = {
+static struct aucodec isacv[] = {
 	{
-	LE_INIT, 0, "iSAC", 32000, 1, NULL,
+	LE_INIT, 0, "isac", 32000, 1, NULL,
 	encode_update, encode, decode_update, decode, plc, NULL, NULL
 	},
 	{
-	LE_INIT, 0, "iSAC", 16000, 1, NULL,
+	LE_INIT, 0, "isac", 16000, 1, NULL,
 	encode_update, encode, decode_update, decode, plc, NULL, NULL
 	}
 };
@@ -176,8 +194,10 @@ static struct aucodec isac[2] = {
 
 static int module_init(void)
 {
-	aucodec_register(&isac[0]);
-	aucodec_register(&isac[1]);
+	unsigned i;
+
+	for (i=0; i<ARRAY_SIZE(isacv); i++)
+		aucodec_register(&isacv[i]);
 
 	return 0;
 }
@@ -185,10 +205,10 @@ static int module_init(void)
 
 static int module_close(void)
 {
-	int i = ARRAY_SIZE(isac);
+	int i = ARRAY_SIZE(isacv);
 
 	while (i--)
-		aucodec_unregister(&isac[i]);
+		aucodec_unregister(&isacv[i]);
 
 	return 0;
 }

@@ -329,13 +329,14 @@ static int vrx_alloc(struct vrx *vrx, struct video *video)
 
 	err = lock_alloc(&vrx->lock);
 	if (err)
-		goto out;
+		return err;
 
 	vrx->video  = video;
 	vrx->pt_rx  = -1;
 	vrx->orient = VIDORIENT_PORTRAIT;
 
- out:
+	str_ncpy(vrx->device, video->cfg.disp_dev, sizeof(vrx->device));
+
 	return err;
 }
 
@@ -556,16 +557,13 @@ int video_alloc(struct video **vp, const struct config *cfg,
 
 	err = stream_alloc(&v->strm, &cfg->avt, call, sdp_sess, "video", label,
 			   mnat, mnat_sess, menc, menc_sess,
+			   call_localuri(call),
 			   stream_recv_handler, rtcp_handler, v);
 	if (err)
 		goto out;
 
 	if (cfg->avt.rtp_bw.max >= AUDIO_BANDWIDTH) {
 		stream_set_bw(v->strm, cfg->avt.rtp_bw.max - AUDIO_BANDWIDTH);
-	}
-	else {
-		DEBUG_WARNING("bandwidth too low (%u bit/s)\n",
-			      cfg->avt.rtp_bw.max);
 	}
 
 	err |= sdp_media_set_lattr(stream_sdpmedia(v->strm), true,
@@ -641,7 +639,7 @@ static int set_vidisp(struct vrx *vrx)
 	vrx->vidisp = mem_deref(vrx->vidisp);
 	vrx->vidisp_prm.view = NULL;
 
-	vd = (struct vidisp *)vidisp_find(NULL);
+	vd = (struct vidisp *)vidisp_find(vrx->video->cfg.disp_mod);
 	if (!vd)
 		return ENOENT;
 
@@ -718,13 +716,10 @@ int video_start(struct video *v, const char *peer)
 
 	stream_set_srate(v->strm, SRATE, SRATE);
 
-	err = stream_start(v->strm);
-	if (err)
-		return err;
-
 	err = set_vidisp(&v->vrx);
 	if (err) {
-		DEBUG_WARNING("could not set vidisp: %m\n", err);
+		DEBUG_WARNING("could not set vidisp '%s': %m\n",
+			      v->vrx.device, err);
 	}
 
 	size.w = v->cfg.width;
@@ -858,7 +853,7 @@ int video_encoder_set(struct video *v, struct vidcodec *vc,
 		struct videnc_param prm;
 
 		prm.bitrate = v->cfg.bitrate;
-		prm.pktsize = 1300;
+		prm.pktsize = 1024;
 		prm.fps     = get_fps(v);
 		prm.max_fs  = -1;
 

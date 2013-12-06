@@ -32,7 +32,6 @@ struct play {
 
 
 static struct list playl;
-static struct config_audio cfg_audio;
 
 
 static void tmr_polling(void *arg);
@@ -207,10 +206,15 @@ int play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
 {
 	struct auplay_prm wprm;
 	struct play *play;
+	struct config *cfg;
 	int err;
 
 	if (playp && *playp)
 		return EALREADY;
+
+	cfg = conf_config();
+	if (!cfg)
+		return ENOENT;
 
 	play = mem_zalloc(sizeof(*play), destructor);
 	if (!play)
@@ -229,8 +233,8 @@ int play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
 	wprm.srate      = srate;
 	wprm.frame_size = srate * ch * 100 / 1000;
 
-	err = auplay_alloc(&play->auplay, cfg_audio.alert_mod, &wprm,
-			   cfg_audio.alert_dev, write_handler, play);
+	err = auplay_alloc(&play->auplay, cfg->audio.alert_mod, &wprm,
+			   cfg->audio.alert_dev, write_handler, play);
 	if (err)
 		goto out;
 
@@ -296,12 +300,9 @@ int play_file(struct play **playp, const char *filename, int repeat)
 }
 
 
-void play_init(const struct config *cfg)
+void play_init(void)
 {
-	if (!cfg)
-		return;
-
-	cfg_audio = cfg->audio;
+	list_init(&playl);
 }
 
 

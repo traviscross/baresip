@@ -17,6 +17,7 @@ SRCS	+= config.c
 SRCS	+= contact.c
 SRCS	+= menc.c
 SRCS	+= message.c
+SRCS	+= metric.c
 SRCS	+= mnat.c
 SRCS	+= module.c
 SRCS	+= net.c

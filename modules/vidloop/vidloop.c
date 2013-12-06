@@ -75,7 +75,7 @@ static int packet_handler(bool marker, const uint8_t *hdr, size_t hdr_len,
 	struct video_loop *vl = arg;
 	struct vidframe frame;
 	struct mbuf *mb;
-	int err;
+	int err = 0;
 
 	mb = mbuf_alloc(hdr_len + pld_len);
 	if (!mb)
@@ -95,12 +95,13 @@ static int packet_handler(bool marker, const uint8_t *hdr, size_t hdr_len,
 		err = vl->vc->dech(vl->dec, &frame, marker, vl->seq++, mb);
 		if (err) {
 			DEBUG_WARNING("codec_decode: %m\n", err);
-			return err;
+			goto out;
 		}
 	}
 
 	display(vl, &frame);
 
+ out:
 	mem_deref(mb);
 
 	return 0;

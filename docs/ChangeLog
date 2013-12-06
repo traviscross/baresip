@@ -1,3 +1,38 @@
+2013-12-06 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.8
+
+	* new modules:
+	  - dtls_srtp  DTLS-SRTP media encryption module (RFC 5763,5764)
+	  - aubridge   Audio Bridge to connect auplay->ausrc
+	  - vidbridge  Video Bridge module to connect vidisp->vidsrc
+
+	* baresip:
+	  - added RFC 5576  Source-Specific Media Attributes in SDP
+	  - audio: set SDP bandwidth only if "rtp_bandwidth" config set
+	  - play: do not store a copy of global config
+	  - stream: save RTCP statistics from Sender-reports
+	  - stream: add SDP ssrc attribute
+	  - stream: added metrics for packets/bytes transmit/receive
+	  - ua: added uag_current()/_set() to get/set current User-Agent
+	  - video: set maximum RTP packet-size to 1024 bytes
+
+	* config:
+	  - added "video_display  module,device" for Video Display
+	  - added "rtp_stats      {off,on}" for RTP Statistics after Call
+	  - default RTP bandwidth is now 0-0
+
+	* contact: dynamic command description for "Message" handling
+		   dial from current UA (thanks to Simon Liebold)
+
+	* isac: upgrade to draft-ietf-avt-rtp-isac-04
+
+	* srtp: added auto-negotiation of RTP-profile for incoming calls
+		(RTP/AVP, RTP/AVPF, RTP/SAVP, RTP/SAVPF)
+
+	* vidloop: fix memory leak
+
+
 2013-11-12 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.4.7

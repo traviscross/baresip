@@ -255,6 +255,8 @@ static int cmd_ua_next(struct re_printf *pf, void *unused)
 
 	(void)re_fprintf(stderr, "ua: %s\n", ua_aor(list_ledata(le_cur)));
 
+	uag_current_set(list_ledata(le_cur));
+
 	update_callstatus();
 
 	return 0;

@@ -655,11 +655,14 @@ int audio_alloc(struct audio **ap, const struct config *cfg,
 	err = stream_alloc(&a->strm, &cfg->avt, call, sdp_sess,
 			   "audio", label,
 			   mnat, mnat_sess, menc, menc_sess,
+			   call_localuri(call),
 			   stream_recv_handler, NULL, a);
 	if (err)
 		goto out;
 
-	stream_set_bw(a->strm, AUDIO_BANDWIDTH);
+	if (cfg->avt.rtp_bw.max) {
+		stream_set_bw(a->strm, AUDIO_BANDWIDTH);
+	}
 
 	err = sdp_media_set_lattr(stream_sdpmedia(a->strm), true,
 				  "ptime", "%u", ptime);
@@ -1029,10 +1032,6 @@ int audio_start(struct audio *a)
 
 	if (!a)
 		return EINVAL;
-
-	err = stream_start(a->strm);
-	if (err)
-		return err;
 
 	/* Audio filter */
 	if (!list_isempty(aufilt_list())) {

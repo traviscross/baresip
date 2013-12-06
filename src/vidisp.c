@@ -72,7 +72,7 @@ const struct vidisp *vidisp_find(const char *name)
 	for (le = vidispl.head; le; le = le->next) {
 		struct vidisp *vd = le->data;
 
-		if (name && 0 != str_casecmp(name, vd->name))
+		if (str_isset(name) && 0 != str_casecmp(name, vd->name))
 			continue;
 
 		/* Found */

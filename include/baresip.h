@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.7"
+#define BARESIP_VERSION "0.4.8"
 
 
 /* forward declarations */
@@ -161,6 +161,8 @@ struct config {
 	struct config_video {
 		char src_mod[16];       /**< Video source module            */
 		char src_dev[128];      /**< Video source device            */
+		char disp_mod[16];      /**< Video display module           */
+		char disp_dev[128];     /**< Video display device           */
 		unsigned width, height; /**< Video resolution               */
 		uint32_t bitrate;       /**< Encoder bitrate in [bit/s]     */
 		uint32_t fps;           /**< Video framerate                */
@@ -175,6 +177,7 @@ struct config {
 		bool rtcp_enable;       /**< RTCP is enabled                */
 		bool rtcp_mux;          /**< RTP/RTCP multiplexing          */
 		struct range jbuf_del;  /**< Delay, number of frames        */
+		bool rtp_stats;         /**< Enable RTP statistics          */
 	} avt;
 
 	/* Network */
@@ -408,7 +411,7 @@ struct play;
 int  play_file(struct play **playp, const char *filename, int repeat);
 int  play_tone(struct play **playp, struct mbuf *tone,
 	       uint32_t srate, uint8_t ch, int repeat);
-void play_init(const struct config *cfg);
+void play_init(void);
 void play_close(void);
 
 
@@ -483,6 +486,8 @@ struct ua   *uag_find_aor(const char *aor);
 struct sip  *uag_sip(void);
 const char  *uag_event_str(enum ua_event ev);
 struct list *uag_list(void);
+void         uag_current_set(struct ua *ua);
+struct ua   *uag_current(void);
 struct sipsess_sock  *uag_sipsess_sock(void);
 struct sipevent_sock *uag_sipevent_sock(void);
 
