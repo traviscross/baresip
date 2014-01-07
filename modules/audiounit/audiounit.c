@@ -22,11 +22,11 @@ static void interruptionListener(void *data, UInt32 inInterruptionState)
 	(void)data;
 
 	if (inInterruptionState == kAudioSessionBeginInterruption) {
-		re_printf("audiounit interrupt: Begin\n");
+		info("audiounit: interrupt Begin\n");
 		audiosess_interrupt(true);
 	}
 	else if (inInterruptionState == kAudioSessionEndInterruption) {
-		re_printf("audiounit interrupt: End\n");
+		info("audiounit: interrupt End\n");
 		audiosess_interrupt(false);
 	}
 }
@@ -43,7 +43,7 @@ static int module_init(void)
 
 	ret = AudioSessionInitialize(NULL, NULL, interruptionListener, 0);
 	if (ret && ret != kAudioSessionAlreadyInitialized) {
-		re_fprintf(stderr, "AudioSessionInitialize: %d\n", ret);
+		warning("audiounit: AudioSessionInitialize: %d\n", ret);
 		return ENODEV;
 	}
 #endif
@@ -60,7 +60,7 @@ static int module_init(void)
 
 	output_comp = AudioComponentFindNext(NULL, &desc);
 	if (!output_comp) {
-		re_printf("audiounit: Voice Processing I/O not found\n");
+		warning("audiounit: Voice Processing I/O not found\n");
 		return ENOENT;
 	}
 

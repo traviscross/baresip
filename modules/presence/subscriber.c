@@ -87,9 +87,8 @@ static void notify_handler(struct sip *sip, const struct sip_msg *msg,
 	if (!hdr || 0 != pl_strcasecmp(&hdr->val, "application/pidf+xml")) {
 
 		if (hdr)
-			(void)re_printf("presence: unsupported"
-					" content-type: '%r'\n",
-					&hdr->val);
+			warning("presence: unsupported content-type: '%r'\n",
+				&hdr->val);
 
 		sip_treplyf(NULL, NULL, sip, msg, false,
 			    415, "Unsupported Media Type",
@@ -139,24 +138,23 @@ static void close_handler(int err, const struct sip_msg *msg,
 
 	pres->sub = mem_deref(pres->sub);
 
-	(void)re_printf("presence: subscriber closed <%r>: ",
-			&contact_addr(pres->contact)->auri);
+	info("presence: subscriber closed <%r>: ",
+	     &contact_addr(pres->contact)->auri);
 
 	if (substate) {
-		(void)re_printf("%s", sipevent_reason_name(substate->reason));
+		info("%s", sipevent_reason_name(substate->reason));
 		wait = wait_term(substate);
 	}
 	else if (msg) {
-		(void)re_printf("%u %r", msg->scode, &msg->reason);
+		info("%u %r", msg->scode, &msg->reason);
 		wait = wait_fail(++pres->failc);
 	}
 	else {
-		(void)re_printf("%m", err);
+		info("%m", err);
 		wait = wait_fail(++pres->failc);
 	}
 
-	(void)re_printf("; will retry in %u secs (failc=%u)\n",
-			wait, pres->failc);
+	info("; will retry in %u secs (failc=%u)\n", wait, pres->failc);
 
 	tmr_start(&pres->tmr, wait * 1000, tmr_handler, pres);
 
@@ -192,7 +190,7 @@ static int subscribe(struct presence *pres)
 	/* We use the first UA */
 	ua = uag_find_aor(NULL);
 	if (!ua) {
-		(void)re_printf("presence: no UA found\n");
+		warning("presence: no UA found\n");
 		return ENOENT;
 	}
 
@@ -207,9 +205,7 @@ static int subscribe(struct presence *pres)
 				 notify_handler, close_handler, pres,
 				 "%H", ua_print_supported, ua);
 	if (err) {
-		(void)re_fprintf(stderr,
-				 "presence: sipevent_subscribe failed: %m\n",
-				 err);
+		warning("presence: sipevent_subscribe failed: %m\n", err);
 	}
 
 	return err;
@@ -265,8 +261,7 @@ int subscriber_init(void)
 		}
 	}
 
-	(void)re_printf("Subscribing to %u contacts\n",
-			list_count(&presencel));
+	info("Subscribing to %u contacts\n", list_count(&presencel));
 
 	return err;
 }

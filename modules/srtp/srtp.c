@@ -301,8 +301,8 @@ static int start_crypto(struct menc_st *st, const struct pl *key_info)
 	if (err)
 		return err;
 
-	(void)re_fprintf(stderr, "%s: SRTP is Enabled (cryptosuite=%s)\n",
-			 sdp_media_name(st->sdpm), st->crypto_suite);
+	info("srtp: %s: SRTP is Enabled (cryptosuite=%s)\n",
+	     sdp_media_name(st->sdpm), st->crypto_suite);
 
 	return 0;
 }

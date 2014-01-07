@@ -417,9 +417,8 @@ static int pt_handler(struct video *v, uint8_t pt_old, uint8_t pt_new)
 		return ENOENT;
 
 	if (pt_old != (uint8_t)-1) {
-		(void)re_fprintf(stderr, "Video decoder changed payload"
-				 " %u -> %u\n",
-				 pt_old, pt_new);
+		info("Video decoder changed payload %u -> %u\n",
+		     pt_old, pt_new);
 	}
 
 	v->vrx.pt_rx = pt_new;
@@ -625,7 +624,7 @@ static void vidisp_resize_handler(const struct vidsz *sz, void *arg)
 	struct vrx *vrx = arg;
 	(void)vrx;
 
-	(void)re_printf("resize: %u x %u\n", sz->w, sz->h);
+	info("video: display resized: %u x %u\n", sz->w, sz->h);
 
 	/* XXX: update wanted picturesize and send re-invite to peer */
 }
@@ -668,7 +667,7 @@ static int set_encoder_format(struct vtx *vtx, const char *src,
 			 &vtx->vsrc_size, NULL, dev, vidsrc_frame_handler,
 			 vidsrc_error_handler, vtx);
 	if (err) {
-		DEBUG_NOTICE("No video source: %m\n", err);
+		info("video: no video source '%s': %m\n", src, err);
 		return err;
 	}
 
@@ -735,9 +734,9 @@ int video_start(struct video *v, const char *peer)
 	tmr_start(&v->tmr, TMR_INTERVAL * 1000, tmr_handler, v);
 
 	if (v->vtx.vc && v->vrx.vc) {
-		(void)re_printf("%H%H",
-				vtx_print_pipeline, &v->vtx,
-				vrx_print_pipeline, &v->vrx);
+		info("%H%H",
+		     vtx_print_pipeline, &v->vtx,
+		     vrx_print_pipeline, &v->vrx);
 	}
 
 	return 0;
@@ -857,10 +856,8 @@ int video_encoder_set(struct video *v, struct vidcodec *vc,
 		prm.fps     = get_fps(v);
 		prm.max_fs  = -1;
 
-		(void)re_fprintf(stderr, "Set video encoder: %s %s"
-				 " (%u bit/s, %u fps)\n",
-				 vc->name, vc->variant,
-				 prm.bitrate, prm.fps);
+		info("Set video encoder: %s %s (%u bit/s, %u fps)\n",
+		     vc->name, vc->variant, prm.bitrate, prm.fps);
 
 		vtx->enc = mem_deref(vtx->enc);
 		err = vc->encupdh(&vtx->enc, vc, &prm, params);
@@ -893,8 +890,7 @@ int video_decoder_set(struct video *v, struct vidcodec *vc, int pt_rx,
 
 	if (vc != vrx->vc) {
 
-		(void)re_fprintf(stderr, "Set video decoder: %s %s\n",
-				 vc->name, vc->variant);
+		info("Set video decoder: %s %s\n", vc->name, vc->variant);
 
 		vrx->dec = mem_deref(vrx->dec);
 
@@ -925,7 +921,7 @@ void video_encoder_cycle(struct video *video)
 
 	rc = sdp_media_format_cycle(stream_sdpmedia(video_strm(video)));
 	if (!rc) {
-		(void)re_printf("cycle video: no remote codec found\n");
+		info("cycle video: no remote codec found\n");
 		return;
 	}
 

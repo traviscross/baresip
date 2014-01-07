@@ -14,11 +14,6 @@
 #include "avcodec.h"
 
 
-#define DEBUG_MODULE "avcodec_h263"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 int h263_hdr_encode(const struct h263_hdr *hdr, struct mbuf *mb)
 {
 	uint32_t v; /* host byte order */

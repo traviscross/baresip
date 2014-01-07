@@ -94,11 +94,8 @@ static void ice_printf(struct mnat_media *m, const char *fmt, ...)
 {
 	va_list ap;
 
-	if (!ice.debug)
-		return;
-
 	va_start(ap, fmt);
-	re_printf("%s: %v", m ? sdp_media_name(m->sdpm) : "ICE", fmt, &ap);
+	debug("%s: %v", m ? sdp_media_name(m->sdpm) : "ICE", fmt, &ap);
 	va_end(ap);
 }
 
@@ -321,8 +318,8 @@ static bool verify_peer_ice(struct mnat_sess *ms)
 		unsigned i;
 
 		if (!sdp_media_has_media(m->sdpm)) {
-			DEBUG_NOTICE("stream '%s' is disabled -- ignore\n",
-				     sdp_media_name(m->sdpm));
+			info("ice: stream '%s' is disabled -- ignore\n",
+			     sdp_media_name(m->sdpm));
 			continue;
 		}
 
@@ -400,10 +397,9 @@ static void gather_handler(int err, uint16_t scode, const char *reason,
 			      icem_cand_default(m->icem, 1),
 			      icem_cand_default(m->icem, 2));
 
-		DEBUG_NOTICE("%s: Default local candidates: %J / %J\n",
-			     sdp_media_name(m->sdpm),
-			     &m->compv[0].laddr,
-			     &m->compv[1].laddr);
+		info("ice: %s: Default local candidates: %J / %J\n",
+		     sdp_media_name(m->sdpm),
+		     &m->compv[0].laddr, &m->compv[1].laddr);
 
 		(void)set_media_attributes(m);
 
@@ -421,8 +417,8 @@ static void conncheck_handler(int err, bool update, void *arg)
 	struct mnat_sess *sess = m->sess;
 	struct le *le;
 
-	DEBUG_NOTICE("%s: Conncheck is complete (update=%d)\n",
-		     sdp_media_name(m->sdpm), update);
+	info("ice: %s: connectivity check is complete (update=%d)\n",
+	     sdp_media_name(m->sdpm), update);
 
 	ice_printf(m, "Dumping media state: %H\n", icem_debug, m->icem);
 
@@ -453,9 +449,9 @@ static void conncheck_handler(int err, bool update, void *arg)
 	/* call estab-handler and send re-invite */
 	if (sess->send_reinvite && update) {
 
-		DEBUG_NOTICE("%s: sending Re-INVITE with updated"
-			     " default candidates\n",
-			     sdp_media_name(m->sdpm));
+		info("ice: %s: sending Re-INVITE with updated"
+		     " default candidates\n",
+		     sdp_media_name(m->sdpm));
 
 		sess->estabh(0, 0, NULL, sess->arg);
 		sess->send_reinvite = false;
@@ -621,7 +617,7 @@ static int update(struct mnat_sess *sess)
 		err = ice_start(sess);
 	}
 	else if (ice.turn) {
-		DEBUG_NOTICE("ICE not supported by peer, fallback to TURN\n");
+		info("ice: ICE not supported by peer, fallback to TURN\n");
 		err = enable_turn_channels(sess);
 	}
 	else {

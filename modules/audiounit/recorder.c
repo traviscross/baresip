@@ -180,8 +180,8 @@ int audiounit_recorder_alloc(struct ausrc_st **stp, struct ausrc *as,
 
  out:
 	if (ret) {
-		re_printf("audiounit record failed: %d (%c%c%c%c)\n", ret,
-			  ret>>24, ret>>16, ret>>8, ret);
+		warning("audiounit: record failed: %d (%c%c%c%c)\n", ret,
+			ret>>24, ret>>16, ret>>8, ret);
 		err = ENODEV;
 	}
 

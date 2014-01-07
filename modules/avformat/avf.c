@@ -109,8 +109,8 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 
 		/* check if size changed */
 		if (!vidsz_cmp(&sz, &st->sz)) {
-			re_printf("size changed: %d x %d  ---> %d x %d\n",
-				  st->sz.w, st->sz.h, sz.w, sz.h);
+			info("size changed: %d x %d  ---> %d x %d\n",
+			     st->sz.w, st->sz.h, sz.w, sz.h);
 			st->sz = sz;
 
 			if (st->sws) {
@@ -120,9 +120,9 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 		}
 
 		if (!st->sws) {
-			re_printf("scaling: %d x %d  --->  %d x %d\n",
-				  st->sz.w, st->sz.h,
-				  st->app_sz.w, st->app_sz.h);
+			info("scaling: %d x %d  --->  %d x %d\n",
+			     st->sz.w, st->sz.h,
+			     st->app_sz.w, st->app_sz.h);
 
 			st->sws = sws_getContext(st->sz.w, st->sz.h,
 						 st->ctx->pix_fmt,
@@ -268,7 +268,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 #endif
 
 	if (ret < 0) {
-		re_printf("%s: no stream info\n", dev);
+		warning("avformat: %s: no stream info\n", dev);
 		err = ENOENT;
 		goto out;
 	}
@@ -284,9 +284,10 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 		if (ctx->codec_type != AVMEDIA_TYPE_VIDEO)
 			continue;
 
-		re_printf("stream %u:  %u x %u  codec=%s  time_base=%d/%d\n",
-			  i, ctx->width, ctx->height, ctx->codec_name,
-			  ctx->time_base.num, ctx->time_base.den);
+		debug("avformat: stream %u:  %u x %u  codec=%s"
+		      "  time_base=%d/%d\n",
+		      i, ctx->width, ctx->height, ctx->codec_name,
+		      ctx->time_base.num, ctx->time_base.den);
 
 		st->sz.w   = ctx->width;
 		st->sz.h   = ctx->height;

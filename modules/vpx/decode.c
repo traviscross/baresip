@@ -39,6 +39,8 @@ struct viddec_state {
 	vpx_codec_ctx_t ctx;
 	struct mbuf *mb;
 	bool ctxup;
+	bool started;
+	uint16_t seq;
 };
 
 
@@ -112,7 +114,7 @@ static inline int hdr_decode(struct hdr *hdr, struct mbuf *mb)
 	hdr->x      = v>>7 & 0x1;
 	hdr->noref  = v>>5 & 0x1;
 	hdr->start  = v>>4 & 0x1;
-	hdr->partid = v    & 0x0f;
+	hdr->partid = v    & 0x07;
 
 	if (hdr->x) {
 
@@ -171,6 +173,12 @@ static inline int hdr_decode(struct hdr *hdr, struct mbuf *mb)
 }
 
 
+static inline int16_t seq_diff(uint16_t x, uint16_t y)
+{
+	return (int16_t)(y - x);
+}
+
+
 int vp8_decode(struct viddec_state *vds, struct vidframe *frame,
 	       bool marker, uint16_t seq, struct mbuf *mb)
 {
@@ -179,8 +187,6 @@ int vp8_decode(struct viddec_state *vds, struct vidframe *frame,
 	vpx_image_t *img;
 	struct hdr hdr;
 	int err, i;
-
-	(void)seq;
 
 	if (!vds || !frame || !mb)
 		return EINVAL;
@@ -198,6 +204,24 @@ int vp8_decode(struct viddec_state *vds, struct vidframe *frame,
 	      hdr.picid, hdr.tl0picidx, hdr.tid, hdr.y, hdr.keyidx);
 #endif
 
+	if (hdr.start && hdr.partid == 0) {
+
+		mbuf_rewind(vds->mb);
+		vds->started = true;
+	}
+	else {
+		if (!vds->started)
+			return 0;
+
+		if (seq_diff(vds->seq, seq) != 1) {
+			mbuf_rewind(vds->mb);
+			vds->started = false;
+			return 0;
+		}
+	}
+
+	vds->seq = seq;
+
 	err = mbuf_write_mem(vds->mb, mbuf_buf(mb), mbuf_get_left(mb));
 	if (err)
 		goto out;
@@ -205,8 +229,7 @@ int vp8_decode(struct viddec_state *vds, struct vidframe *frame,
 	if (!marker) {
 
 		if (vds->mb->end > DECODE_MAXSZ) {
-			re_fprintf(stderr,
-				   "vp8: decode buffer size exceeded\n");
+			warning("vp8: decode buffer size exceeded\n");
 			err = ENOMEM;
 			goto out;
 		}
@@ -215,22 +238,21 @@ int vp8_decode(struct viddec_state *vds, struct vidframe *frame,
 	}
 
 	res = vpx_codec_decode(&vds->ctx, vds->mb->buf,
-			       (unsigned int)vds->mb->end, NULL, 0);
+			       (unsigned int)vds->mb->end, NULL, 1);
 	if (res) {
-		re_printf("vp8: decode error (%u bytes): %s\n",
-			  vds->mb->end, vpx_codec_err_to_string(res));
+		debug("vp8: decode error: %s\n", vpx_codec_err_to_string(res));
 		err = EPROTO;
 		goto out;
 	}
 
 	img = vpx_codec_get_frame(&vds->ctx, &iter);
 	if (!img) {
-		re_printf("vp8: no picture\n");
+		debug("vp8: no picture\n");
 		goto out;
 	}
 
 	if (img->fmt != VPX_IMG_FMT_I420) {
-		re_fprintf(stderr, "vp8: bad pixel format (%i)\n", img->fmt);
+		warning("vp8: bad pixel format (%i)\n", img->fmt);
 		goto out;
 	}
 
@@ -245,6 +267,7 @@ int vp8_decode(struct viddec_state *vds, struct vidframe *frame,
 
  out:
 	mbuf_rewind(vds->mb);
+	vds->started = false;
 
 	return err;
 }

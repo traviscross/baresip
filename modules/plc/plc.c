@@ -39,8 +39,7 @@ static int update(struct aufilt_dec_st **stp, void **ctx,
 
 	/* XXX: add support for stereo PLC */
 	if (decprm->ch != 1) {
-		re_fprintf(stderr, "plc: only mono supported (ch=%u)\n",
-			   decprm->ch);
+		warning("plc: only mono supported (ch=%u)\n", decprm->ch);
 		return ENOSYS;
 	}
 

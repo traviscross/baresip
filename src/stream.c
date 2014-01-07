@@ -19,7 +19,7 @@
 
 
 enum {
-	RTP_RECV_SIZE    = 8192,  /**< Receive buffer for incoming RTP     */
+	RTP_RECV_SIZE = 8192,
 };
 
 
@@ -78,23 +78,23 @@ static inline int lostcalc(struct stream *s, uint16_t seq)
 
 static void print_rtp_stats(struct stream *s)
 {
-	(void)re_printf("\n%-9s       Transmit:     Receive:\n"
-			"packets:        %7u      %7u\n"
-			"avg. bitrate:   %7.1f      %7.1f  (kbit/s)\n",
-			sdp_media_name(s->sdp),
-			s->metric_tx.n_packets, s->metric_rx.n_packets,
-			1.0*metric_avg_bitrate(&s->metric_tx)/1000,
-			1.0*metric_avg_bitrate(&s->metric_rx)/1000);
+	info("\n%-9s       Transmit:     Receive:\n"
+	     "packets:        %7u      %7u\n"
+	     "avg. bitrate:   %7.1f      %7.1f  (kbit/s)\n",
+	     sdp_media_name(s->sdp),
+	     s->metric_tx.n_packets, s->metric_rx.n_packets,
+	     1.0*metric_avg_bitrate(&s->metric_tx)/1000,
+	     1.0*metric_avg_bitrate(&s->metric_rx)/1000);
 
 	if (s->rtcp_stats.tx.sent || s->rtcp_stats.rx.sent) {
 
-		(void)re_printf("pkt.report:     %7u      %7u\n"
-				"lost:           %7d      %7d\n"
-				"jitter:         %7.1f      %7.1f  (ms)\n",
-				s->rtcp_stats.tx.sent, s->rtcp_stats.rx.sent,
-				s->rtcp_stats.tx.lost, s->rtcp_stats.rx.lost,
-				1.0*s->rtcp_stats.tx.jit/1000,
-				1.0*s->rtcp_stats.rx.jit/1000);
+		info("pkt.report:     %7u      %7u\n"
+		     "lost:           %7d      %7d\n"
+		     "jitter:         %7.1f      %7.1f  (ms)\n",
+		     s->rtcp_stats.tx.sent, s->rtcp_stats.rx.sent,
+		     s->rtcp_stats.tx.lost, s->rtcp_stats.rx.lost,
+		     1.0*s->rtcp_stats.tx.jit/1000,
+		     1.0*s->rtcp_stats.rx.jit/1000);
 	}
 }
 
@@ -139,11 +139,10 @@ static void rtp_recv(const struct sa *src, const struct rtp_header *hdr,
 	if (hdr->ssrc != s->ssrc_rx) {
 		if (s->ssrc_rx) {
 			flush = true;
-			DEBUG_NOTICE("%s: SSRC changed %x -> %x"
-					" (%u bytes from %J)\n",
-				     sdp_media_name(s->sdp),
-				     s->ssrc_rx, hdr->ssrc,
-				     mbuf_get_left(mb), src);
+			info("stream: %s: SSRC changed %x -> %x"
+			     " (%u bytes from %J)\n",
+			     sdp_media_name(s->sdp), s->ssrc_rx, hdr->ssrc,
+			     mbuf_get_left(mb), src);
 		}
 		s->ssrc_rx = hdr->ssrc;
 	}
@@ -159,9 +158,9 @@ static void rtp_recv(const struct sa *src, const struct rtp_header *hdr,
 
 		err = jbuf_put(s->jbuf, hdr, mb);
 		if (err) {
-			(void)re_printf("%s: dropping %u bytes from %J (%m)\n",
-					sdp_media_name(s->sdp), mb->end,
-					src, err);
+			info("%s: dropping %u bytes from %J (%m)\n",
+			     sdp_media_name(s->sdp), mb->end,
+			     src, err);
 			s->metric_rx.n_err++;
 		}
 
@@ -421,8 +420,8 @@ static void stream_remote_set(struct stream *s)
 	if (s->cfg.rtcp_mux && sdp_media_rattr(s->sdp, "rtcp-mux")) {
 
 		if (!s->rtcp_mux)
-			(void)re_printf("%s: RTP/RTCP multiplexing enabled\n",
-					sdp_media_name(s->sdp));
+			info("%s: RTP/RTCP multiplexing enabled\n",
+			     sdp_media_name(s->sdp));
 		s->rtcp_mux = true;
 	}
 

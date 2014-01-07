@@ -8,11 +8,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "menu"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /** Defines the status modes */
 enum statmode {
 	STATMODE_CALL = 0,
@@ -211,7 +206,7 @@ static int dial_handler(struct re_printf *pf, void *arg)
 	}
 
 	if (err) {
-		DEBUG_WARNING("connect failed: %m\n", err);
+		warning("menu: ua_connect failed: %m\n", err);
 	}
 
 	return err;
@@ -536,9 +531,9 @@ static void ua_event_handler(struct ua *ua, enum ua_event ev,
 	switch (ev) {
 
 	case UA_EVENT_CALL_INCOMING:
-		re_printf("%s: Incoming call from: %s %s -"
-			  " (press ENTER to accept)\n",
-			  ua_aor(ua), call_peername(call), call_peeruri(call));
+		info("%s: Incoming call from: %s %s -"
+		     " (press ENTER to accept)\n",
+		     ua_aor(ua), call_peername(call), call_peeruri(call));
 		alert_start(0);
 		break;
 

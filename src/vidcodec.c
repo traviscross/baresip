@@ -23,7 +23,7 @@ void vidcodec_register(struct vidcodec *vc)
 
 	list_append(&vidcodecl, &vc->le, vc);
 
-	(void)re_printf("vidcodec: %s\n", vc->name);
+	info("vidcodec: %s\n", vc->name);
 }
 
 

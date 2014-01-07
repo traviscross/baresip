@@ -8,12 +8,9 @@
 #include "libnatpmp.h"
 
 
-#define DEBUG_MODULE "natpmp"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
-/*
+/**
+ * @defgroup natpmp natpmp
+ *
  * NAT Port Mapping Protocol (NAT-PMP)
  *
  * https://tools.ietf.org/html/rfc6886
@@ -113,28 +110,28 @@ static void natpmp_resp_handler(int err, const struct natpmp_resp *resp,
 	struct sa map_addr;
 
 	if (err) {
-		DEBUG_WARNING("natpmp ERROR: %m\n", err);
+		warning("natpmp: response error: %m\n", err);
 		return;
 	}
 
 	if (resp->op != NATPMP_OP_MAPPING_UDP)
 		return;
 	if (resp->result != NATPMP_SUCCESS) {
-		DEBUG_WARNING("request failed with result code: %d\n",
-			      resp->result);
+		warning("natpmp: request failed with result code: %d\n",
+			resp->result);
 		return;
 	}
 
 	if (resp->u.map.int_port != m->int_port) {
-		DEBUG_NOTICE("ignoring response for internal_port=%u\n",
-			     resp->u.map.int_port);
+		info("natpmp: ignoring response for internal_port=%u\n",
+		     resp->u.map.int_port);
 		return;
 	}
 
-	DEBUG_NOTICE("natpmp: mapping granted:"
-		     " internal_port=%u, external_port=%u, lifetime=%u\n",
-		     resp->u.map.int_port, resp->u.map.ext_port,
-		     resp->u.map.lifetime);
+	info("natpmp: mapping granted:"
+	     " internal_port=%u, external_port=%u, lifetime=%u\n",
+	     resp->u.map.int_port, resp->u.map.ext_port,
+	     resp->u.map.lifetime);
 
 	map_addr = natpmp_extaddr;
 	sa_set_port(&map_addr, resp->u.map.ext_port);
@@ -212,7 +209,7 @@ static int media_alloc(struct mnat_media **mp, struct mnat_sess *sess,
 
 	m->int_port = sa_port(&laddr);
 
-	DEBUG_NOTICE("local UDP port is %u\n", m->int_port);
+	info("natpmp: local UDP port is %u\n", m->int_port);
 
 	err = natpmp_mapping_request(&m->natpmp, &natpmp_srv,
 				     m->int_port, 0, m->lifetime,
@@ -236,13 +233,13 @@ static void extaddr_handler(int err, const struct natpmp_resp *resp, void *arg)
 	(void)arg;
 
 	if (err) {
-		DEBUG_WARNING("external address ERROR: %m\n", err);
+		warning("natpmp: external address ERROR: %m\n", err);
 		return;
 	}
 
 	if (resp->result != NATPMP_SUCCESS) {
-		DEBUG_WARNING("external address failed with result code: %d\n",
-			      resp->result);
+		warning("natpmp: external address failed"
+			" with result code: %d\n", resp->result);
 		return;
 	}
 
@@ -251,7 +248,7 @@ static void extaddr_handler(int err, const struct natpmp_resp *resp, void *arg)
 
 	sa_set_in(&natpmp_extaddr, resp->u.ext_addr, 0);
 
-	DEBUG_NOTICE("discovered External address: %j\n", &natpmp_extaddr);
+	info("natpmp: discovered External address: %j\n", &natpmp_extaddr);
 }
 
 
@@ -267,8 +264,8 @@ static bool net_rt_handler(const char *ifname, const struct sa *dst,
 	if (sa_in(dst) == 0) {
 		natpmp_srv = *gw;
 		sa_set_port(&natpmp_srv, NATPMP_PORT);
-		DEBUG_NOTICE("found default gateway %j on interface '%s'\n",
-			     gw, ifname);
+		info("natpmp: found default gateway %j on interface '%s'\n",
+		     gw, ifname);
 		return true;
 	}
 
@@ -287,7 +284,7 @@ static int module_init(void)
 
 	conf_get_sa(conf_cur(), "natpmp_server", &natpmp_srv);
 
-	DEBUG_NOTICE("using NAT-PMP server at %J\n", &natpmp_srv);
+	info("natpmp: using NAT-PMP server at %J\n", &natpmp_srv);
 
 	err = natpmp_external_request(&natpmp_ext, &natpmp_srv,
 				      extaddr_handler, NULL);

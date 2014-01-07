@@ -88,14 +88,14 @@ static int encode_update(struct auenc_state **aesp,
 	st->encControl.useInBandFEC = 0;
 	st->encControl.useDTX = 0;
 
-	re_printf("SILK encoder: %dHz, psize=%d, bitrate=%d, complex=%d,"
-		  " fec=%d, dtx=%d\n",
-		  st->encControl.API_sampleRate,
-		  st->encControl.packetSize,
-		  st->encControl.bitRate,
-		  st->encControl.complexity,
-		  st->encControl.useInBandFEC,
-		  st->encControl.useDTX);
+	info("silk: encoder: %dHz, psize=%d, bitrate=%d, complex=%d,"
+	     " fec=%d, dtx=%d\n",
+	     st->encControl.API_sampleRate,
+	     st->encControl.packetSize,
+	     st->encControl.bitRate,
+	     st->encControl.complexity,
+	     st->encControl.useInBandFEC,
+	     st->encControl.useDTX);
 
  out:
 	if (err)
@@ -167,7 +167,7 @@ static int encode(struct auenc_state *st, uint8_t *buf, size_t *len,
 				  buf,
 				  &nBytesOut);
 	if (ret) {
-		re_printf("SKP_Silk_SDK_Encode: ret=%d\n", ret);
+		warning("silk: SKP_Silk_SDK_Encode: ret=%d\n", ret);
 	}
 
 	*len = nBytesOut;
@@ -190,7 +190,7 @@ static int decode(struct audec_state *st, int16_t *sampv,
 				  sampv,
 				  &nsamp);
 	if (ret) {
-		re_printf("SKP_Silk_SDK_Decode: ret=%d\n", ret);
+		warning("silk: SKP_Silk_SDK_Decode: ret=%d\n", ret);
 	}
 
 	*sampc = nsamp;
@@ -231,7 +231,7 @@ static struct aucodec silk[] = {
 
 static int module_init(void)
 {
-	re_printf("SILK %s\n", SKP_Silk_SDK_get_version());
+	debug("silk: SILK %s\n", SKP_Silk_SDK_get_version());
 
 	aucodec_register(&silk[0]);
 

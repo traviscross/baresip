@@ -48,7 +48,7 @@ static void propListener(void *inClientData, AudioSessionPropertyID inID,
 
 	CFNumberGetValue(nref, kCFNumberSInt32Type, &reason);
 
-	re_printf("audiounit: AudioRouteChange - reason %d\n", reason);
+	info("audiounit: AudioRouteChange - reason %d\n", reason);
 }
 #endif
 
@@ -100,7 +100,7 @@ int audiosess_alloc(struct audiosess_st **stp,
 	ret = AudioSessionSetProperty(kAudioSessionProperty_AudioCategory,
 				      sizeof(category), &category);
 	if (ret) {
-		re_fprintf(stderr, "Audio Category: %d\n", ret);
+		warning("audiounit: Audio Category: %d\n", ret);
 		return EINVAL;
 	}
 #endif
@@ -115,15 +115,15 @@ int audiosess_alloc(struct audiosess_st **stp,
 #if TARGET_OS_IPHONE
 	ret = AudioSessionSetActive(true);
 	if (ret) {
-		re_fprintf(stderr, "AudioSessionSetActive: %d\n", ret);
+		warning("audiounit: AudioSessionSetActive: %d\n", ret);
 		err = ENOSYS;
 		goto out;
 	}
 
 	ret = AudioSessionAddPropertyListener(id, propListener, as);
 	if (ret) {
-		re_fprintf(stderr, "AudioSessionAddPropertyListener: %d\n",
-			   ret);
+		warning("audiounit: AudioSessionAddPropertyListener: %d\n",
+			ret);
 		err = EINVAL;
 		goto out;
 	}

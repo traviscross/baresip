@@ -5,7 +5,7 @@
 #
 
 MOD		:= sdl
-$(MOD)_SRCS	+= sdl-1.2.c
+$(MOD)_SRCS	+= sdl.c
 $(MOD)_SRCS	+= util.c
 
 CFLAGS		+= -DUSE_SDL

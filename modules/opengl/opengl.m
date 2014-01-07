@@ -90,7 +90,7 @@ static int create_window(struct vidisp_st *st)
 				    backing:NSBackingStoreBuffered
 				    defer:FALSE];
 	if (!st->win) {
-		re_printf("opengl: could not create NSWindow\n");
+		warning("opengl: could not create NSWindow\n");
 		return ENOMEM;
 	}
 
@@ -148,7 +148,7 @@ static int setup_shader(struct vidisp_st *st, int width, int height)
 	/* Print the compilation log. */
 	glGetObjectParameterivARB(FSHandle, GL_OBJECT_COMPILE_STATUS_ARB, &i);
 	if (i != 1) {
-		re_printf("shader compile failed\n");
+		warning("opengl: shader compile failed\n");
 		return ENOSYS;
 	}
 
@@ -203,7 +203,7 @@ static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 	fmt = [[NSOpenGLPixelFormat alloc] initWithAttributes:attr];
 	if (!fmt) {
 		err = ENOMEM;
-		re_printf("Failed creating OpenGL format\n");
+		warning("opengl: Failed creating OpenGL format\n");
 		goto out;
 	}
 
@@ -214,7 +214,7 @@ static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 
 	if (!st->ctx) {
 		err = ENOMEM;
-		re_printf("Failed creating OpenGL context\n");
+		warning("opengl: Failed creating OpenGL context\n");
 		goto out;
 	}
 
@@ -395,9 +395,9 @@ static int display(struct vidisp_st *st, const char *title,
 
 	if (!vidsz_cmp(&st->size, &frame->size)) {
 		if (st->size.w && st->size.h) {
-			re_printf("opengl: reset: %u x %u  --->  %u x %u\n",
-				  st->size.w, st->size.h,
-				  frame->size.w, frame->size.h);
+			info("opengl: reset: %u x %u  --->  %u x %u\n",
+			     st->size.w, st->size.h,
+			     frame->size.w, frame->size.h);
 		}
 
 		opengl_reset(st, &frame->size);
@@ -437,8 +437,7 @@ static int display(struct vidisp_st *st, const char *title,
 
 		if (!st->PHandle) {
 
-			re_printf("opengl: using Vertex shader"
-				  " with YUV420P\n");
+			debug("opengl: using Vertex shader with YUV420P\n");
 
 			err = setup_shader(st, frame->size.w, frame->size.h);
 			if (err)
@@ -467,8 +466,8 @@ static int display(struct vidisp_st *st, const char *title,
 		draw_rgb(frame->data[0], frame->size.w, frame->size.h);
 	}
 	else {
-		re_printf("opengl: unknown pixel format %s\n",
-			  vidfmt_name(frame->fmt));
+		warning("opengl: unknown pixel format %s\n",
+			vidfmt_name(frame->fmt));
 		err = EINVAL;
 	}
 

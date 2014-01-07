@@ -68,7 +68,7 @@ struct vidsrc_st {
 	if (str_isset(name)) {
 		NSString *s = [NSString stringWithUTF8String:name];
 		dev = [QTCaptureDevice deviceWithUniqueID:s];
-		re_printf("qtcapture: using device: %s\n", name);
+		info("qtcapture: using device: %s\n", name);
 	}
 	else {
 		dev = [QTCaptureDevice
@@ -235,7 +235,7 @@ static void frame_handler(struct vidsrc_st *st,
 
 	vidfmt = get_pixfmt(CVPixelBufferGetPixelFormatType(videoFrame));
 	if (vidfmt == (enum vidfmt)-1) {
-		re_printf("unknown pixel format: 0x%08x\n",
+		warning("qtcapture: unknown pixel format: 0x%08x\n",
 			  CVPixelBufferGetPixelFormatType(videoFrame));
 		return;
 	}
@@ -365,14 +365,14 @@ static void device_info(void)
 	if (devs && [devs count] > 1) {
 		QTCaptureDevice *d;
 
-		re_printf("qtcapture devices:\n");
+		debug("qtcapture: devices:\n");
 
 		for (d in devs) {
 			NSString *name = [d localizedDisplayName];
 
-			re_printf("  %s: %s\n",
-				  [[d uniqueID] UTF8String],
-				  [name UTF8String]);
+			debug("    %s: %s\n",
+			      [[d uniqueID] UTF8String],
+			      [name UTF8String]);
 		}
 	}
 

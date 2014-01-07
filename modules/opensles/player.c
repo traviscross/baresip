@@ -10,8 +10,14 @@
 #include "opensles.h"
 
 
+#define DEBUG_MODULE "opensles/player"
+#define DEBUG_LEVEL 5
+#include <re_dbg.h>
+
+
 struct auplay_st {
 	struct auplay *ap;      /* inheritance */
+	int16_t buf[160 * 2];
 	auplay_write_h *wh;
 	void *arg;
 
@@ -39,13 +45,10 @@ static void auplay_destructor(void *arg)
 static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
 	struct auplay_st *st = context;
-	uint8_t buf[320 * 8];
 
-	(void)bq;
+	st->wh((void *)st->buf, sizeof(st->buf), st->arg);
 
-	st->wh(buf, sizeof(buf), st->arg);
-
-	(*st->BufferQueue)->Enqueue(st->BufferQueue, buf, sizeof(buf));
+	(*st->BufferQueue)->Enqueue(bq, st->buf, sizeof(st->buf));
 }
 
 
@@ -92,9 +95,11 @@ static int createPlayer(struct auplay_st *st, struct auplay_prm *prm)
 	r = (*engineEngine)->CreateAudioPlayer(engineEngine,
 					       &st->bqPlayerObject,
 					       &audioSrc, &audioSnk,
-					       2, ids, req);
-	if (SL_RESULT_SUCCESS != r)
+					       ARRAY_SIZE(ids), ids, req);
+	if (SL_RESULT_SUCCESS != r) {
+		DEBUG_WARNING("CreateAudioPlayer error: r = %d\n", r);
 		return ENODEV;
+	}
 
 	r = (*st->bqPlayerObject)->Realize(st->bqPlayerObject,
 					   SL_BOOLEAN_FALSE);
@@ -133,8 +138,10 @@ int opensles_player_alloc(struct auplay_st **stp, struct auplay *ap,
 {
 	struct auplay_st *st;
 	int err;
-
 	(void)device;
+
+	if (!stp || !ap || !prm || !wh)
+		return EINVAL;
 
 	st = mem_zalloc(sizeof(*st), auplay_destructor);
 	if (!st)
@@ -152,6 +159,7 @@ int opensles_player_alloc(struct auplay_st **stp, struct auplay *ap,
 	if (err)
 		goto out;
 
+	/* kick-start the buffer callback */
 	bqPlayerCallback(st->BufferQueue, st);
 
  out:

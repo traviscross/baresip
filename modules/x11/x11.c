@@ -89,7 +89,7 @@ static int create_window(struct vidisp_st *st, const struct vidsz *sz)
 	st->win = XCreateSimpleWindow(st->disp, DefaultRootWindow(st->disp),
 				      0, 0, sz->w, sz->h, 1, 0, 0);
 	if (!st->win) {
-		re_printf("failed to create X window\n");
+		warning("x11: failed to create X window\n");
 		return ENOMEM;
 	}
 
@@ -108,7 +108,7 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 	int err = 0;
 
 	if (!XGetWindowAttributes(st->disp, st->win, &attrs)) {
-		re_printf("cant't get window attributes\n");
+		warning("x11: cant't get window attributes\n");
 		return EINVAL;
 	}
 
@@ -130,8 +130,7 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 		break;
 
 	default:
-		re_printf("x11: colordepth not supported: %d\n",
-			  attrs.depth);
+		warning("x11: colordepth not supported: %d\n", attrs.depth);
 		return ENOSYS;
 	}
 
@@ -153,13 +152,13 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 
 	st->shm.shmid = shmget(IPC_PRIVATE, bufsz, IPC_CREAT | 0777);
 	if (st->shm.shmid < 0) {
-		re_printf("failed to allocate shared memory\n");
+		warning("x11: failed to allocate shared memory\n");
 		return ENOMEM;
 	}
 
 	st->shm.shmaddr = shmat(st->shm.shmid, NULL, 0);
 	if (st->shm.shmaddr == (char *)-1) {
-		re_printf("failed to attach to shared memory\n");
+		warning("x11: failed to attach to shared memory\n");
 		return ENOMEM;
 	}
 
@@ -169,7 +168,7 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 	x11.errorh = XSetErrorHandler(error_handler);
 
 	if (!XShmAttach(st->disp, &st->shm)) {
-		re_printf("failed to attach X to shared memory\n");
+		warning("x11: failed to attach X to shared memory\n");
 		return ENOMEM;
 	}
 
@@ -177,7 +176,7 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 	XSetErrorHandler(x11.errorh);
 
 	if (x11.shm_error)
-		re_printf("x11: shared memory disabled\n");
+		info("x11: shared memory disabled\n");
 	else
 		st->xshmat = true;
 
@@ -185,7 +184,7 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 
 	st->gc = XCreateGC(st->disp, st->win, GCGraphicsExposures, &gcv);
 	if (!st->gc) {
-		re_printf("failed to create graphics context\n");
+		warning("x11: failed to create graphics context\n");
 		return ENOMEM;
 	}
 
@@ -203,7 +202,7 @@ static int x11_reset(struct vidisp_st *st, const struct vidsz *sz)
 
 	}
 	if (!st->image) {
-		re_printf("Failed to create X image\n");
+		warning("x11: Failed to create X image\n");
 		return ENOMEM;
 	}
 
@@ -235,7 +234,7 @@ static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 
 	st->disp = XOpenDisplay(NULL);
 	if (!st->disp) {
-		re_printf("could not open X display\n");
+		warning("x11: could not open X display\n");
 		err = ENODEV;
 		goto out;
 	}
@@ -266,9 +265,9 @@ static int display(struct vidisp_st *st, const char *title,
 		char capt[256];
 
 		if (st->size.w && st->size.h) {
-			re_printf("x11: reset: %u x %u  --->  %u x %u\n",
-				  st->size.w, st->size.h,
-				  frame->size.w, frame->size.h);
+			info("x11: reset: %u x %u  --->  %u x %u\n",
+			     st->size.w, st->size.h,
+			     frame->size.w, frame->size.h);
 		}
 
 		if (st->internal && !st->win)

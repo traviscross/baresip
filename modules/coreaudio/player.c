@@ -125,7 +125,7 @@ int coreaudio_player_alloc(struct auplay_st **stp, struct auplay *ap,
 	status = AudioQueueNewOutput(&fmt, play_handler, st, NULL,
 				     kCFRunLoopCommonModes, 0, &st->queue);
 	if (status) {
-		re_fprintf(stderr, "AudioQueueNewOutput error: %i\n", status);
+		warning("coreaudio: AudioQueueNewOutput error: %i\n", status);
 		err = ENODEV;
 		goto out;
 	}
@@ -151,7 +151,7 @@ int coreaudio_player_alloc(struct auplay_st **stp, struct auplay *ap,
 
 	status = AudioQueueStart(st->queue, NULL);
 	if (status)  {
-		re_fprintf(stderr, "AudioQueueStart error %i\n", status);
+		warning("coreaudio: AudioQueueStart error %i\n", status);
 		err = ENODEV;
 		goto out;
 	}

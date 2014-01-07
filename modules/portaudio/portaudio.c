@@ -10,11 +10,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "portaudio"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /*
  * portaudio v19 is required
  */
@@ -97,15 +92,15 @@ static int read_stream_open(struct ausrc_st *st, const struct ausrc_prm *prm,
 	err = Pa_OpenStream(&st->stream_rd, &prm_in, NULL, prm->srate,
 			    prm->frame_size, paNoFlag, read_callback, st);
 	if (paNoError != err) {
-		DEBUG_WARNING("read: Pa_OpenStream: %s\n",
-			      Pa_GetErrorText(err));
+		warning("portaudio: read: Pa_OpenStream: %s\n",
+			Pa_GetErrorText(err));
 		return EINVAL;
 	}
 
 	err = Pa_StartStream(st->stream_rd);
 	if (paNoError != err) {
-		DEBUG_WARNING("read: Pa_StartStream: %s\n",
-			      Pa_GetErrorText(err));
+		warning("portaudio: read: Pa_StartStream: %s\n",
+			Pa_GetErrorText(err));
 		return EINVAL;
 	}
 
@@ -129,15 +124,15 @@ static int write_stream_open(struct auplay_st *st,
 	err = Pa_OpenStream(&st->stream_wr, NULL, &prm_out, prm->srate,
 			    prm->frame_size, paNoFlag, write_callback, st);
 	if (paNoError != err) {
-		DEBUG_WARNING("write: Pa_OpenStream: %s\n",
-			      Pa_GetErrorText(err));
+		warning("portaudio: write: Pa_OpenStream: %s\n",
+			Pa_GetErrorText(err));
 		return EINVAL;
 	}
 
 	err = Pa_StartStream(st->stream_wr);
 	if (paNoError != err) {
-		DEBUG_WARNING("write: Pa_StartStream: %s\n",
-			      Pa_GetErrorText(err));
+		warning("portaudio: write: Pa_StartStream: %s\n",
+			Pa_GetErrorText(err));
 		return EINVAL;
 	}
 
@@ -255,20 +250,20 @@ static int pa_init(void)
 
 	error = Pa_Initialize();
 	if (paNoError != error) {
-		DEBUG_WARNING("PortAudio init: %s\n", Pa_GetErrorText(error));
+		warning("portaudio: init: %s\n", Pa_GetErrorText(error));
 		return ENODEV;
 	}
 
 	n = Pa_GetDeviceCount();
 
-	DEBUG_NOTICE("Portaudio driver: Device count %d\n", n);
+	info("portaudio: device count is %d\n", n);
 
 	for (i=0; i<n; i++) {
 		const PaDeviceInfo *info;
 
 		info = Pa_GetDeviceInfo(i);
 
-		DEBUG_INFO(" device %d: %s\n", i, info->name);
+		debug("portaudio: device %d: %s\n", i, info->name);
 		(void)info;
 	}
 

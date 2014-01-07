@@ -21,7 +21,7 @@
 
 
 /** Core Run-time Configuration - populated from config file */
-/* todo: move parsing/decoding to a module */
+/** @todo: move config parsing/decoding to a module */
 static struct config core_config = {
 	/* Input */
 	{
@@ -328,6 +328,8 @@ static const char *default_audio_device(void)
 {
 #ifdef DARWIN
 	return "coreaudio,nil";
+#elif defined (FREEBSD)
+	return "oss,/dev/dsp";
 #else
 	return "alsa,default";
 #endif
@@ -484,7 +486,7 @@ static const char *detect_module_path(bool *valid)
 
 		uint32_t n = count_modules(pathv[i]);
 
-		(void)re_printf("%s: detected %u modules\n", pathv[i], n);
+		info("%s: detected %u modules\n", pathv[i], n);
 
 		if (n > nmax) {
 			nmax = n;
@@ -509,7 +511,7 @@ int config_write_template(const char *file, const struct config *cfg)
 	if (!file || !cfg)
 		return EINVAL;
 
-	DEBUG_NOTICE("creating config template %s\n", file);
+	info("config: creating config template %s\n", file);
 
 	f = fopen(file, "w");
 	if (!f) {
@@ -536,8 +538,6 @@ int config_write_template(const char *file, const struct config *cfg)
 	modpath = detect_module_path(&modpath_valid);
 	(void)re_fprintf(f, "%smodule_path\t\t%s\n",
 			 modpath_valid ? "" : "#", modpath);
-
-	/* todo: detect the available modules, and enable most of them .. */
 
 	(void)re_fprintf(f, "\n# UI Modules\n");
 #if defined (WIN32)

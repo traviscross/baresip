@@ -77,8 +77,8 @@ static int cmd_contact(struct re_printf *pf, void *arg)
 			err = ua_connect(uag_current(), NULL, NULL,
 					 contact_str(cnt), NULL, VIDMODE_ON);
 			if (err) {
-				re_fprintf(stderr, "ua_connect failed: %m\n",
-					   err);
+				warning("contact: ua_connect failed: %m\n",
+					err);
 			}
 			break;
 
@@ -128,7 +128,7 @@ static int write_template(const char *file)
 	const char *user, *domain;
 	FILE *f = NULL;
 
-	re_printf("creating contacts template %s\n", file);
+	info("contact: creating contacts template %s\n", file);
 
 	f = fopen(file, "w");
 	if (!f)
@@ -191,7 +191,7 @@ static int module_init(void)
 	if (err)
 		return err;
 
-	re_printf("Populated %u contacts\n", list_count(contact_list()));
+	info("Populated %u contacts\n", list_count(contact_list()));
 
 	return err;
 }

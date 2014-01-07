@@ -15,11 +15,6 @@
 #include "avcodec.h"
 
 
-#define DEBUG_MODULE "avcodec"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 const uint8_t h264_level_idc = 0x0c;
 
 

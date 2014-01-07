@@ -159,7 +159,7 @@ int coreaudio_recorder_alloc(struct ausrc_st **stp, struct ausrc *as,
 	status = AudioQueueNewInput(&fmt, record_handler, st, NULL,
 				     kCFRunLoopCommonModes, 0, &st->queue);
 	if (status) {
-		re_fprintf(stderr, "AudioQueueNewInput error: %i\n", status);
+		warning("coreaudio: AudioQueueNewInput error: %i\n", status);
 		err = ENODEV;
 		goto out;
 	}
@@ -180,7 +180,7 @@ int coreaudio_recorder_alloc(struct ausrc_st **stp, struct ausrc *as,
 
 	status = AudioQueueStart(st->queue, NULL);
 	if (status)  {
-		re_fprintf(stderr, "AudioQueueStart error %i\n", status);
+		warning("coreaudio: AudioQueueStart error %i\n", status);
 		err = ENODEV;
 		goto out;
 	}

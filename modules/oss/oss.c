@@ -118,8 +118,8 @@ static int oss_reset(int fd, uint32_t srate, uint8_t ch, int frame_size,
 
 	(void)ioctl(fd, SNDCTL_DSP_GETBLKSIZE, &blocksize);
 
-	re_printf("oss init: %u bit %d Hz %d ch, blocksize=%d\n",
-		  format, speed, channels, blocksize);
+	info("oss: init: %u bit %d Hz %d ch, blocksize=%d\n",
+	     format, speed, channels, blocksize);
 
 	return 0;
 }
@@ -191,7 +191,7 @@ static void *play_thread(void *arg)
 
 		n = write(st->fd, st->buf, st->sz);
 		if (n < 0) {
-			re_printf("write: %m\n", errno);
+			warning("oss: write: %m\n", errno);
 			break;
 		}
 	}

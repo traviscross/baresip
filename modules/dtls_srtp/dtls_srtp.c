@@ -14,11 +14,6 @@
 #include "dtls_srtp.h"
 
 
-#define DEBUG_MODULE "dtls_srtp"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /*
  *            STACK Diagram:
  *
@@ -107,18 +102,18 @@ static bool verify_fingerprint(const struct sdp_session *sess,
 	pl_strcpy(&hash, hashstr, sizeof(hashstr));
 
 	if (dtls_get_remote_fingerprint(tc, hashstr, &tls_fp)) {
-		DEBUG_WARNING("could not get DTLS fingerprint\n");
+		warning("dtls_srtp: could not get DTLS fingerprint\n");
 		return false;
 	}
 
 	if (sz_sdp != tls_fp.len || 0 != memcmp(md_sdp, tls_fp.md, sz_sdp)) {
-		DEBUG_WARNING("%s fingerprint mismatch\n", hashstr);
-		re_printf("DTLS: %w\n", tls_fp.md, (size_t)tls_fp.len);
-		re_printf("SDP:  %w\n", md_sdp, sz_sdp);
+		warning("dtls_srtp: %s fingerprint mismatch\n", hashstr);
+		info("DTLS: %w\n", tls_fp.md, (size_t)tls_fp.len);
+		info("SDP:  %w\n", md_sdp, sz_sdp);
 		return false;
 	}
 
-	DEBUG_NOTICE("verified %s fingerprint OK\n", hashstr);
+	info("dtls_srtp: verified %s fingerprint OK\n", hashstr);
 
 	return true;
 }
@@ -134,7 +129,7 @@ static void dtls_established_handler(int err, struct dtls_flow *flow,
 	const struct dtls_srtp *ds = sock->ds;
 
 	if (!verify_fingerprint(ds->sess->sdp, ds->sdpm, flow)) {
-		DEBUG_WARNING("could not verify remote fingerprint\n");
+		warning("dtls_srtp: could not verify remote fingerprint\n");
 		if (ds->sess->errorh)
 			ds->sess->errorh(EPIPE, ds->sess->arg);
 		return;
@@ -142,9 +137,9 @@ static void dtls_established_handler(int err, struct dtls_flow *flow,
 
 	sock->negotiated = true;
 
-	re_printf("---> DTLS-SRTP complete (%s/%s) Profile=%s\n",
-		  sdp_media_name(ds->sdpm),
-		  sock->is_rtp ? "RTP" : "RTCP", profile);
+	info("dtls_srtp: ---> DTLS-SRTP complete (%s/%s) Profile=%s\n",
+	     sdp_media_name(ds->sdpm),
+	     sock->is_rtp ? "RTP" : "RTCP", profile);
 
 	err |= srtp_stream_add(&sock->tx, profile,
 			       ds->active ? client_key : server_key,
@@ -156,7 +151,7 @@ static void dtls_established_handler(int err, struct dtls_flow *flow,
 
 	err |= srtp_install(sock);
 	if (err) {
-		DEBUG_WARNING("srtp_install: %m\n", err);
+		warning("dtls_srtp: srtp_install: %m\n", err);
 	}
 }
 
@@ -236,8 +231,8 @@ static int media_start(struct dtls_srtp *st, struct sdp_media *sdpm)
 	if (st->started)
 		return 0;
 
-	DEBUG_NOTICE("media_start: '%s' mux=%d, active=%d\n",
-		     sdp_media_name(sdpm), st->mux, st->active);
+	debug("dtls_srtp: media_start: '%s' mux=%d, active=%d\n",
+	      sdp_media_name(sdpm), st->mux, st->active);
 
 	if (!sdp_media_has_media(sdpm))
 		return 0;
@@ -338,8 +333,8 @@ static int media_alloc(struct menc_media **mp, struct menc_sess *sess,
 						  tls);
 		}
 		else {
-			DEBUG_NOTICE("unsupported fingerprint hash `%r'\n",
-				     &hash);
+			info("dtls_srtp: unsupported fingerprint hash `%r'\n",
+			     &hash);
 			return EPROTO;
 		}
 	}
@@ -370,7 +365,7 @@ static int module_init(void)
 	crypto_kernel_shutdown();
 	ret = srtp_init();
 	if (err_status_ok != ret) {
-		DEBUG_WARNING("srtp_init() failed: ret=%d\n", ret);
+		warning("dtls_srtp: srtp_init() failed: ret=%d\n", ret);
 		return ENOSYS;
 	}
 
@@ -382,7 +377,7 @@ static int module_init(void)
 	menc_register(&dtls_srtp);
 	menc_register(&dtls_srtp2);
 
-	re_printf("DTLS-SRTP ready with profiles %s\n", srtp_profiles);
+	debug("DTLS-SRTP ready with profiles %s\n", srtp_profiles);
 
 	return 0;
 }

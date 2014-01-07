@@ -68,7 +68,7 @@ bool conf_fileexist(const char *path)
 
 static void print_populated(const char *what, uint32_t n)
 {
-	(void)re_printf("Populated %u %s%s\n", n, what, 1==n ? "" : "s");
+	info("Populated %u %s%s\n", n, what, 1==n ? "" : "s");
 }
 
 

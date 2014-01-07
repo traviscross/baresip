@@ -15,11 +15,6 @@
 #include "avcodec.h"
 
 
-#define DEBUG_MODULE "avcodec"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 enum {
 	DEFAULT_GOP_SIZE =   10,
 };
@@ -106,16 +101,16 @@ static int decode_sdpparam_h263(struct videnc_state *st, const struct pl *name,
 	const int mpi = pl_u32(val);
 
 	if (fmt == H263_FMT_OTHER) {
-		DEBUG_NOTICE("h263: unknown param '%r'\n", name);
+		info("h263: unknown param '%r'\n", name);
 		return 0;
 	}
 	if (mpi < 1 || mpi > 32) {
-		DEBUG_NOTICE("h263: %r: MPI out of range %d\n", name, mpi);
+		info("h263: %r: MPI out of range %d\n", name, mpi);
 		return 0;
 	}
 
 	if (st->u.h263.picszn >= ARRAY_SIZE(st->u.h263.picszv)) {
-		DEBUG_NOTICE("h263: picszv overflow: %r\n", name);
+		info("h263: picszv overflow: %r\n", name);
 		return 0;
 	}
 
@@ -159,7 +154,11 @@ static int open_encoder(struct videnc_state *st,
 	st->ctx = avcodec_alloc_context();
 #endif
 
+#if LIBAVUTIL_VERSION_INT >= ((52<<16)+(20<<8)+100)
+	st->pict = av_frame_alloc();
+#else
 	st->pict = avcodec_alloc_frame();
+#endif
 
 	if (!st->ctx || !st->pict) {
 		err = ENOMEM;
@@ -223,15 +222,16 @@ int decode_sdpparam_h264(struct videnc_state *st, const struct pl *name,
 		st->u.h264.packetization_mode = pl_u32(val);
 
 		if (st->u.h264.packetization_mode != 0) {
-			DEBUG_WARNING("illegal packetization-mode %u\n",
-				      st->u.h264.packetization_mode);
+			warning("avcodec: illegal packetization-mode %u\n",
+				st->u.h264.packetization_mode);
 			return EPROTO;
 		}
 	}
 	else if (0 == pl_strcasecmp(name, "profile-level-id")) {
 		struct pl prof = *val;
 		if (prof.l != 6) {
-			DEBUG_WARNING("invalid profile-level-id (%r)\n", val);
+			warning("avcodec: invalid profile-level-id (%r)\n",
+				val);
 			return EPROTO;
 		}
 
@@ -396,7 +396,7 @@ static int open_encoder_x264(struct videnc_state *st, struct videnc_param *prm,
 
 	st->x264 = x264_encoder_open(&xprm);
 	if (!st->x264) {
-		DEBUG_WARNING("x264_encoder_open() failed\n");
+		warning("avcodec: x264_encoder_open() failed\n");
 		return ENOENT;
 	}
 
@@ -448,7 +448,7 @@ int encode_update(struct videnc_state **vesp, const struct vidcodec *vc,
 	else
 		err = init_encoder(st);
 	if (err) {
-		DEBUG_WARNING("%s: could not init encoder\n", vc->name);
+		warning("avcodec: %s: could not init encoder\n", vc->name);
 		goto out;
 	}
 
@@ -460,8 +460,8 @@ int encode_update(struct videnc_state **vesp, const struct vidcodec *vc,
 		fmt_param_apply(&sdp_fmtp, param_handler, st);
 	}
 
-	re_printf("video encoder %s: %d fps, %d bit/s, pktsize=%u\n",
-		  vc->name, prm->fps, prm->bitrate, prm->pktsize);
+	debug("avcodec: video encoder %s: %d fps, %d bit/s, pktsize=%u\n",
+	      vc->name, prm->fps, prm->bitrate, prm->pktsize);
 
  out:
 	if (err)
@@ -494,7 +494,7 @@ int encode_x264(struct videnc_state *st, bool update,
 #if X264_BUILD >= 95
 		x264_encoder_intra_refresh(st->x264);
 #endif
-		re_printf("x264 picture update\n");
+		debug("avcodec: x264 picture update\n");
 	}
 
 	x264_picture_init(&pic_in);
@@ -561,7 +561,7 @@ int encode(struct videnc_state *st, bool update, const struct vidframe *frame,
 
 		err = open_encoder(st, &st->encprm, &frame->size);
 		if (err) {
-			DEBUG_WARNING("open_encoder: %m\n", err);
+			warning("avcodec: open_encoder: %m\n", err);
 			return err;
 		}
 	}
@@ -572,7 +572,7 @@ int encode(struct videnc_state *st, bool update, const struct vidframe *frame,
 	}
 	st->pict->pts = st->pts++;
 	if (update) {
-		re_printf("avcodec encoder picture update\n");
+		debug("avcodec: encoder picture update\n");
 		st->pict->key_frame = 1;
 #ifdef FF_I_TYPE
 		st->pict->pict_type = FF_I_TYPE;  /* Infra Frame */
@@ -615,8 +615,8 @@ int encode(struct videnc_state *st, bool update, const struct vidframe *frame,
 
 	/* todo: figure out proper buffer size */
 	if (ret > (int)st->sz_max) {
-		re_printf("note: grow encode buffer %u --> %d\n",
-			  st->sz_max, ret);
+		debug("avcodec: grow encode buffer %u --> %d\n",
+		      st->sz_max, ret);
 		st->sz_max = ret;
 	}
 

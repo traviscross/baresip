@@ -22,11 +22,6 @@
 #include <libv4l2.h>
 
 
-#define DEBUG_MODULE "v4l2"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 enum io_method {
 	IO_METHOD_READ = 0,
 	IO_METHOD_MMAP
@@ -63,16 +58,16 @@ static void get_video_input(struct vidsrc_st *st)
 	memset(&input, 0, sizeof(input));
 
 	if (-1 == v4l2_ioctl(st->fd, VIDIOC_G_INPUT, &input.index)) {
-		DEBUG_WARNING("VIDIOC_G_INPUT: %m\n", errno);
+		warning("v4l2: VIDIOC_G_INPUT: %m\n", errno);
 		return;
 	}
 
 	if (-1 == v4l2_ioctl(st->fd, VIDIOC_ENUMINPUT, &input)) {
-		DEBUG_WARNING("VIDIOC_ENUMINPUT: %m\n", errno);
+		warning("v4l2: VIDIOC_ENUMINPUT: %m\n", errno);
 		return;
 	}
 
-	printf("Current input: %s\n", input.name);
+	info("v4l2: Current input: %s\n", input.name);
 }
 
 
@@ -116,8 +111,8 @@ static int init_mmap(struct vidsrc_st *st, const char *dev_name)
 
 	if (-1 == xioctl(st->fd, VIDIOC_REQBUFS, &req)) {
 		if (EINVAL == errno) {
-			DEBUG_WARNING("%s does not support "
-				      "memory mapping\n", dev_name);
+			warning("v4l2: %s does not support "
+				"memory mapping\n", dev_name);
 			return errno;
 		}
 		else {
@@ -126,7 +121,7 @@ static int init_mmap(struct vidsrc_st *st, const char *dev_name)
 	}
 
 	if (req.count < 2) {
-		DEBUG_WARNING("Insufficient buffer memory on %s\n", dev_name);
+		warning("v4l2: Insufficient buffer memory on %s\n", dev_name);
 		return ENOMEM;
 	}
 
@@ -144,7 +139,7 @@ static int init_mmap(struct vidsrc_st *st, const char *dev_name)
 		buf.index  = st->n_buffers;
 
 		if (-1 == xioctl(st->fd, VIDIOC_QUERYBUF, &buf)) {
-			DEBUG_WARNING("VIDIOC_QUERYBUF\n");
+			warning("v4l2: VIDIOC_QUERYBUF\n");
 			return errno;
 		}
 
@@ -157,7 +152,7 @@ static int init_mmap(struct vidsrc_st *st, const char *dev_name)
 				  st->fd, buf.m.offset);
 
 		if (MAP_FAILED == st->buffers[st->n_buffers].start) {
-			DEBUG_WARNING("mmap\n");
+			warning("v4l2: mmap failed\n");
 			return ENODEV;
 		}
 	}
@@ -176,19 +171,17 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 
 	if (-1 == xioctl(st->fd, VIDIOC_QUERYCAP, &cap)) {
 		if (EINVAL == errno) {
-			fprintf (stderr, "%s is no V4L2 device\n",
-				 dev_name);
+			warning("v4l2: %s is no V4L2 device\n", dev_name);
 			return ENODEV;
 		}
 		else {
-			DEBUG_WARNING("VIDIOC_QUERYCAP: %m\n", errno);
+			warning("v4l2: VIDIOC_QUERYCAP: %m\n", errno);
 			return errno;
 		}
 	}
 
 	if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
-		fprintf (stderr, "%s is no video capture device\n",
-			 dev_name);
+		warning("v4l2: %s is no video capture device\n", dev_name);
 		return ENODEV;
 	}
 
@@ -196,20 +189,17 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 
 	case IO_METHOD_READ:
 		if (!(cap.capabilities & V4L2_CAP_READWRITE)) {
-			fprintf (stderr, "%s does not support read i/o\n",
-				 dev_name);
+			warning("%s does not support read i/o\n", dev_name);
 			return ENOSYS;
 		}
-
 		break;
 
 	case IO_METHOD_MMAP:
 		if (!(cap.capabilities & V4L2_CAP_STREAMING)) {
-			fprintf (stderr, "%s does not support streaming i/o\n",
-				 dev_name);
+			warning("v4l2: %s does not support streaming i/o\n",
+				dev_name);
 			return ENOSYS;
 		}
-
 		break;
 	}
 
@@ -224,7 +214,7 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 	fmt.fmt.pix.field       = V4L2_FIELD_INTERLACED;
 
 	if (-1 == xioctl(st->fd, VIDIOC_S_FMT, &fmt)) {
-		DEBUG_WARNING("VIDIOC_S_FMT: %m\n", errno);
+		warning("v4l2: VIDIOC_S_FMT: %m\n", errno);
 		return errno;
 	}
 
@@ -242,8 +232,8 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 	st->sz.h = fmt.fmt.pix.height;
 
 	if (!vidsz_cmp(&st->sz, &st->app_sz)) {
-		re_printf("v4l2: scaling %u x %u  --->  %u x %u\n",
-			  st->sz.w, st->sz.h, st->app_sz.w, st->app_sz.h);
+		info("v4l2: scaling %u x %u  --->  %u x %u\n",
+		     st->sz.w, st->sz.h, st->app_sz.w, st->app_sz.h);
 	}
 
 	switch (st->io) {
@@ -257,7 +247,7 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 		break;
 
 	default:
-		DEBUG_WARNING("unknown io: %d\n", st->io);
+		warning("v4l2: unknown io: %d\n", st->io);
 		err = EINVAL;
 		break;
 	}
@@ -268,13 +258,12 @@ static int v4l2_init_device(struct vidsrc_st *st, const char *dev_name)
 	pix = (char *)&fmt.fmt.pix.pixelformat;
 
 	if (V4L2_PIX_FMT_YUV420 != fmt.fmt.pix.pixelformat) {
-		DEBUG_WARNING("%s: expected YUV420 got %c%c%c%c\n", dev_name,
-			      pix[0], pix[1], pix[2], pix[3]);
+		warning("v4l2: %s: expected YUV420 got %c%c%c%c\n", dev_name,
+			pix[0], pix[1], pix[2], pix[3]);
 		return ENODEV;
 	}
 
-
-	printf("%s: found valid V4L2 device (%u x %u) pixfmt=%c%c%c%c\n",
+	info("v4l2: %s: found valid V4L2 device (%u x %u) pixfmt=%c%c%c%c\n",
 	       dev_name, fmt.fmt.pix.width, fmt.fmt.pix.height,
 	       pix[0], pix[1], pix[2], pix[3]);
 
@@ -299,7 +288,7 @@ static void stop_capturing(struct vidsrc_st *st)
 		type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
 		if (-1 == xioctl(st->fd, VIDIOC_STREAMOFF, &type))
-			DEBUG_WARNING("VIDIOC_STREAMOFF\n");
+			warning("v4l2: VIDIOC_STREAMOFF\n");
 		break;
 	}
 }
@@ -395,7 +384,7 @@ static int read_frame(struct vidsrc_st *st)
 				/* fall through */
 
 			default:
-				DEBUG_WARNING("read: %m\n", errno);
+				warning("v4l2: read error: %m\n", errno);
 				BREAKPOINT;
 				return errno;
 			}
@@ -422,19 +411,19 @@ static int read_frame(struct vidsrc_st *st)
 				/* fall through */
 
 			default:
-				DEBUG_WARNING("VIDIOC_DQBUF: %m\n", errno);
+				warning("v4l2: VIDIOC_DQBUF: %m\n", errno);
 				return errno;
 			}
 		}
 
 		if (buf.index >= st->n_buffers) {
-			DEBUG_WARNING("index >= n_buffers\n");
+			warning("v4l2: index >= n_buffers\n");
 		}
 
 		call_frame_handler(st, st->buffers[buf.index].start);
 
 		if (-1 == xioctl (st->fd, VIDIOC_QBUF, &buf)) {
-			DEBUG_WARNING("VIDIOC_QBUF\n");
+			warning("v4l2: VIDIOC_QBUF\n");
 			return errno;
 		}
 		break;
@@ -451,7 +440,7 @@ static int vd_open(struct vidsrc_st *st, const char *device)
 	 */
 	st->fd = v4l2_open(device, O_RDWR);
 	if (st->fd < 0) {
-		DEBUG_WARNING("open %s: %m\n", device, errno);
+		warning("v4l2: open %s: %m\n", device, errno);
 		return errno;
 	}
 
@@ -487,7 +476,7 @@ static void *read_thread(void *arg)
 	while (st->run) {
 		err = read_frame(st);
 		if (err) {
-			DEBUG_WARNING("read_frame: %m\n", err);
+			warning("v4l2: read_frame: %m\n", err);
 		}
 	}
 

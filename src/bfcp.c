@@ -49,8 +49,7 @@ static enum bfcp_transp str2tp(const char *proto)
 	else if (0 == str_casecmp(proto, "dtls"))
 		return BFCP_DTLS;
 	else {
-		(void)re_fprintf(stderr, "unsupported BFCP protocol: %s\n",
-				 proto);
+		warning("unsupported BFCP protocol: %s\n", proto);
 		return -1;
 	}
 }
@@ -62,12 +61,12 @@ static void bfcp_resp_handler(int err, const struct bfcp_msg *msg, void *arg)
 	(void)bfcp;
 
 	if (err) {
-		(void)re_fprintf(stderr, "bfcp: error response: %m\n", err);
+		warning("bfcp: error response: %m\n", err);
 		return;
 	}
 
-	(void)re_printf("bfcp: received BFCP response: '%s'\n",
-			bfcp_prim_name(msg->prim));
+	info("bfcp: received BFCP response: '%s'\n",
+	     bfcp_prim_name(msg->prim));
 }
 
 
@@ -75,8 +74,7 @@ static void bfcp_msg_handler(const struct bfcp_msg *msg, void *arg)
 {
 	struct bfcp *bfcp = arg;
 
-	(void)re_printf("bfcp: received BFCP message '%s'\n",
-			bfcp_prim_name(msg->prim));
+	info("bfcp: received BFCP message '%s'\n", bfcp_prim_name(msg->prim));
 
 	switch (msg->prim) {
 
@@ -150,8 +148,7 @@ int bfcp_alloc(struct bfcp **bfcpp, struct sdp_session *sdp_sess,
 		goto out;
 
 	if (mnat) {
-		(void)re_printf("bfcp: enabled medianat '%s' on UDP socket\n",
-				mnat->id);
+		info("bfcp: enabled medianat '%s' on UDP socket\n", mnat->id);
 
 		err = mnat->mediah(&bfcp->mnat_st, mnat_sess, IPPROTO_UDP,
 				   bfcp_sock(bfcp->conn), NULL, bfcp->sdpm);
@@ -159,9 +156,9 @@ int bfcp_alloc(struct bfcp **bfcpp, struct sdp_session *sdp_sess,
 			goto out;
 	}
 
-	(void)re_printf("bfcp: %s BFCP agent protocol '%s' on port %d\n",
-			bfcp->active ? "Active" : "Passive",
-			proto, sa_port(&laddr));
+	info("bfcp: %s BFCP agent protocol '%s' on port %d\n",
+	     bfcp->active ? "Active" : "Passive",
+	     proto, sa_port(&laddr));
 
  out:
 	if (err)
@@ -184,7 +181,7 @@ int bfcp_start(struct bfcp *bfcp)
 		return EINVAL;
 
 	if (!sdp_media_rport(bfcp->sdpm)) {
-		(void)re_printf("bfcp channel is disabled\n");
+		info("bfcp channel is disabled\n");
 		return 0;
 	}
 

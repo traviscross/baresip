@@ -2,7 +2,7 @@ README
 ------
 
 Baresip is a portable and modular SIP User-Agent with audio and video support
-Copyright (c) 2010 - 2013 Creytiv.com
+Copyright (c) 2010 - 2014 Creytiv.com
 
 Distributed under BSD license
 
@@ -30,8 +30,8 @@ avcodec       Video codec using FFmpeg
 avformat      Video source using FFmpeg libavformat
 bv32          BroadVoice32 audio codec
 cairo         Cairo video source
-celt          CELT audio codec
-cons          UDP console
+celt          CELT audio codec (obsolete, use opus instead)
+cons          UDP/TCP console UI driver
 contact       Contacts module
 coreaudio     Apple Coreaudio driver
 directfb      DirectFB video display module
@@ -74,7 +74,6 @@ sndfile       Audio dumper using libsndfile
 speex         Speex audio codec
 speex_aec     Acoustic Echo Cancellation (AEC) using libspeexdsp
 speex_pp      Audio pre-processor using libspeexdsp
-speex_resamp  Speex resampler (deprecated)
 srtp          Secure RTP encryption
 stdio         Standard input/output UI driver
 stun          Session Traversal Utilities for NAT (STUN) module
@@ -91,6 +90,7 @@ wincons       Console input driver for Windows
 winwave       Audio driver for Windows
 x11           X11 video output driver
 x11grab       X11 grabber video source
+zrtp          ZRTP media encryption module
 
 
 IETF RFC/I-Ds:
@@ -135,7 +135,6 @@ IETF RFC/I-Ds:
 * draft-ietf-avt-rtp-isac-04
 * draft-ietf-payload-vp8-08
 * draft-spittka-payload-rtp-opus-00
-* draft-valin-celt-rtp-profile-02
 
 
 Architecture:
@@ -184,6 +183,7 @@ Supported compilers:
 
 * gcc (v2.9x to v4.x)
 * gcce
+* llvm clang
 * ms vc2003 compiler
 * codewarrior
 

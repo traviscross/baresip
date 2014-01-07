@@ -110,16 +110,16 @@ bool net_check(void)
 	if (sa_isset(&net.laddr, SA_ADDR) &&
 	    !sa_cmp(&laddr, &net.laddr, SA_ADDR)) {
 		change = true;
-		DEBUG_NOTICE("local IPv4 address changed: %j -> %j\n",
-			     &laddr, &net.laddr);
+		info("net: local IPv4 address changed: %j -> %j\n",
+		     &laddr, &net.laddr);
 	}
 
 #ifdef HAVE_INET6
 	if (sa_isset(&net.laddr6, SA_ADDR) &&
 	    !sa_cmp(&laddr6, &net.laddr6, SA_ADDR)) {
 		change = true;
-		DEBUG_NOTICE("local IPv6 address changed: %j -> %j\n",
-			     &laddr6, &net.laddr6);
+		info("net: local IPv6 address changed: %j -> %j\n",
+		     &laddr6, &net.laddr6);
 	}
 #endif
 
@@ -149,6 +149,17 @@ static int dns_init(void)
 
 
 /**
+ * Return TRUE if libre supports IPv6
+ */
+static bool check_ipv6(void)
+{
+	struct sa sa;
+
+	return 0 == sa_set_str(&sa, "::1", 2000);
+}
+
+
+/**
  * Initialise networking
  *
  * @param cfg Network configuration
@@ -162,6 +173,25 @@ int net_init(const struct config_net *cfg, int af)
 
 	if (!cfg)
 		return EINVAL;
+
+	/*
+	 * baresip/libre must be built with matching HAVE_INET6 value.
+	 * if different the size of `struct sa' will not match and the
+	 * application is very likely to crash.
+	 */
+#ifdef HAVE_INET6
+	if (!check_ipv6()) {
+		DEBUG_WARNING("libre was compiled without IPv6-support"
+			      ", but baresip was compiled with\n");
+		return EAFNOSUPPORT;
+	}
+#else
+	if (check_ipv6()) {
+		DEBUG_WARNING("libre was compiled with IPv6-support"
+			      ", but baresip was compiled without\n");
+		return EAFNOSUPPORT;
+	}
+#endif
 
 	net.cfg = *cfg;
 	net.af  = af;
@@ -182,16 +212,15 @@ int net_init(const struct config_net *cfg, int af)
 
 		bool got_it = false;
 
-		(void)re_printf("Binding to interface '%s'\n",
-				cfg->ifname);
+		info("Binding to interface '%s'\n", cfg->ifname);
 
 		str_ncpy(net.ifname, cfg->ifname, sizeof(net.ifname));
 
 		err = net_if_getaddr(cfg->ifname,
 				     AF_INET, &net.laddr);
 		if (err) {
-			DEBUG_NOTICE("%s: could not get IPv4 address (%m)\n",
-				     cfg->ifname, err);
+			info("net: %s: could not get IPv4 address (%m)\n",
+			     cfg->ifname, err);
 		}
 		else
 			got_it = true;
@@ -203,8 +232,8 @@ int net_init(const struct config_net *cfg, int af)
 		err = net_if_getaddr(cfg->ifname,
 				     AF_INET6, &net.laddr6);
 		if (err) {
-			DEBUG_NOTICE("%s: could not get IPv6 address (%m)\n",
-				     cfg->ifname, err);
+			info("net: %s: could not get IPv6 address (%m)\n",
+			     cfg->ifname, err);
 		}
 		else
 			got_it = true;

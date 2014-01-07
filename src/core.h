@@ -20,6 +20,7 @@ enum {
 };
 
 
+/** Media constants */
 enum {
 	AUDIO_BANDWIDTH = 128000 /**< Bandwidth for audio in bits/s       */
 };

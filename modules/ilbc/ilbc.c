@@ -10,11 +10,6 @@
 #include <iLBC_encode.h>
 
 
-#define DEBUG_MODULE "ilbc"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /*
  * This module implements the iLBC audio codec as defined in:
  *
@@ -59,7 +54,7 @@ static void set_encoder_mode(struct auenc_state *st, int mode)
 	if (st->mode == mode)
 		return;
 
-	(void)re_printf("set iLBC encoder mode %dms\n", mode);
+	info("ilbc: set iLBC encoder mode %dms\n", mode);
 
 	st->mode = mode;
 
@@ -74,7 +69,7 @@ static void set_encoder_mode(struct auenc_state *st, int mode)
 		break;
 
 	default:
-		DEBUG_WARNING("unknown encoder mode %d\n", mode);
+		warning("ilbc: unknown encoder mode %d\n", mode);
 		return;
 	}
 
@@ -87,7 +82,7 @@ static void set_decoder_mode(struct audec_state *st, int mode)
 	if (st->mode == mode)
 		return;
 
-	(void)re_printf("set iLBC decoder mode %dms\n", mode);
+	info("ilbc: set iLBC decoder mode %dms\n", mode);
 
 	st->mode = mode;
 
@@ -102,7 +97,7 @@ static void set_decoder_mode(struct audec_state *st, int mode)
 		break;
 
 	default:
-		DEBUG_WARNING("unknown decoder mode %d\n", mode);
+		warning("ilbc: unknown decoder mode %d\n", mode);
 		return;
 	}
 
@@ -164,7 +159,7 @@ static int check_ptime(const struct auenc_param *prm)
 		return 0;
 
 	default:
-		DEBUG_WARNING("invalid ptime %u ms\n", prm->ptime);
+		warning("ilbc: invalid ptime %u ms\n", prm->ptime);
 		return EINVAL;
 	}
 }
@@ -244,8 +239,8 @@ static int encode(struct auenc_state *st, uint8_t *buf,
 
 	/* Make sure there is enough space */
 	if (*len < st->enc_bytes) {
-		DEBUG_WARNING("encode: buffer is too small (%u bytes)\n",
-			      *len);
+		warning("ilbc: encode: buffer is too small (%u bytes)\n",
+			*len);
 		return ENOMEM;
 	}
 
@@ -273,11 +268,8 @@ static int do_dec(struct audec_state *st, int16_t *sampv, size_t *sampc,
 	uint32_t i;
 
 	/* Make sure there is enough space in the buffer */
-	if (*sampc < st->nsamp) {
-		DEBUG_NOTICE("decode: buffer too small (sampc=%u, need %u)\n",
-			     sampc, st->nsamp);
+	if (*sampc < st->nsamp)
 		return ENOMEM;
-	}
 
 	iLBC_decode(float_buf,      /* (o) decoded signal block */
 		    (uint8_t *)buf, /* (i) encoded signal bits */
@@ -314,8 +306,8 @@ static int decode(struct audec_state *st, int16_t *sampv,
 			break;
 
 		default:
-			DEBUG_WARNING("decode: expect %u, got %u\n",
-				      st->dec_bytes, len);
+			warning("ilbc: decode: expect %u, got %u\n",
+				st->dec_bytes, len);
 			return EINVAL;
 		}
 	}

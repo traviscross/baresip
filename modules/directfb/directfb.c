@@ -72,15 +72,16 @@ static int display(struct vidisp_st *st, const char *title,
 		   const struct vidframe *frame)
 {
 	void *pixels;
-	int pitch, i, h;
+	int pitch, i;
+	unsigned h;
 	uint8_t *p;
 	(void) title;
 
 	if (!vidsz_cmp(&st->size, &frame->size)) {
 		if (st->size.w && st->size.h) {
-			re_printf("directfb reset: %u x %u ---> %u x %u\n",
-				  st->size.w, st->size.h,
-				  frame->size.w, frame->size.h);
+			info("directfb: reset: %u x %u ---> %u x %u\n",
+			     st->size.w, st->size.h,
+			     frame->size.w, frame->size.h);
 		}
 
 		if (st->surface) {

@@ -128,7 +128,7 @@ int png_save_vidframe(const struct vidframe *vf, const char *path)
 	png_set_rows(png_ptr, info_ptr, png_row_pointers);
 	png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
 
-	re_printf("png: wrote %s\n", filename_buf);
+	info("png: wrote %s\n", filename_buf);
 
  out:
 	/* Finish writing. */

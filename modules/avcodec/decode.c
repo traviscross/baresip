@@ -12,11 +12,6 @@
 #include "avcodec.h"
 
 
-#define DEBUG_MODULE "avcodec"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 struct viddec_state {
 	AVCodec *codec;
 	AVCodecContext *ctx;
@@ -61,7 +56,11 @@ static int init_decoder(struct viddec_state *st, const char *name)
 	st->ctx = avcodec_alloc_context();
 #endif
 
+#if LIBAVUTIL_VERSION_INT >= ((52<<16)+(20<<8)+100)
+	st->pict = av_frame_alloc();
+#else
 	st->pict = avcodec_alloc_frame();
+#endif
 
 	if (!st->ctx || !st->pict)
 		return ENOMEM;
@@ -104,11 +103,11 @@ int decode_update(struct viddec_state **vdsp, const struct vidcodec *vc,
 
 	err = init_decoder(st, vc->name);
 	if (err) {
-		DEBUG_WARNING("%s: could not init decoder\n", vc->name);
+		warning("avcodec: %s: could not init decoder\n", vc->name);
 		goto out;
 	}
 
-	re_printf("video decoder %s (%s)\n", vc->name, fmtp);
+	debug("avcodec: video decoder %s (%s)\n", vc->name, fmtp);
 
  out:
 	if (err)
@@ -164,10 +163,6 @@ static int ffdecode(struct viddec_state *st, struct vidframe *frame,
 		err = EBADMSG;
 		goto out;
 	}
-	else if (ret && ret != (int)mbuf_get_left(st->mb)) {
-		DEBUG_NOTICE("decoded only %d of %u bytes (got_pict=%d)\n",
-			     ret, mbuf_get_left(st->mb), got_picture);
-	}
 
 	mbuf_skip_to_end(src);
 
@@ -200,7 +195,7 @@ int h264_decode(struct viddec_state *st, struct mbuf *src)
 		return err;
 
 	if (h264_hdr.f) {
-		DEBUG_WARNING("H264 forbidden bit set!\n");
+		info("avcodec: H264 forbidden bit set!\n");
 		return EBADMSG;
 	}
 
@@ -240,7 +235,7 @@ int h264_decode(struct viddec_state *st, struct mbuf *src)
 		}
 	}
 	else {
-		DEBUG_WARNING("unknown NAL type %u\n", h264_hdr.type);
+		warning("avcodec: unknown NAL type %u\n", h264_hdr.type);
 		return EBADMSG;
 	}
 
@@ -300,13 +295,13 @@ int decode_h263(struct viddec_state *st, struct vidframe *frame,
 		return err;
 
 #if 0
-	re_printf(".....[%s seq=%5u ] MODE %s -"
-		  " SBIT=%u EBIT=%u I=%s"
-		  " (%5u/%5u bytes)\n",
-		  marker ? "M" : " ", seq,
-		  h263_hdr_mode(&hdr) == H263_MODE_A ? "A" : "B",
-		  hdr.sbit, hdr.ebit, hdr.i ? "Inter" : "Intra",
-		  mbuf_get_left(src), st->mb->end);
+	debug(".....[%s seq=%5u ] MODE %s -"
+	      " SBIT=%u EBIT=%u I=%s"
+	      " (%5u/%5u bytes)\n",
+	      marker ? "M" : " ", seq,
+	      h263_hdr_mode(&hdr) == H263_MODE_A ? "A" : "B",
+	      hdr.sbit, hdr.ebit, hdr.i ? "Inter" : "Intra",
+	      mbuf_get_left(src), st->mb->end);
 #endif
 
 	if (!hdr.i)
@@ -317,8 +312,8 @@ int decode_h263(struct viddec_state *st, struct vidframe *frame,
 		uint8_t *p = mbuf_buf(src);
 
 		if (p[0] != 0x00 || p[1] != 0x00) {
-			re_printf("invalid PSC detected (%02x %02x)\n",
-				  p[0], p[1]);
+			warning("invalid PSC detected (%02x %02x)\n",
+				p[0], p[1]);
 			return EPROTO;
 		}
 	}

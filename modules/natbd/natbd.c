@@ -109,11 +109,10 @@ static void nat_hairpinning_handler(int err, bool supported, void *arg)
 		return;
 
 	if (res_hp != natbd->res_hp) {
-		(void)re_fprintf(stderr, "NAT Hairpinning %s changed from"
-				 " (%s) to (%s)\n",
-				 net_proto2name(natbd->proto),
-				 hairpinning_str(natbd->res_hp),
-				 hairpinning_str(res_hp));
+		info("NAT Hairpinning %s changed from (%s) to (%s)\n",
+		     net_proto2name(natbd->proto),
+		     hairpinning_str(natbd->res_hp),
+		     hairpinning_str(res_hp));
 	}
 
 	natbd->res_hp = res_hp;
@@ -135,11 +134,10 @@ static void nat_mapping_handler(int err, enum nat_type type, void *arg)
 	}
 
 	if (type != natbd->res_nm) {
-		(void)re_fprintf(stderr, "NAT Mapping %s changed from (%s)"
-				 " to (%s)\n",
-				 net_proto2name(natbd->proto),
-				 nat_type_str(natbd->res_nm),
-				 nat_type_str(type));
+		info("NAT Mapping %s changed from (%s) to (%s)\n",
+		     net_proto2name(natbd->proto),
+		     nat_type_str(natbd->res_nm),
+		     nat_type_str(type));
 	}
 
 	natbd->res_nm = type;
@@ -162,11 +160,10 @@ static void nat_filtering_handler(int err, enum nat_type type, void *arg)
 	}
 
 	if (type != natbd->res_nf) {
-		(void)re_fprintf(stderr, "NAT Filtering %s changed from (%s)"
-				 " to (%s)\n",
-				 net_proto2name(natbd->proto),
-				 nat_type_str(natbd->res_nf),
-				 nat_type_str(type));
+		info("NAT Filtering %s changed from (%s) to (%s)\n",
+		     net_proto2name(natbd->proto),
+		     nat_type_str(natbd->res_nf),
+		     nat_type_str(type));
 	}
 
 	natbd->res_nf = type;
@@ -191,10 +188,9 @@ static void nat_lifetime_handler(int err,
 
 	natbd->res_nl = *interval;
 
-	(void)re_fprintf(stderr, "NAT Binding lifetime for %s:"
-			 " min=%u cur=%u max=%u\n",
-			 net_proto2name(natbd->proto),
-			 interval->min, interval->cur, interval->max);
+	info("NAT Binding lifetime for %s: min=%u cur=%u max=%u\n",
+	     net_proto2name(natbd->proto),
+	     interval->min, interval->cur, interval->max);
 }
 
 
@@ -220,11 +216,10 @@ static void nat_genalg_handler(int err, uint16_t scode, const char *reason,
 	}
 
 	if (status != natbd->status_ga) {
-		(void)re_fprintf(stderr, "Generic ALG for %s changed from"
-				 " (%s) to (%s)\n",
-				 net_proto2name(natbd->proto),
-				 genalg_str(natbd->status_ga),
-				 genalg_str(status));
+		info("Generic ALG for %s changed from (%s) to (%s)\n",
+		     net_proto2name(natbd->proto),
+		     genalg_str(natbd->status_ga),
+		     genalg_str(status));
 	}
 
 	natbd->status_ga = status;
@@ -314,7 +309,7 @@ static void timeout(void *arg)
 {
 	struct natbd *natbd = arg;
 
-	re_printf("%H\n", natbd_status, natbd);
+	info("%H\n", natbd_status, natbd);
 
 	natbd_start(natbd);
 
@@ -332,8 +327,8 @@ static void dns_handler(int err, const struct sa *addr, void *arg)
 		goto out;
 	}
 
-	re_printf("natbd: resolved STUN-server for %s -- %J\n",
-		  net_proto2name(natbd->proto), addr);
+	info("natbd: resolved STUN-server for %s -- %J\n",
+	     net_proto2name(natbd->proto), addr);
 
 	sa_cpy(&natbd->stun_srv, addr);
 
@@ -479,8 +474,8 @@ static int module_init(void)
 		return EINVAL;
 	}
 
-	(void)re_printf("Enable NAT Behavior Discovery using STUN server %s\n",
-			server);
+	info("natbd: Enable NAT Behavior Discovery using STUN server %s\n",
+	     server);
 
 	err |= natbd_alloc(&natbdv[0], interval, IPPROTO_UDP, server);
 	err |= natbd_alloc(&natbdv[1], interval, IPPROTO_TCP, server);

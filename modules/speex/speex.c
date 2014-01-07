@@ -11,11 +11,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "speex"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 enum {
 	MIN_FRAME_SIZE = 43,
 	SPEEX_PTIME    = 20,
@@ -85,22 +80,22 @@ static void encoder_config(void *st)
 
 	ret = speex_encoder_ctl(st, SPEEX_SET_QUALITY, &sconf.quality);
 	if (ret) {
-		DEBUG_WARNING("SPEEX_SET_QUALITY: %d\n", ret);
+		warning("speex: SPEEX_SET_QUALITY: %d\n", ret);
 	}
 
 	ret = speex_encoder_ctl(st, SPEEX_SET_COMPLEXITY, &sconf.complexity);
 	if (ret) {
-		DEBUG_WARNING("SPEEX_SET_COMPLEXITY: %d\n", ret);
+		warning("speex: SPEEX_SET_COMPLEXITY: %d\n", ret);
 	}
 
 	ret = speex_encoder_ctl(st, SPEEX_SET_VBR, &sconf.vbr);
 	if (ret) {
-		DEBUG_WARNING("SPEEX_SET_VBR: %d\n", ret);
+		warning("speex: SPEEX_SET_VBR: %d\n", ret);
 	}
 
 	ret = speex_encoder_ctl(st, SPEEX_SET_VAD, &sconf.vad);
 	if (ret) {
-		DEBUG_WARNING("SPEEX_SET_VAD: %d\n", ret);
+		warning("speex: SPEEX_SET_VAD: %d\n", ret);
 	}
 }
 
@@ -111,7 +106,7 @@ static void decoder_config(void *st)
 
 	ret = speex_decoder_ctl(st, SPEEX_SET_ENH, &sconf.enhancement);
 	if (ret) {
-		DEBUG_WARNING("SPEEX_SET_ENH: %d\n", ret);
+		warning("speex: SPEEX_SET_ENH: %d\n", ret);
 	}
 }
 
@@ -120,8 +115,6 @@ static int decode_param(struct auenc_state *st, const struct pl *name,
 			const struct pl *val)
 {
 	int ret;
-
-	DEBUG_INFO("speex param: \"%r\" = \"%r\"\n", name, val);
 
 	/* mode: List supported Speex decoding modes.  The valid modes are
 	   different for narrowband and wideband, and are defined as follows:
@@ -142,10 +135,9 @@ static int decode_param(struct auenc_state *st, const struct pl *name,
 
 		mode = pl_u32(&v);
 
-		DEBUG_NOTICE("SPEEX_SET_MODE: mode=%d\n", mode);
 		ret = speex_encoder_ctl(st->enc, SPEEX_SET_MODE, &mode);
 		if (ret) {
-			DEBUG_WARNING("SPEEX_SET_MODE: ret=%d\n", ret);
+			warning("speex: SPEEX_SET_MODE: ret=%d\n", ret);
 		}
 	}
 	/* vbr: variable bit rate - either 'on' 'off' or 'vad' */
@@ -159,17 +151,17 @@ static int decode_param(struct auenc_state *st, const struct pl *name,
 		else if (0 == pl_strcasecmp(val, "vad"))
 			vad = 1;
 		else {
-			DEBUG_WARNING("invalid vbr value %r\n", val);
+			warning("speex: invalid vbr value %r\n", val);
 		}
 
-		DEBUG_NOTICE("Setting VBR=%d VAD=%d\n", vbr, vad);
+		debug("speex: setting VBR=%d VAD=%d\n", vbr, vad);
 		ret = speex_encoder_ctl(st->enc, SPEEX_SET_VBR, &vbr);
 		if (ret) {
-			DEBUG_WARNING("SPEEX_SET_VBR: ret=%d\n", ret);
+			warning("speex: SPEEX_SET_VBR: ret=%d\n", ret);
 		}
 		ret = speex_encoder_ctl(st->enc, SPEEX_SET_VAD, &vad);
 		if (ret) {
-			DEBUG_WARNING("SPEEX_SET_VAD: ret=%d\n", ret);
+			warning("speex: SPEEX_SET_VAD: ret=%d\n", ret);
 		}
 	}
 	else if (0 == pl_strcasecmp(name, "cng")) {
@@ -182,11 +174,11 @@ static int decode_param(struct auenc_state *st, const struct pl *name,
 
 		ret = speex_encoder_ctl(st->enc, SPEEX_SET_DTX, &dtx);
 		if (ret) {
-			DEBUG_WARNING("SPEEX_SET_DTX: ret=%d\n", ret);
+			warning("speex: SPEEX_SET_DTX: ret=%d\n", ret);
 		}
 	}
 	else {
-		DEBUG_NOTICE("unknown Speex param: %r=%r\n", name, val);
+		debug("speex: unknown Speex param: %r=%r\n", name, val);
 	}
 
 	return 0;
@@ -248,7 +240,7 @@ static int encode_update(struct auenc_state **aesp, const struct aucodec *ac,
 	ret = speex_encoder_ctl(st->enc, SPEEX_GET_FRAME_SIZE,
 				&st->frame_size);
 	if (ret) {
-		DEBUG_WARNING("SPEEX_GET_FRAME_SIZE: %d\n", ret);
+		warning("speex: SPEEX_GET_FRAME_SIZE: %d\n", ret);
 	}
 
 	if (str_isset(fmtp)) {
@@ -298,7 +290,6 @@ static int decode_update(struct audec_state **adsp,
 	speex_bits_init(&st->bits);
 
 	if (2 == st->channels) {
-		DEBUG_NOTICE("decoder: Stereo enabled\n");
 
 		/* Stereo. */
 		st->stereo.balance = 1;
@@ -352,7 +343,7 @@ static int encode(struct auenc_state *st, uint8_t *buf,
 
 		ret = speex_encode_int(st->enc, (int16_t *)sampv, &st->bits);
 		if (1 != ret) {
-			DEBUG_WARNING("speex_encode_int: ret=%d\n", ret);
+			warning("speex: speex_encode_int: ret=%d\n", ret);
 		}
 
 		sampc -= n;
@@ -394,11 +385,11 @@ static int decode(struct audec_state *st, int16_t *sampv,
 			if (-1 == ret) {
 			}
 			else if (-2 == ret) {
-				DEBUG_WARNING("decode: corrupt stream\n");
+				warning("speex: decode: corrupt stream\n");
 			}
 			else {
-				DEBUG_WARNING("decode: speex_decode_int:"
-					      " ret=%d\n", ret);
+				warning("speex: decode: speex_decode_int:"
+					" ret=%d\n", ret);
 			}
 			break;
 		}

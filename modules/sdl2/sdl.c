@@ -1,5 +1,5 @@
 /**
- * @file sdl.c  Simple DirectMedia Layer module for SDL v2.0
+ * @file sdl2/sdl.c  Simple DirectMedia Layer module for SDL v2.0
  *
  * Copyright (C) 2010 Creytiv.com
  */
@@ -90,9 +90,9 @@ static int display(struct vidisp_st *st, const char *title,
 
 	if (!vidsz_cmp(&st->size, &frame->size)) {
 		if (st->size.w && st->size.h) {
-			re_printf("SDL reset: %u x %u ---> %u x %u\n",
-				  st->size.w, st->size.h,
-				  frame->size.w, frame->size.h);
+			info("sdl: reset size: %u x %u ---> %u x %u\n",
+			     st->size.w, st->size.h,
+			     frame->size.w, frame->size.h);
 		}
 		sdl_reset(st);
 	}
@@ -119,8 +119,8 @@ static int display(struct vidisp_st *st, const char *title,
 					      frame->size.w, frame->size.h,
 					      flags);
 		if (!st->window) {
-			re_fprintf(stderr, "unable to create sdl window: %s\n",
-				   SDL_GetError());
+			warning("sdl: unable to create sdl window: %s\n",
+				SDL_GetError());
 			return ENODEV;
 		}
 
@@ -140,8 +140,8 @@ static int display(struct vidisp_st *st, const char *title,
 
 		st->renderer = SDL_CreateRenderer(st->window, -1, flags);
 		if (!st->renderer) {
-			re_fprintf(stderr, "unable to create renderer: %s\n",
-				   SDL_GetError());
+			warning("sdl: unable to create renderer: %s\n",
+				SDL_GetError());
 			return ENOMEM;
 		}
 	}
@@ -153,15 +153,15 @@ static int display(struct vidisp_st *st, const char *title,
 						SDL_TEXTUREACCESS_STREAMING,
 						frame->size.w, frame->size.h);
 		if (!st->texture) {
-			re_fprintf(stderr, "unable to create texture: %s\n",
-				   SDL_GetError());
+			warning("sdl: unable to create texture: %s\n",
+				SDL_GetError());
 			return ENODEV;
 		}
 	}
 
 	ret = SDL_LockTexture(st->texture, NULL, &pixels, &pitch);
 	if (ret != 0) {
-		re_fprintf(stderr, "unable to lock texture (ret=%d)\n", ret);
+		warning("sdl: unable to lock texture (ret=%d)\n", ret);
 		return ENODEV;
 	}
 
@@ -207,8 +207,8 @@ static int module_init(void)
 	int err;
 
 	if (SDL_VideoInit(NULL) < 0) {
-		re_fprintf(stderr, "sdl2: unable to init Video: %s\n",
-			   SDL_GetError());
+		warning("sdl2: unable to init Video: %s\n",
+			SDL_GetError());
 		return ENODEV;
 	}
 

@@ -28,8 +28,8 @@ static int ww_init(void)
 	play_dev_count = waveOutGetNumDevs();
 	src_dev_count = waveInGetNumDevs();
 
-	re_printf("winwave: output devices: %d, input devices: %d\n",
-		  play_dev_count, src_dev_count);
+	info("winwave: output devices: %d, input devices: %d\n",
+	     play_dev_count, src_dev_count);
 
 	err  = ausrc_register(&ausrc, "winwave", winwave_src_alloc);
 	err |= auplay_register(&auplay, "winwave", winwave_play_alloc);

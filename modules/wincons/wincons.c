@@ -9,6 +9,7 @@
 #include <baresip.h>
 
 
+/** Local constants */
 enum {
 	RELEASE_VAL = 250  /**< Key release value in [ms] */
 };

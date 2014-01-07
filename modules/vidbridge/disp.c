@@ -80,8 +80,8 @@ int vidbridge_disp_display(struct vidisp_st *st, const char *title,
 	if (st->vidsrc)
 		vidbridge_src_input(st->vidsrc, frame);
 	else {
-		re_printf("vidbridge: display: dropping frame (%u x %u)\n",
-			  frame->size.w, frame->size.h);
+		debug("vidbridge: display: dropping frame (%u x %u)\n",
+		      frame->size.w, frame->size.h);
 	}
 
 	return err;

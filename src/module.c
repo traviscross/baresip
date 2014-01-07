@@ -82,13 +82,12 @@ static int load_module(struct mod **modp, const struct pl *modpath,
 	if (err)
 		goto out;
 
-	if (modp)
-		*modp = m;
-
  out:
 	if (err) {
 		DEBUG_WARNING("module %r: %m\n", name, err);
 	}
+	else if (modp)
+		*modp = m;
 
 	return err;
 }

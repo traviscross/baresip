@@ -1,5 +1,5 @@
 /**
- * @file ua.c  User-Agent
+ * @file src/ua.c  User-Agent
  *
  * Copyright (C) 2010 Creytiv.com
  */
@@ -102,9 +102,7 @@ void ua_printf(const struct ua *ua, const char *fmt, ...)
 		return;
 
 	va_start(ap, fmt);
-	(void)re_fprintf(stderr, "%r@%r: ",
-			 &ua->acc->luri.user, &ua->acc->luri.host);
-	(void)re_vfprintf(stderr, fmt, ap);
+	info("%r@%r: %v", &ua->acc->luri.user, &ua->acc->luri.host, fmt, &ap);
 	va_end(ap);
 }
 
@@ -200,6 +198,9 @@ int ua_register(struct ua *ua)
 bool ua_isregistered(const struct ua *ua)
 {
 	struct le *le;
+
+	if (!ua)
+		return false;
 
 	for (le = ua->regl.head; le; le = le->next) {
 
@@ -697,10 +698,8 @@ int ua_answer(struct ua *ua, struct call *call)
 
 	if (!call) {
 		call = ua_call(ua);
-		if (!call) {
-			DEBUG_NOTICE("answer: no incoming calls found\n");
+		if (!call)
 			return ENOENT;
-		}
 	}
 
 	/* todo: put previous call on-hold (if configured) */
@@ -893,7 +892,7 @@ static int add_transp_af(const struct sa *laddr)
 
 			if (str_isset(uag.cfg->cert)) {
 				cert = uag.cfg->cert;
-				(void)re_printf("SIP Certificate: %s\n", cert);
+				info("SIP Certificate: %s\n", cert);
 			}
 
 			err = tls_alloc(&uag.tls, TLS_METHOD_SSLV23,
@@ -963,7 +962,7 @@ static void sipsess_conn_handler(const struct sip_msg *msg, void *arg)
 	const struct sip_hdr *hdr;
 	struct ua *ua;
 	struct call *call = NULL;
-	char str[256];
+	char str[256], to_uri[256];
 	int err;
 
 	(void)arg;
@@ -978,8 +977,8 @@ static void sipsess_conn_handler(const struct sip_msg *msg, void *arg)
 
 	/* handle multiple calls */
 	if (list_count(&ua->calls) + 1 > MAX_CALLS) {
-		DEBUG_NOTICE("rejected call from %r (maximum %d calls)\n",
-			     &msg->from.auri, MAX_CALLS);
+		info("ua: rejected call from %r (maximum %d calls)\n",
+		     &msg->from.auri, MAX_CALLS);
 		(void)sip_treply(NULL, uag.sip, msg, 486, "Busy Here");
 		return;
 	}
@@ -988,7 +987,7 @@ static void sipsess_conn_handler(const struct sip_msg *msg, void *arg)
 	hdr = sip_msg_hdr_apply(msg, true, SIP_HDR_REQUIRE,
 				require_handler, ua);
 	if (hdr) {
-		DEBUG_NOTICE("call from %r rejected with 420"
+		info("ua: call from %r rejected with 420"
 			     " -- option-tag '%r' not supported\n",
 			     &msg->from.auri, &hdr->val);
 
@@ -1000,7 +999,9 @@ static void sipsess_conn_handler(const struct sip_msg *msg, void *arg)
 		return;
 	}
 
-	err = ua_call_alloc(&call, ua, VIDMODE_ON, msg, NULL, NULL);
+	(void)pl_strcpy(&msg->to.auri, to_uri, sizeof(to_uri));
+
+	err = ua_call_alloc(&call, ua, VIDMODE_ON, msg, NULL, to_uri);
 	if (err) {
 		DEBUG_WARNING("call_alloc: %m\n", err);
 		goto error;
@@ -1023,7 +1024,7 @@ static void net_change_handler(void *arg)
 {
 	(void)arg;
 
-	(void)re_printf("IP-address changed: %j\n", net_laddr_af(AF_INET));
+	info("IP-address changed: %j\n", net_laddr_af(AF_INET));
 
 	(void)uag_reset_transp(true, true);
 }
@@ -1159,9 +1160,8 @@ void ua_stop_all(bool forced)
 
 	if (!list_isempty(&uag.ual)) {
 		const uint32_t n = list_count(&uag.ual);
-		(void)re_fprintf(stderr, "Stopping %u useragent%s.. %s\n",
-				 n, n==1 ? "" : "s",
-				 forced ? "(Forced)" : "");
+		info("Stopping %u useragent%s.. %s\n",
+		     n, n==1 ? "" : "s", forced ? "(Forced)" : "");
 	}
 
 	if (forced)
@@ -1401,6 +1401,41 @@ struct ua *uag_find_aor(const char *aor)
 			continue;
 
 		return ua;
+	}
+
+	return NULL;
+}
+
+
+/**
+ * Find a User-Agent (UA) which has certain address parameter and/or value
+ *
+ * @param name  SIP Address parameter name
+ * @param value SIP Address parameter value (optional)
+ *
+ * @return User-Agent (UA) if found, otherwise NULL
+ */
+struct ua *uag_find_param(const char *name, const char *value)
+{
+	struct le *le;
+
+	for (le = uag.ual.head; le; le = le->next) {
+		struct ua *ua = le->data;
+		struct sip_addr *laddr = account_laddr(ua->acc);
+		struct pl val;
+
+		if (value) {
+
+			if (0 == sip_param_decode(&laddr->params, name, &val)
+			    &&
+			    0 == pl_strcasecmp(&val, value)) {
+				return ua;
+			}
+		}
+		else {
+			if (0 == sip_param_exists(&laddr->params, name, &val))
+				return ua;
+		}
 	}
 
 	return NULL;

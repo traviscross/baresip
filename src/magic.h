@@ -16,8 +16,8 @@
 #define MAGIC_INIT(s) (s)->magic = MAGIC
 #define MAGIC_CHECK(s) \
 	if (MAGIC != s->magic) {					\
-		DEBUG_WARNING("%s: wrong magic struct=%p (magic=0x%08x)\n", \
-			      __FUNCTION__, s, s->magic);		\
+		warning("%s: wrong magic struct=%p (magic=0x%08x)\n",	\
+			__FUNCTION__, s, s->magic);			\
 		BREAKPOINT;						\
 	}
 #else

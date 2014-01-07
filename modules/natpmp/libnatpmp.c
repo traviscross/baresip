@@ -5,6 +5,7 @@
  */
 #include <string.h>
 #include <re.h>
+#include <baresip.h>
 #include "libnatpmp.h"
 
 
@@ -71,7 +72,7 @@ static void timeout(void *arg)
 	tmr_start(&np->tmr, NATPMP_DELAY<<np->n, timeout, arg);
 
 #if 1
-	re_printf("natpmp: {n=%u} tx %u bytes\n", np->n, np->mb->end);
+	debug("natpmp: {n=%u} tx %u bytes\n", np->n, np->mb->end);
 #endif
 
 	np->n++;
@@ -109,7 +110,7 @@ static int resp_decode(struct natpmp_resp *resp, struct mbuf *mb)
 		break;
 
 	default:
-		re_printf("natmap: WARNING! unknown opcode %d\n", resp->op);
+		warning("natmap: unknown opcode %d\n", resp->op);
 		return EBADMSG;
 	}
 

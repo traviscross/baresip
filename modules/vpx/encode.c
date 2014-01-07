@@ -92,21 +92,28 @@ static int open_encoder(struct videnc_state *ves, const struct vidsz *size)
 	if (res)
 		return EPROTO;
 
+	cfg.g_profile = 2;
 	cfg.g_w = size->w;
 	cfg.g_h = size->h;
-	cfg.rc_target_bitrate = ves->bitrate;
+	cfg.g_timebase.num    = 1;
+	cfg.g_timebase.den    = ves->fps;
 	cfg.g_error_resilient = VPX_ERROR_RESILIENT_DEFAULT;
+	cfg.g_pass            = VPX_RC_ONE_PASS;
+	cfg.g_lag_in_frames   = 0;
+	cfg.rc_end_usage      = VPX_VBR;
+	cfg.rc_target_bitrate = ves->bitrate;
+	cfg.kf_mode           = VPX_KF_AUTO;
 
 	if (ves->ctxup) {
-		re_printf("vp8: re-opening encoder\n");
+		debug("vp8: re-opening encoder\n");
 		vpx_codec_destroy(&ves->ctx);
 		ves->ctxup = false;
 	}
 
-	res = vpx_codec_enc_init(&ves->ctx, &vpx_codec_vp8_cx_algo, &cfg, 0);
+	res = vpx_codec_enc_init(&ves->ctx, &vpx_codec_vp8_cx_algo, &cfg,
+				 VPX_CODEC_USE_OUTPUT_PARTITION);
 	if (res) {
-		re_fprintf(stderr, "vp8: enc init: %s\n",
-			   vpx_codec_err_to_string(res));
+		warning("vp8: enc init: %s\n", vpx_codec_err_to_string(res));
 		return EPROTO;
 	}
 
@@ -114,8 +121,12 @@ static int open_encoder(struct videnc_state *ves, const struct vidsz *size)
 
 	res = vpx_codec_control(&ves->ctx, VP8E_SET_CPUUSED, 16);
 	if (res) {
-		re_fprintf(stderr, "vp8: codec ctrl: %s\n",
-			   vpx_codec_err_to_string(res));
+		warning("vp8: codec ctrl: %s\n", vpx_codec_err_to_string(res));
+	}
+
+	res = vpx_codec_control(&ves->ctx, VP8E_SET_NOISE_SENSITIVITY, 0);
+	if (res) {
+		warning("vp8: codec ctrl: %s\n", vpx_codec_err_to_string(res));
 	}
 
 	return 0;
@@ -123,9 +134,9 @@ static int open_encoder(struct videnc_state *ves, const struct vidsz *size)
 
 
 static inline void hdr_encode(uint8_t hdr[HDR_SIZE], bool noref, bool start,
-			      uint16_t picid)
+			      uint8_t partid, uint16_t picid)
 {
-	hdr[0] = 1<<7 | noref<<5 | start<<4;
+	hdr[0] = 1<<7 | noref<<5 | start<<4 | (partid & 0x7);
 	hdr[1] = 1<<7;
 	hdr[2] = 1<<7 | (picid>>8 & 0x7f);
 	hdr[3] = picid & 0xff;
@@ -133,8 +144,8 @@ static inline void hdr_encode(uint8_t hdr[HDR_SIZE], bool noref, bool start,
 
 
 static inline int packetize(bool marker, const uint8_t *buf, size_t len,
-			    size_t maxlen, bool noref, uint16_t picid,
-			    videnc_packet_h *pkth, void *arg)
+			    size_t maxlen, bool noref, uint8_t partid,
+			    uint16_t picid, videnc_packet_h *pkth, void *arg)
 {
 	uint8_t hdr[HDR_SIZE];
 	bool start = true;
@@ -144,7 +155,7 @@ static inline int packetize(bool marker, const uint8_t *buf, size_t len,
 
 	while (len > maxlen) {
 
-		hdr_encode(hdr, noref, start, picid);
+		hdr_encode(hdr, noref, start, partid, picid);
 
 		err |= pkth(false, hdr, sizeof(hdr), buf, maxlen, arg);
 
@@ -153,7 +164,7 @@ static inline int packetize(bool marker, const uint8_t *buf, size_t len,
 		start = false;
 	}
 
-	hdr_encode(hdr, noref, start, picid);
+	hdr_encode(hdr, noref, start, partid, picid);
 
 	err |= pkth(marker, hdr, sizeof(hdr), buf, len, arg);
 
@@ -161,29 +172,10 @@ static inline int packetize(bool marker, const uint8_t *buf, size_t len,
 }
 
 
-static const vpx_codec_cx_pkt_t *get_cxdata(vpx_codec_ctx_t *ctx,
-					    vpx_codec_iter_t *iter)
-{
-	for (;;) {
-		const vpx_codec_cx_pkt_t *pkt;
-
-		pkt = vpx_codec_get_cx_data(ctx, iter);
-		if (!pkt)
-			return NULL;
-
-		if (pkt->kind == VPX_CODEC_CX_FRAME_PKT)
-			return pkt;
-	}
-
-	return NULL;
-}
-
-
 int vp8_encode(struct videnc_state *ves, bool update,
 		const struct vidframe *frame,
 		videnc_packet_h *pkth, void *arg)
 {
-	const vpx_codec_cx_pkt_t *pkt, *next_pkt;
 	vpx_enc_frame_flags_t flags = 0;
 	vpx_codec_iter_t iter = NULL;
 	vpx_codec_err_t res;
@@ -202,8 +194,10 @@ int vp8_encode(struct videnc_state *ves, bool update,
 		ves->size = frame->size;
 	}
 
-	if (update)
+	if (update) {
+		/* debug("vp8: picture update\n"); */
 		flags |= VPX_EFLAG_FORCE_KF;
+	}
 
 	memset(&img, 0, sizeof(img));
 
@@ -219,29 +213,37 @@ int vp8_encode(struct videnc_state *ves, bool update,
 	res = vpx_codec_encode(&ves->ctx, &img, ves->pts++, 1,
 			       flags, VPX_DL_REALTIME);
 	if (res) {
-		re_fprintf(stderr, "vp8: enc error: %s\n",
-			   vpx_codec_err_to_string(res));
+		warning("vp8: enc error: %s\n", vpx_codec_err_to_string(res));
 		return ENOMEM;
 	}
 
 	++ves->picid;
 
-	next_pkt = get_cxdata(&ves->ctx, &iter);
+	for (;;) {
+		bool keyframe = false, marker = true;
+		const vpx_codec_cx_pkt_t *pkt;
+		uint8_t partid = 0;
 
-	while (next_pkt) {
+		pkt = vpx_codec_get_cx_data(&ves->ctx, &iter);
+		if (!pkt)
+			break;
 
-		bool keyframe = false;
-
-		pkt      = next_pkt;
-		next_pkt = get_cxdata(&ves->ctx, &iter);
+		if (pkt->kind != VPX_CODEC_CX_FRAME_PKT)
+			continue;
 
 		if (pkt->data.frame.flags & VPX_FRAME_IS_KEY)
 			keyframe = true;
 
-		err = packetize(next_pkt == NULL,
+		if (pkt->data.frame.flags & VPX_FRAME_IS_FRAGMENT)
+			marker = false;
+
+		if (pkt->data.frame.partition_id >= 0)
+			partid = pkt->data.frame.partition_id;
+
+		err = packetize(marker,
 				pkt->data.frame.buf,
 				pkt->data.frame.sz,
-				ves->pktsize, !keyframe, ves->picid,
+				ves->pktsize, !keyframe, partid, ves->picid,
 				pkth, arg);
 		if (err)
 			return err;

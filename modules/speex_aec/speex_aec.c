@@ -11,11 +11,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "speex_aec"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 struct speex_st {
 	uint32_t nsamp;
 	int16_t *out;
@@ -99,10 +94,10 @@ static int aec_alloc(struct speex_st **stp, void **ctx, struct aufilt_prm *prm)
 	tmp = prm->srate;
 	err = speex_echo_ctl(st->state, SPEEX_ECHO_SET_SAMPLING_RATE, &tmp);
 	if (err < 0) {
-		DEBUG_WARNING("speex_echo_ctl: err=%d\n", err);
+		warning("speex_aec: speex_echo_ctl: err=%d\n", err);
 	}
 
-	DEBUG_NOTICE("Speex AEC loaded: enc=%uHz\n", prm->srate);
+	info("speex_aec: Speex AEC loaded: srate = %uHz\n", prm->srate);
 
  out:
 	if (err)

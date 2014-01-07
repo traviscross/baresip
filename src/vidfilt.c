@@ -23,7 +23,7 @@ void vidfilt_register(struct vidfilt *vf)
 
 	list_append(&vfl, &vf->le, vf);
 
-	(void)re_printf("vidfilt: %s\n", vf->name);
+	info("vidfilt: %s\n", vf->name);
 }
 
 

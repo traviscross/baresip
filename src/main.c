@@ -31,7 +31,7 @@ static void signal_handler(int sig)
 
 	term = true;
 
-	re_fprintf(stderr, "terminated by signal %d\n", sig);
+	info("terminated by signal %d\n", sig);
 
 	ua_stop_all(false);
 }
@@ -44,15 +44,15 @@ int main(int argc, char *argv[])
 	int err;
 
 	(void)re_fprintf(stderr, "baresip v%s"
-			 " Copyright (C) 2010 - 2013"
-			 " Alfred E. Heggestad <aeh@db.org>\n",
+			 " Copyright (C) 2010 - 2014"
+			 " Alfred E. Heggestad et al.\n",
 			 BARESIP_VERSION);
 
 	(void)sys_coredump_set(true);
 
 #ifdef HAVE_GETOPT
 	for (;;) {
-		const int c = getopt(argc, argv, "6de:f:h");
+		const int c = getopt(argc, argv, "6de:f:hv");
 		if (0 > c)
 			break;
 
@@ -69,7 +69,9 @@ int main(int argc, char *argv[])
 					 "\t-d               Daemon\n"
 					 "\t-e <commands>    Exec commands\n"
 					 "\t-f <path>        Config path\n"
-					 "\t-h -?            Help\n");
+					 "\t-h -?            Help\n"
+					 "\t-v               Verbose debug\n"
+					 );
 			return -2;
 
 #if HAVE_INET6
@@ -88,6 +90,10 @@ int main(int argc, char *argv[])
 
 		case 'f':
 			conf_path_set(optarg);
+			break;
+
+		case 'v':
+			log_enable_debug(true);
 			break;
 
 		default:
@@ -124,9 +130,11 @@ int main(int argc, char *argv[])
 		err = sys_daemon();
 		if (err)
 			goto out;
+
+		log_enable_stderr(false);
 	}
 
-	re_printf("baresip is ready.\n");
+	info("baresip is ready.\n");
 
 	if (exec)
 		ui_input_str(exec);

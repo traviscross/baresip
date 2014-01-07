@@ -31,6 +31,10 @@ struct play {
 };
 
 
+#ifndef PREFIX
+#define PREFIX "/usr"
+#endif
+static char play_path[256] = PREFIX "/share/baresip";
 static struct list playl;
 
 
@@ -266,7 +270,7 @@ int play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
 int play_file(struct play **playp, const char *filename, int repeat)
 {
 	struct mbuf *mb;
-	char path[256];
+	char path[512];
 	uint32_t srate;
 	uint8_t ch;
 	int err;
@@ -274,11 +278,8 @@ int play_file(struct play **playp, const char *filename, int repeat)
 	if (playp && *playp)
 		return EALREADY;
 
-#ifndef PREFIX
-#define PREFIX "/usr"
-#endif
-	if (re_snprintf(path, sizeof(path), PREFIX "/share/baresip/%s",
-			filename) < 0)
+	if (re_snprintf(path, sizeof(path), "%s/%s",
+			play_path, filename) < 0)
 		return ENOMEM;
 
 	mb = mbuf_alloc(1024);
@@ -312,4 +313,10 @@ void play_init(void)
 void play_close(void)
 {
 	list_flush(&playl);
+}
+
+
+void play_set_path(const char *path)
+{
+	str_ncpy(play_path, path, sizeof(play_path));
 }

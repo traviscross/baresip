@@ -81,7 +81,7 @@ static void *video_thread(void *arg)
 }
 
 
-static void background(cairo_t *cr, int width, int height)
+static void background(cairo_t *cr, unsigned width, unsigned height)
 {
 	cairo_pattern_t *pat;
 	double r, g, b;

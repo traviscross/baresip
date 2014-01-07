@@ -11,11 +11,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "vidloop"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /** Video Statistics */
 struct vstat {
 	uint64_t tsamp;
@@ -94,7 +89,7 @@ static int packet_handler(bool marker, const uint8_t *hdr, size_t hdr_len,
 	if (vl->dec) {
 		err = vl->vc->dech(vl->dec, &frame, marker, vl->seq++, mb);
 		if (err) {
-			DEBUG_WARNING("codec_decode: %m\n", err);
+			warning("vidloop: codec decode: %m\n", err);
 			goto out;
 		}
 	}
@@ -180,14 +175,14 @@ static int enable_codec(struct video_loop *vl)
 
 	err = vl->vc->encupdh(&vl->enc, vl->vc, &prm, NULL);
 	if (err) {
-		DEBUG_WARNING("update encoder: %m\n", err);
+		warning("vidloop: update encoder failed: %m\n", err);
 		return err;
 	}
 
 	if (vl->vc->decupdh) {
 		err = vl->vc->decupdh(&vl->dec, vl->vc, NULL);
 		if (err) {
-			DEBUG_WARNING("update decoder: %m\n", err);
+			warning("vidloop: update decoder failed: %m\n", err);
 			return err;
 		}
 	}
@@ -246,9 +241,9 @@ static int vsrc_reopen(struct video_loop *vl, const struct vidsz *sz)
 	struct vidsrc_prm prm;
 	int err;
 
-	(void)re_printf("%s,%s: open video source: %u x %u\n",
-			vl->cfg.src_mod, vl->cfg.src_dev,
-			sz->w, sz->h);
+	info("vidloop: %s,%s: open video source: %u x %u\n",
+	     vl->cfg.src_mod, vl->cfg.src_dev,
+	     sz->w, sz->h);
 
 	prm.orient = VIDORIENT_PORTRAIT;
 	prm.fps    = vl->cfg.fps;
@@ -258,8 +253,7 @@ static int vsrc_reopen(struct video_loop *vl, const struct vidsz *sz)
 			   NULL, vl->cfg.src_dev, vidsrc_frame_handler,
 			   NULL, vl);
 	if (err) {
-		DEBUG_WARNING("vidsrc %s failed: %m\n",
-			      vl->cfg.src_dev, err);
+		warning("x11: vidsrc %s failed: %m\n", vl->cfg.src_dev, err);
 	}
 
 	return err;
@@ -289,12 +283,12 @@ static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 		struct vidfilt *vf = le->data;
 		void *ctx = NULL;
 
-		re_printf("vidloop: added video-filter `%s'\n", vf->name);
+		info("vidloop: added video-filter `%s'\n", vf->name);
 
 		err |= vidfilt_enc_append(&vl->filtencl, &ctx, vf);
 		err |= vidfilt_dec_append(&vl->filtdecl, &ctx, vf);
 		if (err) {
-			DEBUG_WARNING("vidfilt error: %m\n", err);
+			warning("vidloop: vidfilt error: %m\n", err);
 		}
 	}
 
@@ -304,7 +298,7 @@ static int video_loop_alloc(struct video_loop **vlp, const struct vidsz *size)
 
 	err = vidisp_alloc(&vl->vidisp, NULL, NULL, NULL, NULL, vl);
 	if (err) {
-		DEBUG_WARNING("video display failed: %m\n", err);
+		warning("vidloop: video display failed: %m\n", err);
 		goto out;
 	}
 
@@ -351,7 +345,7 @@ static int vidloop_start(struct re_printf *pf, void *arg)
 
 		err = video_loop_alloc(&gvl, &size);
 		if (err) {
-			DEBUG_WARNING("vidloop alloc: %m\n", err);
+			warning("vidloop: alloc: %m\n", err);
 		}
 	}
 

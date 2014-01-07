@@ -1,5 +1,5 @@
 /**
- * @file cmd.c  Command Interface
+ * @file src/cmd.c  Command Interface
  *
  * Copyright (C) 2010 Creytiv.com
  */

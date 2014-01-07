@@ -11,11 +11,7 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "stdio"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
+/** Local constants */
 enum {
 	RELEASE_VAL = 250  /**< Key release value in [ms] */
 };
@@ -83,11 +79,7 @@ static void ui_fd_handler(int flags, void *arg)
 {
 	struct ui_st *st = arg;
 	char key;
-
-	if (FD_READ != flags) {
-		DEBUG_WARNING("fd_handler: unexpected flags=0x%02x\n", flags);
-		return;
-	}
+	(void)flags;
 
 	if (1 != read(STDIN_FILENO, &key, 1)) {
 		return;
@@ -152,7 +144,7 @@ static int ui_alloc(struct ui_st **stp, struct ui_prm *prm,
 
 	err = term_setup(st);
 	if (err) {
-		DEBUG_NOTICE("could not setup terminal: %m\n", err);
+		info("stdio: could not setup terminal: %m\n", err);
 		err = 0;
 	}
 

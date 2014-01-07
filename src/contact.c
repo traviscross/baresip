@@ -52,7 +52,7 @@ int contact_add(struct contact **contactp, const struct pl *addr)
 
 	err = sip_addr_decode(&c->addr, &pl);
 	if (err) {
-		(void)re_fprintf(stderr, "contact: decode error '%r'\n", addr);
+		warning("contact: decode error '%r'\n", addr);
 		goto out;
 	}
 
@@ -114,10 +114,9 @@ void contact_set_presence(struct contact *c, enum presence_status status)
 
 	if (c->status != PRESENCE_UNKNOWN && c->status != status) {
 
-		(void)re_printf("<%r> changed status from %s to %s\n",
-				&c->addr.auri,
-				contact_presence_str(c->status),
-				contact_presence_str(status));
+		info("<%r> changed status from %s to %s\n", &c->addr.auri,
+		     contact_presence_str(c->status),
+		     contact_presence_str(status));
 	}
 
 	c->status = status;

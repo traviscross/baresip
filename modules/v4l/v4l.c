@@ -19,11 +19,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "v4l"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 struct vidsrc_st {
 	struct vidsrc *vs;  /* inheritance */
 
@@ -45,16 +40,16 @@ static void v4l_get_caps(struct vidsrc_st *st)
 	struct video_capability caps;
 
 	if (-1 == ioctl(st->fd, VIDIOCGCAP, &caps)) {
-		DEBUG_WARNING("VIDIOCGCAP: %m\n", errno);
+		warning("v4l: VIDIOCGCAP: %m\n", errno);
 		return;
 	}
 
-	re_printf("video: \"%s\" (%ux%u) - (%ux%u)\n", caps.name,
-		  caps.minwidth, caps.minheight,
-		  caps.maxwidth, caps.maxheight);
+	info("v4l: video: \"%s\" (%ux%u) - (%ux%u)\n", caps.name,
+	     caps.minwidth, caps.minheight,
+	     caps.maxwidth, caps.maxheight);
 
 	if (VID_TYPE_CAPTURE != caps.type) {
-		DEBUG_WARNING("not a capture device (%d)\n", caps.type);
+		warning("v4l: not a capture device (%d)\n", caps.type);
 	}
 }
 
@@ -64,13 +59,13 @@ static int v4l_check_palette(struct vidsrc_st *st)
 	struct video_picture pic;
 
 	if (-1 == ioctl(st->fd, VIDIOCGPICT, &pic)) {
-		DEBUG_WARNING("VIDIOCGPICT: %m\n", errno);
+		warning("v4l: VIDIOCGPICT: %m\n", errno);
 		return errno;
 	}
 
 	if (VIDEO_PALETTE_RGB24 != pic.palette) {
-		DEBUG_WARNING("unsupported palette %d (only RGB24 supp.)\n",
-			      pic.palette);
+		warning("v4l: unsupported palette %d (only RGB24 supp.)\n",
+			pic.palette);
 		return ENODEV;
 	}
 
@@ -83,18 +78,18 @@ static int v4l_get_win(int fd, int width, int height)
 	struct video_window win;
 
 	if (-1 == ioctl(fd, VIDIOCGWIN, &win)) {
-		DEBUG_WARNING("VIDIOCGWIN: %m\n", errno);
+		warning("v4l: VIDIOCGWIN: %m\n", errno);
 		return errno;
 	}
 
-	re_printf("video window: x,y=%u,%u (%u x %u)\n",
-		  win.x, win.y, win.width, win.height);
+	info("v4l: video window: x,y=%u,%u (%u x %u)\n",
+	     win.x, win.y, win.width, win.height);
 
 	win.width = width;
 	win.height = height;
 
 	if (-1 == ioctl(fd, VIDIOCSWIN, &win)) {
-		DEBUG_WARNING("VIDIOCSWIN: %m\n", errno);
+		warning("v4l: VIDIOCSWIN: %m\n", errno);
 		return errno;
 	}
 
@@ -121,8 +116,8 @@ static void *read_thread(void *arg)
 
 		n = read(st->fd, st->mb->buf, st->mb->size);
 		if ((ssize_t)st->mb->size != n) {
-			DEBUG_WARNING("video read: %d -> %d bytes\n",
-				      st->mb->size, n);
+			warning("v4l: video read: %d -> %d bytes\n",
+				st->mb->size, n);
 			continue;
 		}
 
@@ -140,7 +135,7 @@ static int vd_open(struct vidsrc_st *v4l, const char *device)
 	 */
 	v4l->fd = open(device, O_RDWR);
 	if (v4l->fd < 0) {
-		DEBUG_WARNING("open %s: %m\n", device, errno);
+		warning("v4l: open %s: %m\n", device, errno);
 		return errno;
 	}
 
@@ -201,7 +196,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	st->frameh = frameh;
 	st->arg    = arg;
 
-	DEBUG_NOTICE("open: %s %ix%i\n", dev, size->w, size->h);
+	info("v4l: open: %s (%u x %u)\n", dev, size->w, size->h);
 
 	err = vd_open(st, dev);
 	if (err)

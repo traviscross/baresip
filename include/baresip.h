@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.8"
+#define BARESIP_VERSION "0.4.9"
 
 
 /* forward declarations */
@@ -39,6 +39,7 @@ int account_auth(const struct account *acc, char **username, char **password,
 		 const char *realm);
 struct list *account_aucodecl(const struct account *acc);
 struct list *account_vidcodecl(const struct account *acc);
+struct sip_addr *account_laddr(const struct account *acc);
 
 
 /*
@@ -353,6 +354,37 @@ struct list *aufilt_list(void);
 
 
 /*
+ * Log
+ */
+
+enum log_level {
+	DEBUG = 0,
+	INFO,
+	WARN,
+#undef ERROR
+	ERROR,
+};
+
+typedef void (log_h)(uint32_t level, const char *msg);
+
+struct log {
+	struct le le;
+	log_h *h;
+};
+
+void log_register_handler(struct log *log);
+void log_unregister_handler(struct log *log);
+void log_enable_debug(bool enable);
+void log_enable_stderr(bool enable);
+void vlog(enum log_level level, const char *fmt, va_list ap);
+void loglv(enum log_level level, const char *fmt, ...);
+void debug(const char *fmt, ...);
+void info(const char *fmt, ...);
+void warning(const char *fmt, ...);
+void error(const char *fmt, ...);
+
+
+/*
  * Menc - Media encryption (for RTP)
  */
 
@@ -413,6 +445,7 @@ int  play_tone(struct play **playp, struct mbuf *tone,
 	       uint32_t srate, uint8_t ch, int repeat);
 void play_init(void);
 void play_close(void);
+void play_set_path(const char *path);
 
 
 /*
@@ -483,6 +516,7 @@ void uag_event_unregister(ua_event_h *eh);
 int  ua_print_sip_status(struct re_printf *pf, void *unused);
 struct ua   *uag_find(const struct pl *cuser);
 struct ua   *uag_find_aor(const char *aor);
+struct ua   *uag_find_param(const char *name, const char *val);
 struct sip  *uag_sip(void);
 const char  *uag_event_str(enum ua_event ev);
 struct list *uag_list(void);

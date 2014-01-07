@@ -14,24 +14,25 @@
 #include <re_dbg.h>
 
 
-/*
- * Latest supported version: CELT 0.11.1
+/**
+ * @defgroup celt celt
  *
- *    http://www.celt-codec.org/downloads/
+ * CELT audio codec
  *
+ * @deprecated Replaced by the @ref opus module
  *
- * References:
+ * NOTE:
  *
- *    http://tools.ietf.org/html/draft-valin-celt-rtp-profile-02
- *    http://tools.ietf.org/html/draft-valin-celt-codec-01
- *
+ * The CELT codec has been merged into the IETF Opus codec and is now obsolete
  */
+
 
 #ifdef CELT_GET_FRAME_SIZE
 #define CELT_OLD_API 1
 #endif
 
 
+/** Celt constants */
 enum {
 	DEFAULT_FRAME_SIZE = 640,   /**< Framesize in [samples]    */
 	DEFAULT_BITRATE    = 64000, /**< 32-128 kbps               */

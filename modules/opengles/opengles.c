@@ -79,8 +79,7 @@ static void texture_render(struct vidisp_st *st)
 static void setup_layout(struct vidisp_st *st, const struct vidsz *screensz,
 			 struct vidrect *ortho, struct vidrect *vp)
 {
-	struct vidpt origin;
-	int w, h, i = 0;
+	int x, y, w, h, i = 0;
 
 	w = st->vf->size.w;
 	h = st->vf->size.h;
@@ -98,24 +97,24 @@ static void setup_layout(struct vidisp_st *st, const struct vidsz *screensz,
 	st->vertices[i++] = h;
 	st->vertices[i++] = 0;
 
-	origin.x = (screensz->w - w) / 2;
-	origin.y = (screensz->h - h) / 2;
+	x = (screensz->w - w) / 2;
+	y = (screensz->h - h) / 2;
 
-	if (origin.x < 0) {
+	if (x < 0) {
 		vp->x    = 0;
-		ortho->x = -origin.x;
+		ortho->x = -x;
 	}
 	else {
-		vp->x    = origin.x;
+		vp->x    = x;
 		ortho->x = 0;
 	}
 
-	if (origin.y < 0) {
+	if (y < 0) {
 		vp->y    = 0;
-		ortho->y = -origin.y;
+		ortho->y = -y;
 	}
 	else {
-		vp->y    = origin.y;
+		vp->y    = y;
 		ortho->y = 0;
 	}
 
@@ -146,10 +145,10 @@ void opengles_render(struct vidisp_st *st)
 
 		glGetRenderbufferParameterivOES(GL_RENDERBUFFER_OES,
 						GL_RENDERBUFFER_WIDTH_OES,
-						&bufsz.w);
+						(GLint *)&bufsz.w);
 		glGetRenderbufferParameterivOES(GL_RENDERBUFFER_OES,
 						GL_RENDERBUFFER_HEIGHT_OES,
-						&bufsz.h);
+						(GLint *)&bufsz.h);
 
 		glBindFramebufferOES(GL_FRAMEBUFFER_OES, st->framebuffer);
 		glFramebufferRenderbufferOES(GL_FRAMEBUFFER_OES,

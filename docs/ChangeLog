@@ -1,3 +1,41 @@
+2014-01-06 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.9
+
+	* new modules:
+	  - zrtp  Media Path Key Agreement for Unicast Secure RTP
+
+	* build:
+	  - added support for LLVM clang compiler
+
+	* baresip:
+	  - account: add account_laddr()
+	  - audio: upgrade to new librem auresamp API
+	  - config: use oss,/dev/dsp as default device for FreeBSD
+	  - log: added new logging framework
+	  - main: added new verbose debug argument (-v)
+	  - net: added sanity check for HAVE_INET6 build flag
+	  - play: added play_set_path() -- thanks to Dimitris P.
+	  - ua: added uag_find_param()
+	  - ua: fix param-bug in ua_connect() -- thanks to Juha Heinanen
+
+	* aubridge: upgrade to new librem auresamp API
+
+	* avcodec: use new av_frame_alloc() api
+
+	* celt: deprecate CELT-module, use OPUS instead
+
+	* opengles: fix warnings (thanks to Dimitris P.)
+
+	* opensles: fix bugs in player and recorder
+
+	* opus: encode/decode sdp parameters as of I-D
+
+	* speex_resamp: module removed, replaced by librem's resampler
+
+	* zrtp: new module for ZRTP media encryption (use ;mediaenc=zrtp)
+
+
 2013-12-06 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.4.8

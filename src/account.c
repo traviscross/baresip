@@ -89,7 +89,7 @@ static int stunsrv_decode(struct account *acc, const struct sip_addr *aor)
 
 	if (0 == sip_param_decode(&aor->params, "stunserver", &srv)) {
 
-		DEBUG_NOTICE("got stunserver: '%r'\n", &srv);
+		info("using stunserver: '%r'\n", &srv);
 
 		err = uri_decode(&uri, &srv);
 		if (err) {
@@ -485,6 +485,12 @@ struct list *account_vidcodecl(const struct account *acc)
 		? (struct list *)&acc->vidcodecl : vidcodec_list();
 }
 #endif
+
+
+struct sip_addr *account_laddr(const struct account *acc)
+{
+	return acc ? (struct sip_addr *)&acc->laddr : NULL;
+}
 
 
 static const char *answermode_str(enum answermode mode)

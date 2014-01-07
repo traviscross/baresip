@@ -9,11 +9,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "auloop"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /* Configurable items */
 #define PTIME 20
 
@@ -114,7 +109,7 @@ static void read_handler(const uint8_t *buf, size_t sz, void *arg)
 
 	err = aubuf_write(al->ab, buf, sz);
 	if (err) {
-		DEBUG_WARNING("aubuf_write: %m\n", err);
+		warning("auloop: aubuf_write: %m\n", err);
 	}
 
 	print_stats(al);
@@ -142,7 +137,7 @@ static bool write_handler(uint8_t *buf, size_t sz, void *arg)
 static void error_handler(int err, const char *str, void *arg)
 {
 	(void)arg;
-	DEBUG_WARNING("error: %m (%s)\n", err, str);
+	warning("auloop: ausrc error: %m (%s)\n", err, str);
 	gal = mem_deref(gal);
 }
 
@@ -156,21 +151,21 @@ static void start_codec(struct audio_loop *al, const char *name)
 			      configv[al->index].srate,
 			      configv[al->index].ch);
 	if (!al->ac) {
-		DEBUG_WARNING("could not find codec: %s\n", name);
+		warning("auloop: could not find codec: %s\n", name);
 		return;
 	}
 
 	if (al->ac->encupdh) {
 		err = al->ac->encupdh(&al->enc, al->ac, &prm, NULL);
 		if (err) {
-			DEBUG_WARNING("encoder update failed: %m\n", err);
+			warning("auloop: encoder update failed: %m\n", err);
 		}
 	}
 
 	if (al->ac->decupdh) {
 		err = al->ac->decupdh(&al->dec, al->ac, NULL);
 		if (err) {
-			DEBUG_WARNING("decoder update failed: %m\n", err);
+			warning("auloop: decoder update failed: %m\n", err);
 		}
 	}
 }
@@ -198,7 +193,7 @@ static int auloop_reset(struct audio_loop *al)
 	al->ch    = configv[al->index].ch;
 	al->fs    = al->srate * al->ch * PTIME / 1000;
 
-	(void)re_printf("Audio-loop: %uHz, %dch\n", al->srate, al->ch);
+	info("Audio-loop: %uHz, %dch\n", al->srate, al->ch);
 
 	err = aubuf_alloc(&al->ab, 320, 0);
 	if (err)
@@ -211,9 +206,9 @@ static int auloop_reset(struct audio_loop *al)
 	err = auplay_alloc(&al->auplay, cfg->audio.play_mod, &auplay_prm,
 			   cfg->audio.play_dev, write_handler, al);
 	if (err) {
-		DEBUG_WARNING("auplay %s,%s failed: %m\n",
-			      cfg->audio.play_mod, cfg->audio.play_dev,
-			      err);
+		warning("auloop: auplay %s,%s failed: %m\n",
+			cfg->audio.play_mod, cfg->audio.play_dev,
+			err);
 		return err;
 	}
 
@@ -225,8 +220,8 @@ static int auloop_reset(struct audio_loop *al)
 			  &ausrc_prm, cfg->audio.src_dev,
 			  read_handler, error_handler, al);
 	if (err) {
-		DEBUG_WARNING("ausrc %s,%s failed: %m\n", cfg->audio.src_mod,
-			      cfg->audio.src_dev, err);
+		warning("auloop: ausrc %s,%s failed: %m\n", cfg->audio.src_mod,
+			cfg->audio.src_dev, err);
 		return err;
 	}
 
@@ -265,7 +260,7 @@ static int audio_loop_cycle(struct audio_loop *al)
 
 	if (al->index >= ARRAY_SIZE(configv)) {
 		gal = mem_deref(gal);
-		(void)re_printf("\nAudio-loop stopped\n");
+		info("\nAudio-loop stopped\n");
 		return 0;
 	}
 
@@ -273,8 +268,7 @@ static int audio_loop_cycle(struct audio_loop *al)
 	if (err)
 		return err;
 
-	(void)re_printf("\nAudio-loop started: %uHz, %dch\n",
-			al->srate, al->ch);
+	info("\nAudio-loop started: %uHz, %dch\n", al->srate, al->ch);
 
 	return 0;
 }
@@ -293,13 +287,13 @@ static int auloop_start(struct re_printf *pf, void *arg)
 	if (gal) {
 		err = audio_loop_cycle(gal);
 		if (err) {
-			DEBUG_WARNING("cycle: %m\n", err);
+			warning("auloop: loop cycle: %m\n", err);
 		}
 	}
 	else {
 		err = audio_loop_alloc(&gal);
 		if (err) {
-			DEBUG_WARNING("auloop: %m\n", err);
+			warning("auloop: alloc failed %m\n", err);
 		}
 	}
 

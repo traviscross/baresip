@@ -22,7 +22,7 @@ int audio_fmt(enum aufmt fmt)
 	case AUFMT_PCMA:  return kAudioFormatALaw;
 	case AUFMT_PCMU:  return kAudioFormatULaw;
 	default:
-		re_fprintf(stderr, "coreaudio: unknown format %d\n", fmt);
+		warning("coreaudio: unknown format %d\n", fmt);
 		return -1;
 	}
 }
@@ -48,10 +48,10 @@ static void interruptionListener(void *data, UInt32 inInterruptionState)
 	/* TODO: implement this properly */
 
 	if (inInterruptionState == kAudioSessionBeginInterruption) {
-		re_printf("coreaudio player interrupt: Begin\n");
+		debug("coreaudio: player interrupt: Begin\n");
 	}
 	else if (inInterruptionState == kAudioSessionEndInterruption) {
-		re_printf("coreaudio player interrupt: End\n");
+		debug("coreaudio: player interrupt: End\n");
 	}
 }
 
@@ -69,13 +69,13 @@ int audio_session_enable(void)
 	res = AudioSessionSetProperty(kAudioSessionProperty_AudioCategory,
 				      sizeof(category), &category);
 	if (res) {
-		re_fprintf(stderr, "Audio Category: %d\n", res);
+		warning("coreaudio: Audio Category: %d\n", res);
 		return ENODEV;
 	}
 
 	res = AudioSessionSetActive(true);
 	if (res) {
-		re_fprintf(stderr, "AudioSessionSetActive: %d\n", res);
+		warning("coreaudio: AudioSessionSetActive: %d\n", res);
 		return ENODEV;
 	}
 

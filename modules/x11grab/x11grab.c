@@ -16,11 +16,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "x11grab"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /*
  * XXX: add option to select a specific X window and x,y offset
  */
@@ -45,26 +40,19 @@ static struct vidsrc *vidsrc;
 
 static int x11grab_open(struct vidsrc_st *st, const struct vidsz *sz)
 {
-	int screen_num, screen_width, screen_height;
 	int x = 0, y = 0;
 
 	st->disp = XOpenDisplay(NULL);
 	if (!st->disp) {
-		DEBUG_WARNING("error opening display\n");
+		warning("x11grab: error opening display\n");
 		return ENODEV;
 	}
-
-	screen_num = DefaultScreen(st->disp);
-	screen_width = DisplayWidth(st->disp, screen_num);
-	screen_height = DisplayHeight(st->disp, screen_num);
-
-	DEBUG_NOTICE("screen size: %d x %d\n", screen_width, screen_height);
 
 	st->image = XGetImage(st->disp,
 			      RootWindow(st->disp, DefaultScreen(st->disp)),
 			      x, y, sz->w, sz->h, AllPlanes, ZPixmap);
 	if (!st->image) {
-		DEBUG_WARNING("error creating Ximage\n");
+		warning("x11grab: error creating Ximage\n");
 		return ENODEV;
 	}
 
@@ -81,8 +69,8 @@ static int x11grab_open(struct vidsrc_st *st, const struct vidsz *sz)
 		break;
 
 	default:
-		DEBUG_WARNING("not supported: bpp=%d\n",
-			      st->image->bits_per_pixel);
+		warning("x11grab: not supported: bpp=%d\n",
+			st->image->bits_per_pixel);
 		return ENOSYS;
 	}
 

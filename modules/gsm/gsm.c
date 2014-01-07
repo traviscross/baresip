@@ -8,11 +8,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "gsm"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 enum {
 	FRAME_SIZE = 160
 };
@@ -137,10 +132,8 @@ static int decode(struct audec_state *st, int16_t *sampv, size_t *sampc,
 		return EBADMSG;
 
 	ret = gsm_decode(st->dec, (gsm_byte *)buf, (gsm_signal *)sampv);
-	if (ret) {
-		DEBUG_WARNING("decode: gsm_decode() failed (ret=%d)\n", ret);
+	if (ret)
 		return EPROTO;
-	}
 
 	*sampc = 160;
 
@@ -156,7 +149,7 @@ static struct aucodec ac_gsm = {
 
 static int module_init(void)
 {
-	DEBUG_INFO("GSM v%u.%u.%u\n", GSM_MAJOR, GSM_MINOR, GSM_PATCHLEVEL);
+	debug("gsm: GSM v%u.%u.%u\n", GSM_MAJOR, GSM_MINOR, GSM_PATCHLEVEL);
 
 	aucodec_register(&ac_gsm);
 	return 0;

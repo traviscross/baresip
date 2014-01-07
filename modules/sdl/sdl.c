@@ -1,5 +1,5 @@
 /**
- * @file sdl-1.2.c  SDL - Simple DirectMedia Layer v1.2
+ * @file sdl/sdl.c  SDL - Simple DirectMedia Layer v1.2
  *
  * Copyright (C) 2010 Creytiv.com
  */
@@ -11,6 +11,7 @@
 #include "sdl.h"
 
 
+/** Local constants */
 enum {
 	KEY_RELEASE_VAL = 250  /**< Key release value in [ms] */
 };
@@ -144,7 +145,7 @@ static int sdl_open(void)
 		return 0;
 
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-		re_fprintf(stderr, "unable to init SDL: %s\n", SDL_GetError());
+		warning("sdl: unable to init SDL: %s\n", SDL_GetError());
 		return ENODEV;
 	}
 
@@ -225,9 +226,9 @@ static int display(struct vidisp_st *st, const char *title,
 
 	if (!vidsz_cmp(&sdl.size, &frame->size)) {
 		if (sdl.size.w && sdl.size.h) {
-			re_printf("SDL reset: %u x %u  --->  %u x %u\n",
-				  sdl.size.w, sdl.size.h,
-				  frame->size.w, frame->size.h);
+			info("sdl: reset size %u x %u  --->  %u x %u\n",
+			     sdl.size.w, sdl.size.h,
+			     frame->size.w, frame->size.h);
 		}
 		sdl_reset();
 	}
@@ -255,8 +256,8 @@ static int display(struct vidisp_st *st, const char *title,
 		sdl.screen = SDL_SetVideoMode(frame->size.w, frame->size.h,
 					      0, flags);
 		if (!sdl.screen) {
-			re_fprintf(stderr, "unable to get video screen: %s\n",
-				   SDL_GetError());
+			warning("sdl: unable to get video screen: %s\n",
+				SDL_GetError());
 			return ENODEV;
 		}
 
@@ -267,8 +268,8 @@ static int display(struct vidisp_st *st, const char *title,
 		sdl.bmp = SDL_CreateYUVOverlay(frame->size.w, frame->size.h,
 					       SDL_YV12_OVERLAY, sdl.screen);
 		if (!sdl.bmp) {
-			re_fprintf(stderr, "unable to create overlay: %s\n",
-				   SDL_GetError());
+			warning("sdl: unable to create overlay: %s\n",
+				SDL_GetError());
 			return ENODEV;
 		}
 	}

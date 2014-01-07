@@ -175,8 +175,8 @@ int audiounit_player_alloc(struct auplay_st **stp, struct auplay *ap,
 
  out:
 	if (ret) {
-		re_printf("audiounit player failed: %d (%c%c%c%c)\n", ret,
-			  ret>>24, ret>>16, ret>>8, ret);
+		warning("audiounit: player failed: %d (%c%c%c%c)\n", ret,
+			ret>>24, ret>>16, ret>>8, ret);
 		err = ENODEV;
 	}
 

@@ -86,7 +86,7 @@ static int module_init(void)
 	if (err)
 		return err;
 
-	re_printf("httpd: listening on %J\n", &laddr);
+	info("httpd: listening on %J\n", &laddr);
 
 	return 0;
 }

@@ -64,8 +64,7 @@ int realtime_enable(bool enable, int fps)
 			return ENOSYS;
 		}
 
-		re_fprintf(stderr, "realtime: fps=%d bus_speed=%d\n",
-			   fps, bus_speed);
+		info("realtime: fps=%d bus_speed=%d\n", fps, bus_speed);
 #endif
 
 		return set_realtime(bus_speed / fps,

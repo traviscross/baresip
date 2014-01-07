@@ -10,11 +10,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "mod_uuid"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 static int uuid_init(const char *file)
 {
 	char uuid[37];
@@ -31,7 +26,7 @@ static int uuid_init(const char *file)
 	f = fopen(file, "w");
 	if (!f) {
 		err = errno;
-		DEBUG_WARNING("init: fopen() %s (%m)\n", file, err);
+		warning("uuid: fopen() %s (%m)\n", file, err);
 		goto out;
 	}
 
@@ -41,7 +36,7 @@ static int uuid_init(const char *file)
 
 	re_fprintf(f, "%s", uuid);
 
-	DEBUG_NOTICE("init: generated new UUID (%s)\n", uuid);
+	info("uuid: generated new UUID (%s)\n", uuid);
 
  out:
 	if (f)

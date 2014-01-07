@@ -7,17 +7,12 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "account"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 static int account_write_template(const char *file)
 {
 	FILE *f = NULL;
 	const char *login, *pass, *domain;
 
-	DEBUG_NOTICE("creating accounts template %s\n", file);
+	info("account: creating accounts template %s\n", file);
 
 	f = fopen(file, "w");
 	if (!f)
@@ -106,7 +101,7 @@ static int account_read_file(void)
 
 	err = conf_path_get(path, sizeof(path));
 	if (err) {
-		DEBUG_WARNING("accounts: conf_path_get (%m)\n", err);
+		warning("account: conf_path_get (%m)\n", err);
 		return err;
 	}
 
@@ -127,10 +122,11 @@ static int account_read_file(void)
 		return err;
 
 	n = list_count(uag_list());
-	(void)re_printf("Populated %u account%s\n", n, 1==n ? "" : "s");
+	info("Populated %u account%s\n", n, 1==n ? "" : "s");
 
 	if (list_isempty(uag_list())) {
-		DEBUG_WARNING("No SIP accounts found - check your config\n");
+		warning("account: No SIP accounts found"
+			" -- check your config\n");
 		return ENOENT;
 	}
 
@@ -152,7 +148,7 @@ static int module_close(void)
 
 const struct mod_export DECL_EXPORTS(account) = {
 	"account",
-	"",
+	"application",
 	module_init,
 	module_close
 };

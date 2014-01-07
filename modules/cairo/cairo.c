@@ -185,13 +185,11 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 						 size->w, size->h);
 	st->cr = cairo_create(st->surface);
 
-	re_printf("cairo: surface with format %d (%d x %d) stride=%d\n",
-		  cairo_image_surface_get_format(st->surface),
-		  cairo_image_surface_get_width(st->surface),
-		  cairo_image_surface_get_height(st->surface),
-		  cairo_image_surface_get_stride(st->surface)
-
-		  );
+	info("cairo: surface with format %d (%d x %d) stride=%d\n",
+	     cairo_image_surface_get_format(st->surface),
+	     cairo_image_surface_get_width(st->surface),
+	     cairo_image_surface_get_height(st->surface),
+	     cairo_image_surface_get_stride(st->surface));
 
 	st->step = rand_u16() / 1000.0;
 

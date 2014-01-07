@@ -14,11 +14,6 @@
 #include "avcodec.h"
 
 
-#define DEBUG_MODULE "avcodec"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 int avcodec_resolve_codecid(const char *s)
 {
 	if (0 == str_casecmp(s, "H263"))
@@ -139,9 +134,9 @@ static struct vidcodec mpg4 = {
 static int module_init(void)
 {
 #ifdef USE_X264
-	re_printf("x264 build %d\n", X264_BUILD);
+	debug("avcodec: x264 build %d\n", X264_BUILD);
 #else
-	re_printf("using FFmpeg H.264 encoder\n");
+	debug("avcodec: using FFmpeg H.264 encoder\n");
 #endif
 
 #if LIBAVCODEC_VERSION_INT < ((53<<16)+(10<<8)+0)

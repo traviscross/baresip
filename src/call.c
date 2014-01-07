@@ -28,6 +28,7 @@
 #define FOREACH_STREAM						\
 	for (le = call->streaml.head; le; le = le->next)
 
+/** Call constants */
 enum {
 	PTIME           = 20,    /**< Packet time for audio               */
 	LOCAL_TIMEOUT   = 120,   /**< Incoming call timeout in [seconds]  */
@@ -103,8 +104,6 @@ static const char *state_name(enum state st)
 
 static void set_state(struct call *call, enum state st)
 {
-	DEBUG_INFO("State %s -> %s\n", state_name(call->state),
-		   state_name(st));
 	call->state = st;
 }
 
@@ -132,11 +131,11 @@ static void call_stream_start(struct call *call, bool active)
 			}
 		}
 		else {
-			(void)re_printf("no common audio-codecs..\n");
+			info("call: no common audio-codecs..\n");
 		}
 	}
 	else {
-		(void)re_printf("audio stream is disabled..\n");
+		info("call: audio stream is disabled..\n");
 	}
 
 #ifdef USE_VIDEO
@@ -155,7 +154,7 @@ static void call_stream_start(struct call *call, bool active)
 		}
 	}
 	else if (call->video) {
-		(void)re_printf("video stream is disabled..\n");
+		info("call: video stream is disabled..\n");
 	}
 
 	if (call->bfcp) {
@@ -221,8 +220,8 @@ static void invite_timeout(void *arg)
 {
 	struct call *call = arg;
 
-	(void)re_printf("%s: Local timeout after %u seconds\n",
-			call->peer_uri, LOCAL_TIMEOUT);
+	info("%s: Local timeout after %u seconds\n",
+	     call->peer_uri, LOCAL_TIMEOUT);
 
 	call_event_handler(call, CALL_EVENT_CLOSED, "Local timeout");
 }
@@ -250,7 +249,7 @@ static void mnat_handler(int err, uint16_t scode, const char *reason,
 
 	/* Re-INVITE */
 	if (!call->mnat_wait) {
-		DEBUG_NOTICE("MNAT Established: Send Re-INVITE\n");
+		info("call: medianat established -- sending Re-INVITE\n");
 		(void)call_modify(call);
 		return;
 	}
@@ -305,11 +304,11 @@ static int update_media(struct call *call)
 						 sc->pt, sc->params);
 		}
 		else {
-			(void)re_printf("no common audio-codecs..\n");
+			info("no common audio-codecs..\n");
 		}
 	}
 	else {
-		(void)re_printf("audio stream is disabled..\n");
+		info("audio stream is disabled..\n");
 	}
 
 #ifdef USE_VIDEO
@@ -322,7 +321,7 @@ static int update_media(struct call *call)
 		}
 	}
 	else if (call->video) {
-		(void)re_printf("video stream is disabled..\n");
+		info("video stream is disabled..\n");
 	}
 #endif
 
@@ -336,10 +335,8 @@ static void print_summary(const struct call *call)
 	if (!dur)
 		return;
 
-	(void)re_fprintf(stderr, "%s: Call with %s terminated"
-			 " (duration: %H)\n",
-			 call->local_uri, call->peer_uri,
-			 fmt_human_time, &dur);
+	info("%s: Call with %s terminated (duration: %H)\n",
+	     call->local_uri, call->peer_uri, fmt_human_time, &dur);
 }
 
 
@@ -378,7 +375,7 @@ static void audio_event_handler(int key, bool end, void *arg)
 	struct call *call = arg;
 	MAGIC_CHECK(call);
 
-	(void)re_printf("received event: '%c' (end=%d)\n", key, end);
+	info("received event: '%c' (end=%d)\n", key, end);
 
 	if (call->dtmfh)
 		call->dtmfh(call, end ? 0x00 : key, call->arg);
@@ -572,9 +569,12 @@ int call_connect(struct call *call, const struct pl *paddr)
 	if (!call || !paddr)
 		return EINVAL;
 
-	(void)re_printf("connecting to '%r'..\n", paddr);
+	info("call: connecting to '%r'..\n", paddr);
 
-	if (0 == sip_addr_decode(&addr, paddr)) {
+	/* if the peer-address is a full SIP address then we need
+	 * to parse it and extract the SIP uri part.
+	 */
+	if (0 == sip_addr_decode(&addr, paddr) && addr.dname.p) {
 		err = pl_strdup(&call->peer_uri, &addr.auri);
 	}
 	else {
@@ -633,13 +633,13 @@ int call_hangup(struct call *call, uint16_t scode, const char *reason)
 			scode = 486;
 			reason = "Rejected";
 		}
-		(void)re_printf("rejecting incoming call from %s (%u %s)\n",
-				call->peer_uri, scode, reason);
+		info("call: rejecting incoming call from %s (%u %s)\n",
+		     call->peer_uri, scode, reason);
 		(void)sipsess_reject(call->sess, scode, reason, NULL);
 		break;
 
 	default:
-		(void)re_printf("terminate call with %s\n", call->peer_uri);
+		info("call: terminate call with %s\n", call->peer_uri);
 		call->sess = mem_deref(call->sess);
 		break;
 	}
@@ -688,8 +688,7 @@ int call_answer(struct call *call, uint16_t scode)
 		return 0;
 	}
 
-	(void)re_printf("answering call from %s with %u\n",
-			call->peer_uri, scode);
+	info("answering call from %s with %u\n", call->peer_uri, scode);
 
 	if (call->got_offer) {
 
@@ -762,7 +761,7 @@ int call_hold(struct call *call, bool hold)
 	if (!call || !call->sess)
 		return EINVAL;
 
-	(void)re_printf("%s %s\n", hold ? "hold" : "resume", call->peer_uri);
+	info("call: %s %s\n", hold ? "hold" : "resume", call->peer_uri);
 
 	FOREACH_STREAM
 		stream_hold(le->data, hold);
@@ -937,7 +936,7 @@ static int sipsess_offer_handler(struct mbuf **descp,
 
 	MAGIC_CHECK(call);
 
-	DEBUG_NOTICE("got re-INVITE%s\n", got_offer ? " (SDP Offer)" : "");
+	info("call: got re-INVITE%s\n", got_offer ? " (SDP Offer)" : "");
 
 	if (got_offer) {
 
@@ -1060,8 +1059,7 @@ static void sipsess_info_handler(struct sip *sip, const struct sip_msg *msg,
 			else if (s == 11) s = '#';
 			else s += '0';
 
-			(void)re_printf("received DTMF: '%c' (duration=%r)\n",
-					s, &dur);
+			info("received DTMF: '%c' (duration=%r)\n", s, &dur);
 
 			(void)sip_reply(sip, msg, 200, "OK");
 
@@ -1091,10 +1089,10 @@ static void sipnot_close_handler(int err, const struct sip_msg *msg,
 	struct call *call = arg;
 
 	if (err)
-		(void)re_printf("notification closed: %m\n", err);
+		info("call: notification closed: %m\n", err);
 	else if (msg)
-		(void)re_printf("notification closed: %u %r\n",
-				msg->scode, &msg->reason);
+		info("call: notification closed: %u %r\n",
+		     msg->scode, &msg->reason);
 
 	call->not = mem_deref(call->not);
 }
@@ -1146,8 +1144,7 @@ static void sipsess_close_handler(int err, const struct sip_msg *msg,
 	MAGIC_CHECK(call);
 
 	if (err) {
-		(void)re_printf("%s: session closed: %m\n",
-				call->peer_uri, err);
+		info("%s: session closed: %m\n", call->peer_uri, err);
 
 		if (call->not) {
 			(void)call_notify_sipfrag(call, 500, "%m", err);
@@ -1160,8 +1157,8 @@ static void sipsess_close_handler(int err, const struct sip_msg *msg,
 		(void)re_snprintf(reason, sizeof(reason), "%u %r",
 				  msg->scode, &msg->reason);
 
-		(void)re_printf("%s: session closed: %u %r\n",
-				call->peer_uri, msg->scode, &msg->reason);
+		info("%s: session closed: %u %r\n",
+		     call->peer_uri, msg->scode, &msg->reason);
 
 		if (call->not) {
 			(void)call_notify_sipfrag(call, msg->scode,
@@ -1169,7 +1166,7 @@ static void sipsess_close_handler(int err, const struct sip_msg *msg,
 		}
 	}
 	else {
-		(void)re_printf("%s: session closed\n", call->peer_uri);
+		info("%s: session closed\n", call->peer_uri);
 	}
 
 	call_stream_stop(call);
@@ -1238,8 +1235,8 @@ static void sipsess_progr_handler(const struct sip_msg *msg, void *arg)
 
 	MAGIC_CHECK(call);
 
-	(void)re_printf("SIP Progress: %u %r (%r)\n",
-			msg->scode, &msg->reason, &msg->ctype);
+	info("call: SIP Progress: %u %r (%r)\n",
+	     msg->scode, &msg->reason, &msg->ctype);
 
 	if (msg->scode <= 100)
 		return;
@@ -1469,11 +1466,11 @@ static void sipsub_close_handler(int err, const struct sip_msg *msg,
 	call->sub = mem_deref(call->sub);
 
 	if (err) {
-		(void)re_printf("subscription closed: %m\n", err);
+		info("call: subscription closed: %m\n", err);
 	}
 	else if (msg && msg->scode >= 300) {
-		(void)re_printf("call transfer failed: %u %r\n",
-				msg->scode, &msg->reason);
+		info("call: transfer failed: %u %r\n",
+		     msg->scode, &msg->reason);
 	}
 }
 
@@ -1527,7 +1524,7 @@ int call_transfer(struct call *call, const char *uri)
 	if (err)
 		return err;
 
-	(void)re_printf("transferring call to %s\n", nuri);
+	info("transferring call to %s\n", nuri);
 
 	call->sub = mem_deref(call->sub);
 	err = sipevent_drefer(&call->sub, uag_sipevent_sock(),

@@ -70,9 +70,7 @@ static int notify(struct notifier *not, enum presence_status status)
 
 	err = sipevent_notify(not->not, mb, SIPEVENT_ACTIVE, 0, 0);
 	if (err) {
-		(void)re_fprintf(stderr,
-				 "presence: notify to %s failed (%m)\n",
-				 aor, err);
+		warning("presence: notify to %s failed (%m)\n", aor, err);
 	}
 
  out:
@@ -87,11 +85,11 @@ static void sipnot_close_handler(int err, const struct sip_msg *msg,
 	struct notifier *not = arg;
 
 	if (err) {
-		(void)re_printf("presence: notifier closed (%m)\n", err);
+		info("presence: notifier closed (%m)\n", err);
 	}
 	else if (msg) {
-		(void)re_printf("presence: notifier closed (%u %r)\n",
-				msg->scode, &msg->reason);
+		info("presence: notifier closed (%u %r)\n",
+		     msg->scode, &msg->reason);
 	}
 
 	not = mem_deref(not);
@@ -139,9 +137,7 @@ static int notifier_alloc(struct notifier **notp, struct sipevent_sock *sock,
 			      auth_handler, ua_prm(not->ua), true,
 			      sipnot_close_handler, not, NULL);
 	if (err) {
-		(void)re_fprintf(stderr,
-				 "presence: sipevent_accept failed: %m\n",
-				 err);
+		warning("presence: sipevent_accept failed: %m\n", err);
 		goto out;
 	}
 
@@ -174,9 +170,7 @@ static int notifier_add(struct sipevent_sock *sock, const struct sip_msg *msg,
 		return err;
 
 	if (pl_strcasecmp(&se.event, "presence")) {
-		(void)re_fprintf(stderr,
-				 "presence: unexpected event '%r'\n",
-				 &se.event);
+		info("presence: unexpected event '%r'\n", &se.event);
 		return EPROTO;
 	}
 
@@ -197,9 +191,9 @@ static void notifier_update_status(enum presence_status status)
 	if (status == my_status)
 		return;
 
-	(void)re_printf("presence: update my status from '%s' to '%s'\n",
-			contact_presence_str(my_status),
-			contact_presence_str(status));
+	info("presence: update my status from '%s' to '%s'\n",
+	     contact_presence_str(my_status),
+	     contact_presence_str(status));
 
 	my_status = status;
 
@@ -244,8 +238,7 @@ static bool sub_handler(const struct sip_msg *msg, void *arg)
 
 	ua = uag_find(&msg->uri.user);
 	if (!ua) {
-		(void)re_printf("presence: no UA found for %r\n",
-				&msg->uri.user);
+		warning("presence: no UA found for %r\n", &msg->uri.user);
 		(void)sip_treply(NULL, uag_sip(), msg, 404, "Not Found");
 		return true;
 	}

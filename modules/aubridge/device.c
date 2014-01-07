@@ -52,18 +52,20 @@ static void *device_thread(void *arg)
 {
 	uint64_t now, ts = tmr_jiffies();
 	struct device *dev = arg;
-	struct auresamp *rs = NULL;
+	struct auresamp rs;
 	int16_t *sampv_in, *sampv_out;
 	size_t sampc_in  = dev->auplay->prm.frame_size;
 	size_t sampc_out = dev->ausrc->prm.frame_size;
 	int err;
+
+	auresamp_init(&rs);
 
 	sampv_in  = mem_alloc(2 * sampc_in, NULL);
 	sampv_out = mem_alloc(2 * sampc_out, NULL);
 	if (!sampv_in || !sampv_out)
 		goto out;
 
-	err = auresamp_alloc(&rs, 1920,
+	err = auresamp_setup(&rs,
 			     dev->auplay->prm.srate, dev->auplay->prm.ch,
 			     dev->ausrc->prm.srate, dev->ausrc->prm.ch);
 	if (err)
@@ -86,11 +88,11 @@ static void *device_thread(void *arg)
 					dev->auplay->arg);
 		}
 
-		err = auresamp_process(rs,
-				       sampv_out, &sampc_out,
-				       sampv_in, sampc_in);
+		err = auresamp(&rs,
+			       sampv_out, &sampc_out,
+			       sampv_in, sampc_in);
 		if (err) {
-			re_printf("auresamp_process: %m\n", err);
+			warning("aubridge: auresamp error: %m\n", err);
 		}
 
 		if (dev->ausrc && dev->ausrc->rh) {
@@ -104,7 +106,6 @@ static void *device_thread(void *arg)
  out:
 	mem_deref(sampv_in);
 	mem_deref(sampv_out);
-	mem_deref(rs);
 
 	return NULL;
 }
@@ -136,7 +137,7 @@ int device_connect(struct device **devp, const char *device,
 
 		*devp = dev;
 
-		re_printf("aubridge: created device '%s'\n", device);
+		debug("aubridge: created device '%s'\n", device);
 	}
 
 	if (auplay)

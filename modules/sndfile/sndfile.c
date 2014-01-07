@@ -9,11 +9,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "sndfile"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 struct sndfile_enc {
 	struct aufilt_enc_st af;  /* base class */
 	SNDFILE *enc;
@@ -76,13 +71,13 @@ static SNDFILE *openfile(const struct aufilt_prm *prm, bool enc)
 
 	sf = sf_open(filename, SFM_WRITE, &sfinfo);
 	if (!sf) {
-		DEBUG_WARNING("could not open: %s\n", filename);
+		warning("sndfile: could not open: %s\n", filename);
 		puts(sf_strerror(NULL));
 		return NULL;
 	}
 
-	DEBUG_NOTICE("dumping %s audio to %s\n",
-		     enc ? "encode" : "decode", filename);
+	info("sndfile: dumping %s audio to %s\n",
+	     enc ? "encode" : "decode", filename);
 
 	return sf;
 }

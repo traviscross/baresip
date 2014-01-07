@@ -230,8 +230,7 @@ static void estab_handler(void *arg)
 
  out:
 	if (err) {
-		re_printf("rst: error sending HTTP request: %m\n",
-			  err);
+		re_printf("rst: error sending HTTP request: %m\n", err);
 	}
 
 	mem_deref(mb);

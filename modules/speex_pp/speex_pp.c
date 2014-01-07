@@ -11,11 +11,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "speex_pp"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 struct preproc {
 	struct aufilt_enc_st af;    /* base class */
 	uint32_t psize;
@@ -87,7 +82,8 @@ static int encode_update(struct aufilt_enc_st **stp, void **ctx,
 	speex_preprocess_ctl(st->state, SPEEX_PREPROCESS_SET_DEREVERB,
 			     &pp_conf.dereverb_enabled);
 
-	DEBUG_NOTICE("Speex preprocessor loaded: enc=%uHz\n", prm->srate);
+	info("speex_pp: Speex preprocessor loaded: srate = %uHz\n",
+	     prm->srate);
 
 	*stp = (struct aufilt_enc_st *)st;
 	return 0;
