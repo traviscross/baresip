@@ -7,7 +7,14 @@
 #include <baresip.h>
 
 
-/* TODO: use RSV_TOKEN for RTP/RTCP even/odd pair ? */
+/**
+ * @defgroup turn turn
+ *
+ * Traversal Using Relays around NAT (TURN) for media NAT traversal
+ *
+ * XXX: use turn RSV_TOKEN for RTP/RTCP even/odd pair ?
+ */
+
 
 enum {LAYER = 0};
 

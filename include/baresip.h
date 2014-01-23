@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.9"
+#define BARESIP_VERSION "0.4.10"
 
 
 /* forward declarations */
@@ -35,6 +35,7 @@ struct account;
 
 int account_alloc(struct account **accp, const char *sipaddr);
 int account_debug(struct re_printf *pf, const struct account *acc);
+int account_set_display_name(struct account *acc, const char *dname);
 int account_auth(const struct account *acc, char **username, char **password,
 		 const char *realm);
 struct list *account_aucodecl(const struct account *acc);
@@ -153,6 +154,8 @@ struct config {
 		struct range channels;  /**< Nr. of audio channels (1=mono) */
 		uint32_t srate_play;    /**< Opt. sampling rate for player  */
 		uint32_t srate_src;     /**< Opt. sampling rate for source  */
+		uint32_t channels_play; /**< Opt. channels for player       */
+		uint32_t channels_src;  /**< Opt. channels for source       */
 		bool src_first;         /**< Audio source opened first      */
 		enum audio_mode txmode; /**< Audio transmit mode            */
 	} audio;
@@ -256,7 +259,7 @@ struct ausrc_prm {
 	int        fmt;         /**< Audio format (enum aufmt) */
 	uint32_t   srate;       /**< Sampling rate in [Hz] */
 	uint8_t    ch;          /**< Number of channels    */
-	uint32_t   frame_size;  /**< Frame size in samples */
+	uint32_t   ptime;       /**< Wanted packet-time in [ms] */
 };
 
 typedef void (ausrc_read_h)(const uint8_t *buf, size_t sz, void *arg);
@@ -288,7 +291,7 @@ struct auplay_prm {
 	int        fmt;         /**< Audio format (enum aufmt) */
 	uint32_t   srate;       /**< Sampling rate in [Hz] */
 	uint8_t    ch;          /**< Number of channels    */
-	uint32_t   frame_size;  /**< Frame size in samples */
+	uint32_t   ptime;       /**< Wanted packet-time in [ms] */
 };
 
 typedef bool (auplay_write_h)(uint8_t *buf, size_t sz, void *arg);
@@ -326,7 +329,7 @@ struct aufilt_dec_st {
 struct aufilt_prm {
 	uint32_t srate;       /**< Sampling rate in [Hz]        */
 	uint8_t  ch;          /**< Number of channels           */
-	uint32_t frame_size;  /**< Number of samples per frame  */
+	uint32_t ptime;       /**< Wanted packet-time in [ms]   */
 };
 
 typedef int (aufilt_encupd_h)(struct aufilt_enc_st **stp, void **ctx,
@@ -671,8 +674,6 @@ struct auenc_param {
 struct auenc_state;
 struct audec_state;
 struct aucodec;
-
-/* TODO: sample count excludes channel info ? */
 
 typedef int (auenc_update_h)(struct auenc_state **aesp,
 			     const struct aucodec *ac,

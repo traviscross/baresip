@@ -9,11 +9,6 @@
 #include "core.h"
 
 
-#define DEBUG_MODULE "account"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 enum {
 	REG_INTERVAL    = 3600,
 };
@@ -68,14 +63,6 @@ static int param_u32(uint32_t *v, const struct pl *params, const char *name)
 }
 
 
-/**
- * Decode STUN Server parameter. We use the SIP parameters as default,
- * and override with any STUN parameters present.
- *
- * \verbatim
- *   ;stunserver=stun:username:password@host:port
- * \endverbatim
- */
 static int stunsrv_decode(struct account *acc, const struct sip_addr *aor)
 {
 	struct pl srv;
@@ -93,12 +80,12 @@ static int stunsrv_decode(struct account *acc, const struct sip_addr *aor)
 
 		err = uri_decode(&uri, &srv);
 		if (err) {
-			DEBUG_WARNING("%r: decode failed: %m\n", &srv, err);
+			warning("account: %r: decode failed: %m\n", &srv, err);
 			memset(&uri, 0, sizeof(uri));
 		}
 
 		if (0 != pl_strcasecmp(&uri.scheme, "stun")) {
-			DEBUG_WARNING("unknown scheme: %r\n", &uri.scheme);
+			warning("account: unknown scheme: %r\n", &uri.scheme);
 			return EINVAL;
 		}
 	}
@@ -159,7 +146,7 @@ static void answermode_decode(struct account *prm, const struct pl *pl)
 			prm->answermode = ANSWERMODE_AUTO;
 		}
 		else {
-			DEBUG_WARNING("answermode: unknown (%r)\n", &amode);
+			warning("account: answermode unknown (%r)\n", &amode);
 			prm->answermode = ANSWERMODE_MANUAL;
 		}
 	}
@@ -221,9 +208,9 @@ static int audio_codecs_decode(struct account *acc, const struct pl *prm)
 
 			ac = (struct aucodec *)aucodec_find(cname, srate, ch);
 			if (!ac) {
-				DEBUG_WARNING("audio codec not found:"
-					      " %s/%u/%d\n",
-					      cname, srate, ch);
+				warning("account: audio codec not found:"
+					" %s/%u/%d\n",
+					cname, srate, ch);
 				continue;
 			}
 
@@ -262,8 +249,8 @@ static int video_codecs_decode(struct account *acc, const struct pl *prm)
 
 			vc = (struct vidcodec *)vidcodec_find(cname, NULL);
 			if (!vc) {
-				DEBUG_WARNING("video codec not found: %s\n",
-					      cname);
+				warning("account: video codec not found: %s\n",
+					cname);
 				continue;
 			}
 
@@ -383,7 +370,7 @@ int account_alloc(struct account **accp, const char *sipaddr)
 	pl_set_str(&pl, acc->buf);
 	err = sip_addr_decode(&acc->laddr, &pl);
 	if (err) {
-		DEBUG_WARNING("invalid SIP address: `%r'\n", &pl);
+		warning("account: invalid SIP address: `%r'\n", &pl);
 		goto out;
 	}
 
@@ -425,14 +412,16 @@ int account_alloc(struct account **accp, const char *sipaddr)
 
 		acc->mnat = mnat_find(acc->mnatid);
 		if (!acc->mnat) {
-			DEBUG_WARNING("medianat not found: %s\n", acc->mnatid);
+			warning("account: medianat not found: %s\n",
+				acc->mnatid);
 		}
 	}
 
 	if (acc->mencid) {
 		acc->menc = menc_find(acc->mencid);
 		if (!acc->menc) {
-			DEBUG_WARNING("mediaenc not found: %s\n", acc->mencid);
+			warning("account: mediaenc not found: %s\n",
+				acc->mencid);
 		}
 	}
 
@@ -443,6 +432,28 @@ int account_alloc(struct account **accp, const char *sipaddr)
 		*accp = acc;
 
 	return err;
+}
+
+
+/**
+ * Sets the displayed name. Pass null in dname to disable display name
+ *
+ * @param acc      User-Agent account
+ * @param dname    Display name (NULL to disable)
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+int account_set_display_name(struct account *acc, const char *dname)
+{
+	if (!acc)
+		return EINVAL;
+
+	acc->dispname = mem_deref(acc->dispname);
+
+	if (dname)
+		return str_dup(&acc->dispname, dname);
+
+	return 0;
 }
 
 

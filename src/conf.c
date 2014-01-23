@@ -19,8 +19,8 @@
 #include "core.h"
 
 
-#define DEBUG_MODULE "conf"
-#define DEBUG_LEVEL 5
+#define DEBUG_MODULE ""
+#define DEBUG_LEVEL 0
 #include <re_dbg.h>
 
 
@@ -190,8 +190,8 @@ int conf_get_range(const struct conf *conf, const char *name,
 		/* fallback to non-range numeric value */
 		err = conf_get_u32(conf, name, &v);
 		if (err) {
-			DEBUG_WARNING("%s: could not parse range: (%r)\n",
-				      name, &r);
+			warning("conf: %s: could not parse range: (%r)\n",
+				name, &r);
 			return err;
 		}
 
@@ -204,8 +204,8 @@ int conf_get_range(const struct conf *conf, const char *name,
 	rng->max = pl_u32(&max);
 
 	if (rng->min > rng->max) {
-		DEBUG_WARNING("%s: invalid range (%u - %u)\n",
-			      name, rng->min, rng->max);
+		warning("conf: %s: invalid range (%u - %u)\n",
+			name, rng->min, rng->max);
 		return EINVAL;
 	}
 
@@ -256,8 +256,8 @@ int conf_get_vidsz(const struct conf *conf, const char *name, struct vidsz *sz)
 
 	/* check resolution */
 	if (sz->w & 0x1 || sz->h & 0x1) {
-		DEBUG_WARNING("%s: should be multiple of 2 (%u x %u)\n",
-			      name, sz->w, sz->h);
+		warning("conf: %s: should be multiple of 2 (%u x %u)\n",
+			name, sz->w, sz->h);
 		return EINVAL;
 	}
 
@@ -297,7 +297,7 @@ int conf_configure(void)
 
 	err = conf_path_get(path, sizeof(path));
 	if (err) {
-		DEBUG_WARNING("could not get config path: %m\n", err);
+		warning("conf: could not get config path: %m\n", err);
 		return err;
 	}
 
@@ -306,7 +306,7 @@ int conf_configure(void)
 
 	if (!conf_fileexist(file)) {
 
-		(void)fs_mkdir(path, 0755);
+		(void)fs_mkdir(path, 0700);
 
 		err = config_write_template(file, conf_config());
 		if (err)
@@ -350,7 +350,7 @@ int conf_modules(void)
 
 	err = module_init(conf_obj);
 	if (err) {
-		DEBUG_WARNING("configure module parse error (%m)\n", err);
+		warning("conf: configure module parse error (%m)\n", err);
 		goto out;
 	}
 

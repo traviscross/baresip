@@ -126,6 +126,7 @@ static int read_stream_open(struct ausrc_st *st, const struct ausrc_prm *prm)
 {
 	WAVEFORMATEX wfmt;
 	MMRESULT res;
+	uint32_t sampc;
 	int i, err = 0;
 
 	/* Open an audio INPUT stream. */
@@ -133,9 +134,11 @@ static int read_stream_open(struct ausrc_st *st, const struct ausrc_prm *prm)
 	st->pos = 0;
 	st->rdy = false;
 
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
+
 	for (i = 0; i < READ_BUFFERS; i++) {
 		memset(&st->bufs[i].wh, 0, sizeof(WAVEHDR));
-		st->bufs[i].mb = mbuf_alloc(2 * prm->frame_size);
+		st->bufs[i].mb = mbuf_alloc(2 * sampc);
 		if (!st->bufs[i].mb)
 			return ENOMEM;
 	}

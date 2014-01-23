@@ -155,6 +155,7 @@ static int alloc_handler(struct ausrc_st **stp, struct ausrc *as,
 			 ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
+	unsigned sampc;
 	int err;
 
 	if (!stp || !as || !prm || !rh)
@@ -188,8 +189,10 @@ static int alloc_handler(struct ausrc_st **stp, struct ausrc *as,
 	mpg123_format(st->mp3, prm->srate, prm->ch, MPG123_ENC_SIGNED_16);
 	mpg123_volume(st->mp3, 0.3);
 
-	st->ptime = (1000 * prm->frame_size) / (prm->srate * prm->ch);
-	st->psize = prm->frame_size * 2;
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
+
+	st->ptime = prm->ptime;
+	st->psize = sampc * 2;
 
 	prm->fmt = AUFMT_S16LE;
 

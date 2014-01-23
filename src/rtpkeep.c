@@ -8,11 +8,6 @@
 #include "core.h"
 
 
-#define DEBUG_MODULE "rtpkeep"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /*
  * See draft-ietf-avt-app-rtp-keepalive:
  *
@@ -86,11 +81,11 @@ static int send_keepalive(struct rtpkeep *rk)
 			;
 		}
 		else {
-			DEBUG_WARNING("rtcp-mux is disabled\n");
+			warning("rtpkeep: rtcp-mux is disabled\n");
 		}
 	}
 	else {
-		DEBUG_WARNING("unknown method: %s\n", rk->method);
+		warning("rtpkeep: unknown method: %s\n", rk->method);
 		return ENOSYS;
 	}
 
@@ -106,6 +101,8 @@ static int send_keepalive(struct rtpkeep *rk)
  * is not set, it means that we have not sent any RTP packet in the
  * last period of 0 - 15 seconds. Start transmitting RTP keepalives
  * now and every 15 seconds after that.
+ *
+ * @param arg Handler argument
  */
 static void timeout(void *arg)
 {
@@ -121,7 +118,7 @@ static void timeout(void *arg)
 
 	err = send_keepalive(rk);
 	if (err) {
-		DEBUG_WARNING("keepalive: %m\n", err);
+		warning("rtpkeep: send keepalive failed: %m\n", err);
 	}
 }
 

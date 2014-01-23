@@ -8,11 +8,6 @@
 #include "core.h"
 
 
-#define DEBUG_MODULE "module"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 struct modapp {
 	struct mod *mod;
 	struct le le;
@@ -84,7 +79,7 @@ static int load_module(struct mod **modp, const struct pl *modpath,
 
  out:
 	if (err) {
-		DEBUG_WARNING("module %r: %m\n", name, err);
+		warning("module %r: %m\n", name, err);
 	}
 	else if (modp)
 		*modp = m;

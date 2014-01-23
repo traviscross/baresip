@@ -16,21 +16,13 @@
 #include "alsa.h"
 
 
-#define DEBUG_MODULE "alsa_src"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 struct ausrc_st {
 	struct ausrc *as;      /* inheritance */
 	pthread_t thread;
 	bool run;
 	snd_pcm_t *read;
-	int sample_size;
-	int frame_size;
 	struct mbuf *mbr;
 	ausrc_read_h *rh;
-	ausrc_error_h *errh;
 	void *arg;
 	struct ausrc_prm prm;
 	char *device;
@@ -59,43 +51,33 @@ static void ausrc_destructor(void *arg)
 static void *read_thread(void *arg)
 {
 	struct ausrc_st *st = arg;
+	int num_frames;
 	int err;
 
-	err = snd_pcm_open(&st->read, st->device, SND_PCM_STREAM_CAPTURE, 0);
-	if (err < 0) {
-		DEBUG_WARNING("read open: %s %s\n",
-			      st->device, snd_strerror(err));
-		return NULL;
-	}
-
-	err = alsa_reset(st->read, st->prm.srate, st->prm.ch, st->prm.fmt,
-			 st->prm.frame_size);
-	if (err)
-		return NULL;
+	num_frames = st->prm.srate * st->prm.ptime / 1000;
 
 	/* Start */
 	err = snd_pcm_start(st->read);
 	if (err) {
-		DEBUG_WARNING("snd_pcm_start on read: %s\n",
-			      snd_strerror(err));
-		return NULL;
+		warning("alsa: could not start ausrc device '%s' (%s)\n",
+			st->device, snd_strerror(err));
+		goto out;
 	}
 
 	while (st->run) {
-		err = snd_pcm_readi(st->read, st->mbr->buf, st->frame_size);
+		err = snd_pcm_readi(st->read, st->mbr->buf, num_frames);
 		if (err == -EPIPE) {
 			snd_pcm_prepare(st->read);
+			continue;
 		}
 		else if (err <= 0) {
-			if (EAGAIN != err) {
-				DEBUG_WARNING("read: %s\n", snd_strerror(err));
-			}
 			continue;
 		}
 
-		st->rh(st->mbr->buf, err * st->sample_size, st->arg);
+		st->rh(st->mbr->buf, err * 2 * st->prm.ch, st->arg);
 	}
 
+ out:
 	return NULL;
 }
 
@@ -106,10 +88,16 @@ int alsa_src_alloc(struct ausrc_st **stp, struct ausrc *as,
 		   ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
+	uint32_t sampc;
+	int num_frames;
 	int err;
-
 	(void)ctx;
 	(void)errh;
+
+	if (!stp || !as || !prm || !rh)
+		return EINVAL;
+	if (prm->fmt != AUFMT_S16LE)
+		return EINVAL;
 
 	if (!str_isset(device))
 		device = alsa_dev;
@@ -126,12 +114,28 @@ int alsa_src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	st->as  = mem_ref(as);
 	st->rh  = rh;
 	st->arg = arg;
-	st->sample_size = prm->ch * (prm->fmt == AUFMT_S16LE ? 2 : 1);
-	st->frame_size = prm->frame_size;
 
-	st->mbr = mbuf_alloc(st->sample_size * st->frame_size);
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
+	num_frames = st->prm.srate * st->prm.ptime / 1000;
+
+	st->mbr = mbuf_alloc(2 * sampc);
 	if (!st->mbr) {
 		err = ENOMEM;
+		goto out;
+	}
+
+	err = snd_pcm_open(&st->read, st->device, SND_PCM_STREAM_CAPTURE, 0);
+	if (err < 0) {
+		warning("alsa: could not open ausrc device '%s' (%s)\n",
+			st->device, snd_strerror(err));
+		goto out;
+	}
+
+	err = alsa_reset(st->read, st->prm.srate, st->prm.ch, st->prm.fmt,
+			 num_frames);
+	if (err) {
+		warning("alsa: could not reset source '%s' (%s)\n",
+			st->device, snd_strerror(err));
 		goto out;
 	}
 

@@ -176,7 +176,7 @@ static int module_init(void)
 
 	if (!conf_fileexist(file)) {
 
-		(void)fs_mkdir(path, 0755);
+		(void)fs_mkdir(path, 0700);
 
 		err = write_template(file);
 		if (err)

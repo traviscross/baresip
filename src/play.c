@@ -11,12 +11,7 @@
 #include "core.h"
 
 
-#define DEBUG_MODULE "play"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
-enum {SILENCE_DUR = 2000};
+enum {SILENCE_DUR = 2000, PTIME = 100};
 
 /** Audio file player */
 struct play {
@@ -235,7 +230,7 @@ int play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
 	wprm.fmt        = AUFMT_S16LE;
 	wprm.ch         = ch;
 	wprm.srate      = srate;
-	wprm.frame_size = srate * ch * 100 / 1000;
+	wprm.ptime      = PTIME;
 
 	err = auplay_alloc(&play->auplay, cfg->audio.alert_mod, &wprm,
 			   cfg->audio.alert_dev, write_handler, play);
@@ -288,7 +283,7 @@ int play_file(struct play **playp, const char *filename, int repeat)
 
 	err = aufile_load(mb, path, &srate, &ch);
 	if (err) {
-		DEBUG_WARNING("%s: %m\n", path, err);
+		warning("play: %s: %m\n", path, err);
 		goto out;
 	}
 

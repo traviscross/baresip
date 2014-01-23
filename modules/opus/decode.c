@@ -91,7 +91,7 @@ int opus_decode_pkloss(struct audec_state *ads, int16_t *sampv, size_t *sampc)
 	if (!ads || !sampv || !sampc)
 		return EINVAL;
 
-	n = opus_decode(ads->dec, NULL, 0, sampv, (int)*sampc, 0);
+	n = opus_decode(ads->dec, NULL, 0, sampv, (int)(*sampc/ads->ch), 0);
 	if (n < 0)
 		return EPROTO;
 

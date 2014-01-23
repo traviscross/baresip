@@ -11,7 +11,7 @@
 struct plc_st {
 	struct aufilt_dec_st af; /* base class */
 	plc_state_t plc;
-	size_t nsamp;
+	size_t sampc;
 };
 
 
@@ -24,22 +24,22 @@ static void destructor(void *arg)
 
 
 static int update(struct aufilt_dec_st **stp, void **ctx,
-		  const struct aufilt *af, struct aufilt_prm *decprm)
+		  const struct aufilt *af, struct aufilt_prm *prm)
 {
 	struct plc_st *st;
 	int err = 0;
 	(void)ctx;
 	(void)af;
 
-	if (!stp || !decprm)
+	if (!stp || !prm)
 		return EINVAL;
 
 	if (*stp)
 		return 0;
 
 	/* XXX: add support for stereo PLC */
-	if (decprm->ch != 1) {
-		warning("plc: only mono supported (ch=%u)\n", decprm->ch);
+	if (prm->ch != 1) {
+		warning("plc: only mono supported (ch=%u)\n", prm->ch);
 		return ENOSYS;
 	}
 
@@ -52,7 +52,7 @@ static int update(struct aufilt_dec_st **stp, void **ctx,
 		goto out;
 	}
 
-	st->nsamp = decprm->frame_size;
+	st->sampc = prm->srate * prm->ch * prm->ptime / 1000;
 
  out:
 	if (err)
@@ -64,10 +64,10 @@ static int update(struct aufilt_dec_st **stp, void **ctx,
 }
 
 
-/**
+/*
  * PLC is only valid for Decoding (RX)
  *
- * NOTE: sampc_in==0 , means Packet loss
+ * NOTE: sampc == 0 , means Packet loss
  */
 static int decode(struct aufilt_dec_st *st, int16_t *sampv, size_t *sampc)
 {
@@ -76,7 +76,7 @@ static int decode(struct aufilt_dec_st *st, int16_t *sampv, size_t *sampc)
 	if (*sampc)
 		plc_rx(&plc->plc, sampv, (int)*sampc);
 	else
-		*sampc = plc_fillin(&plc->plc, sampv, (int)plc->nsamp);
+		*sampc = plc_fillin(&plc->plc, sampv, (int)plc->sampc);
 
 	return 0;
 }

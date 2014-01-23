@@ -111,7 +111,7 @@ int coreaudio_recorder_alloc(struct ausrc_st **stp, struct ausrc *as,
 {
 	AudioStreamBasicDescription fmt;
 	struct ausrc_st *st;
-	uint32_t bytc, i;
+	uint32_t sampc, bytc, i;
 	OSStatus status;
 	int err;
 
@@ -119,16 +119,22 @@ int coreaudio_recorder_alloc(struct ausrc_st **stp, struct ausrc *as,
 	(void)device;
 	(void)errh;
 
+	if (!stp || !as || !prm)
+		return EINVAL;
+
 	st = mem_zalloc(sizeof(*st), ausrc_destructor);
 	if (!st)
 		return ENOMEM;
 
-	st->ptime = (prm->frame_size * 1000) / (prm->srate * prm->ch);
+	st->ptime = prm->ptime;
 	st->as  = mem_ref(as);
 	st->rh  = rh;
 	st->arg = arg;
 
-	st->mb = mbuf_alloc(prm->frame_size * bytesps(prm->fmt));
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
+	bytc  = sampc * bytesps(prm->fmt);
+
+	st->mb = mbuf_alloc(bytc);
 	if (!st->mb) {
 		err = ENOMEM;
 		goto out;
@@ -163,8 +169,6 @@ int coreaudio_recorder_alloc(struct ausrc_st **stp, struct ausrc *as,
 		err = ENODEV;
 		goto out;
 	}
-
-	bytc = prm->frame_size * bytesps(prm->fmt);
 
 	for (i=0; i<ARRAY_SIZE(st->buf); i++)  {
 

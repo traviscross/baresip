@@ -8,11 +8,6 @@
 #include "core.h"
 
 
-#define DEBUG_MODULE "net"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 static struct {
 	struct config_net cfg;
 	struct sa laddr;
@@ -181,14 +176,14 @@ int net_init(const struct config_net *cfg, int af)
 	 */
 #ifdef HAVE_INET6
 	if (!check_ipv6()) {
-		DEBUG_WARNING("libre was compiled without IPv6-support"
-			      ", but baresip was compiled with\n");
+		error("libre was compiled without IPv6-support"
+		      ", but baresip was compiled with\n");
 		return EAFNOSUPPORT;
 	}
 #else
 	if (check_ipv6()) {
-		DEBUG_WARNING("libre was compiled with IPv6-support"
-			      ", but baresip was compiled without\n");
+		error("libre was compiled with IPv6-support"
+		      ", but baresip was compiled without\n");
 		return EAFNOSUPPORT;
 	}
 #endif
@@ -201,7 +196,7 @@ int net_init(const struct config_net *cfg, int af)
 	/* Initialise DNS resolver */
 	err = dns_init();
 	if (err) {
-		DEBUG_WARNING("dns_init: %m\n", err);
+		warning("net: dns_init: %m\n", err);
 		return err;
 	}
 
@@ -241,8 +236,8 @@ int net_init(const struct config_net *cfg, int af)
 		if (got_it)
 			err = 0;
 		else {
-			DEBUG_WARNING("%s: could not get network address\n",
-				      cfg->ifname);
+			warning("net: %s: could not get network address\n",
+				cfg->ifname);
 			return EADDRNOTAVAIL;
 		}
 	}

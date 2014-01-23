@@ -11,9 +11,22 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "mod_ice"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
+/**
+ * @defgroup ice ice
+ *
+ * Interactive Connectivity Establishment (ICE) for media NAT traversal
+ *
+ * This module enables ICE for NAT traversal. You can enable ICE
+ * in your accounts file with the parameter ;medianat=ice. The following
+ * options can be configured:
+ *
+ \verbatim
+  ice_turn        {yes,no}             # Enable TURN candidates
+  ice_debug       {yes,no}             # Enable ICE debugging/tracing
+  ice_nomination  {regular,aggressive} # Regular or aggressive nomination
+  ice_mode        {full,lite}          # Full ICE-mode or ICE-lite
+ \endverbatim
+ */
 
 
 struct mnat_sess {
@@ -187,7 +200,7 @@ static bool if_handler(const char *ifname, const struct sa *sa, void *arg)
 	}
 
 	if (err) {
-		DEBUG_WARNING("%s:%j: icem_cand_add: %m\n", ifname, sa, err);
+		warning("ice: %s:%j: icem_cand_add: %m\n", ifname, sa, err);
 	}
 
 	return false;
@@ -329,10 +342,10 @@ static bool verify_peer_ice(struct mnat_sess *ms)
 		for (i=0; i<2; i++) {
 			if (m->compv[i].sock &&
 			    !icem_verify_support(m->icem, i+1, &raddr[i])) {
-				DEBUG_WARNING("%s.%u: no remote candidates"
-					      " found (address = %J)\n",
-					      sdp_media_name(m->sdpm),
-					      i+1, &raddr[i]);
+				warning("ice: %s.%u: no remote candidates"
+					" found (address = %J)\n",
+					sdp_media_name(m->sdpm),
+					i+1, &raddr[i]);
 				return false;
 			}
 		}
@@ -389,8 +402,8 @@ static void gather_handler(int err, uint16_t scode, const char *reason,
 	struct mnat_media *m = arg;
 
 	if (err || scode) {
-		DEBUG_WARNING("gather error: %m (%u %s)\n",
-			      err, scode, reason);
+		warning("ice: gather error: %m (%u %s)\n",
+			err, scode, reason);
 	}
 	else {
 		refresh_laddr(m,
@@ -423,7 +436,7 @@ static void conncheck_handler(int err, bool update, void *arg)
 	ice_printf(m, "Dumping media state: %H\n", icem_debug, m->icem);
 
 	if (err) {
-		DEBUG_WARNING("conncheck failed: %m\n", err);
+		warning("ice: connectivity check failed: %m\n", err);
 	}
 	else {
 		bool changed;
@@ -621,7 +634,7 @@ static int update(struct mnat_sess *sess)
 		err = enable_turn_channels(sess);
 	}
 	else {
-		DEBUG_WARNING("ICE not supported by peer\n");
+		info("ice: ICE not supported by peer\n");
 
 		LIST_FOREACH(&sess->medial, le) {
 			struct mnat_media *m = le->data;
@@ -648,7 +661,7 @@ static int module_init(void)
 		else if (0 == pl_strcasecmp(&pl, "aggressive"))
 			ice.nom = ICE_NOMINATION_AGGRESSIVE;
 		else {
-			DEBUG_WARNING("unknown nomination: %r\n", &pl);
+			warning("ice: unknown nomination: %r\n", &pl);
 		}
 	}
 	if (!conf_get(conf_cur(), "ice_mode", &pl)) {
@@ -657,7 +670,7 @@ static int module_init(void)
 		else if (!pl_strcasecmp(&pl, "lite"))
 			ice.mode = ICE_MODE_LITE;
 		else {
-			DEBUG_WARNING("unknown mode: %r\n", &pl);
+			warning("ice: unknown mode: %r\n", &pl);
 		}
 	}
 #endif

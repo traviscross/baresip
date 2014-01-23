@@ -42,7 +42,8 @@ static int account_write_template(const char *file)
 			 "#    ;answermode={manual,early,auto}\n"
 			 "#    ;audio_codecs=speex/16000,pcma,...\n"
 			 "#    ;auth_user=username\n"
-			 "#    ;mediaenc={srtp,srtp-mand,srtp-mandf}\n"
+			 "#    ;mediaenc={srtp,srtp-mand,srtp-mandf"
+			 ",dtls_srtp,zrtp}\n"
 			 "#    ;medianat={stun,turn,ice}\n"
 			 "#    ;outbound=sip:primary.example.com\n"
 			 "#    ;outbound2=sip:secondary.example.com\n"
@@ -110,7 +111,7 @@ static int account_read_file(void)
 
 	if (!conf_fileexist(file)) {
 
-		(void)fs_mkdir(path, 0755);
+		(void)fs_mkdir(path, 0700);
 
 		err = account_write_template(file);
 		if (err)

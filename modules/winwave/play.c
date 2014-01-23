@@ -137,6 +137,7 @@ static int write_stream_open(struct auplay_st *st,
 {
 	WAVEFORMATEX wfmt;
 	MMRESULT res;
+	uint32_t sampc;
 	int i;
 
 	/* Open an audio I/O stream. */
@@ -144,9 +145,11 @@ static int write_stream_open(struct auplay_st *st,
 	st->pos = 0;
 	st->rdy = false;
 
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
+
 	for (i = 0; i < WRITE_BUFFERS; i++) {
 		memset(&st->bufs[i].wh, 0, sizeof(WAVEHDR));
-		st->bufs[i].mb = mbuf_alloc(2 * prm->frame_size);
+		st->bufs[i].mb = mbuf_alloc(2 * sampc);
 	}
 
 	wfmt.wFormatTag      = WAVE_FORMAT_PCM;

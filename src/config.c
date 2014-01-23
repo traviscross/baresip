@@ -11,11 +11,6 @@
 #include "core.h"
 
 
-#define DEBUG_MODULE "config"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 #undef MOD_PRE
 #define MOD_PRE ""  /**< Module prefix */
 
@@ -44,6 +39,8 @@ static struct config core_config = {
 		"","",
 		{8000, 48000},
 		{1, 2},
+		0,
+		0,
 		0,
 		0,
 		false,
@@ -104,13 +101,13 @@ static int dns_server_handler(const struct pl *pl, void *arg)
 
 	err = sa_decode(&sa, pl->p, pl->l);
 	if (err) {
-		DEBUG_WARNING("dns_server: could not decode `%r'\n", pl);
+		warning("config: dns_server: could not decode `%r'\n", pl);
 		return err;
 	}
 
 	err = net_dnssrv_add(&sa);
 	if (err) {
-		DEBUG_WARNING("failed to add nameserver %r: %m\n", pl, err);
+		warning("config: failed to add nameserver %r: %m\n", pl, err);
 	}
 
 	return err;
@@ -133,12 +130,12 @@ int config_parse_conf(struct config *cfg, const struct conf *conf)
 		if (0 == poll_method_type(&method, &pollm)) {
 			err = poll_method_set(method);
 			if (err) {
-				DEBUG_WARNING("poll method (%r) set: %m\n",
-					      &pollm, err);
+				warning("config: poll method (%r) set: %m\n",
+					&pollm, err);
 			}
 		}
 		else {
-			DEBUG_WARNING("unknown poll method (%r)\n", &pollm);
+			warning("config: unknown poll method (%r)\n", &pollm);
 		}
 	}
 
@@ -175,6 +172,8 @@ int config_parse_conf(struct config *cfg, const struct conf *conf)
 	(void)conf_get_range(conf, "audio_channels", &cfg->audio.channels);
 	(void)conf_get_u32(conf, "ausrc_srate", &cfg->audio.srate_src);
 	(void)conf_get_u32(conf, "auplay_srate", &cfg->audio.srate_play);
+	(void)conf_get_u32(conf, "ausrc_channels", &cfg->audio.channels_src);
+	(void)conf_get_u32(conf, "auplay_channels", &cfg->audio.channels_play);
 
 	if (0 == conf_get(conf, "audio_source", &as) &&
 	    0 == conf_get(conf, "audio_player", &ap))
@@ -214,7 +213,7 @@ int config_parse_conf(struct config *cfg, const struct conf *conf)
 	(void)conf_get_bool(conf, "rtp_stats", &cfg->avt.rtp_stats);
 
 	if (err) {
-		DEBUG_WARNING("configure parse error (%m)\n", err);
+		warning("config: configure parse error (%m)\n", err);
 	}
 
 	/* Network */
@@ -258,6 +257,8 @@ int config_print(struct re_printf *pf, const struct config *cfg)
 			 "audio_channels\t\t%H\n"
 			 "auplay_srate\t\t%u\n"
 			 "ausrc_srate\t\t%u\n"
+			 "auplay_channels\t\t%u\n"
+			 "ausrc_channels\t\t%u\n"
 			 "\n"
 #ifdef USE_VIDEO
 			 "# Video\n"
@@ -297,6 +298,7 @@ int config_print(struct re_printf *pf, const struct config *cfg)
 			 range_print, &cfg->audio.srate,
 			 range_print, &cfg->audio.channels,
 			 cfg->audio.srate_play, cfg->audio.srate_src,
+			 cfg->audio.channels_play, cfg->audio.channels_src,
 
 #ifdef USE_VIDEO
 			 cfg->video.src_mod, cfg->video.src_dev,
@@ -330,6 +332,8 @@ static const char *default_audio_device(void)
 	return "coreaudio,nil";
 #elif defined (FREEBSD)
 	return "oss,/dev/dsp";
+#elif defined (WIN32)
+	return "winwave,nil";
 #else
 	return "alsa,default";
 #endif
@@ -394,7 +398,10 @@ static int core_config_template(struct re_printf *pf, const struct config *cfg)
 			  "audio_srate\t\t%u-%u\n"
 			  "audio_channels\t\t%u-%u\n"
 			  "#ausrc_srate\t\t48000\n"
-			  "#auplay_srate\t\t48000\n",
+			  "#auplay_srate\t\t48000\n"
+			  "#ausrc_channels\t\t0\n"
+			  "#auplay_channels\t\t0\n"
+			  ,
 			  poll_method_name(poll_method_best()),
 			  default_audio_device(),
 			  default_audio_device(),
@@ -515,7 +522,7 @@ int config_write_template(const char *file, const struct config *cfg)
 
 	f = fopen(file, "w");
 	if (!f) {
-		DEBUG_WARNING("writing %s: %m\n", file, errno);
+		warning("config: writing %s: %m\n", file, errno);
 		return errno;
 	}
 

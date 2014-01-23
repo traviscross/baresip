@@ -13,7 +13,6 @@
 
 struct preproc {
 	struct aufilt_enc_st af;    /* base class */
-	uint32_t psize;
 	SpeexPreprocessState *state;
 };
 
@@ -49,6 +48,7 @@ static int encode_update(struct aufilt_enc_st **stp, void **ctx,
 			 const struct aufilt *af, struct aufilt_prm *prm)
 {
 	struct preproc *st;
+	unsigned sampc;
 	(void)ctx;
 
 	if (!stp || !af || !prm || prm->ch != 1)
@@ -58,9 +58,9 @@ static int encode_update(struct aufilt_enc_st **stp, void **ctx,
 	if (!st)
 		return ENOMEM;
 
-	st->psize = 2 * prm->frame_size;
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
 
-	st->state = speex_preprocess_state_init(prm->frame_size, prm->srate);
+	st->state = speex_preprocess_state_init(sampc, prm->srate);
 	if (!st->state)
 		goto error;
 

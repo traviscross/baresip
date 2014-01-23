@@ -46,14 +46,14 @@ static struct auplay *auplay;
 static char oss_dev[64] = "/dev/dsp";
 
 
-/**
+/*
  * Automatically calculate the fragment size depending on sampling rate
  * and number of channels. More entries can be added to the table below.
  *
  * NOTE. Powermac 8200 and linux 2.4.18 gives:
  *       SNDCTL_DSP_SETFRAGMENT: Invalid argument
  */
-static int set_fragment(int fd, uint32_t frame_size)
+static int set_fragment(int fd, uint32_t sampc)
 {
 	static const struct {
 		uint16_t max;
@@ -68,7 +68,7 @@ static int set_fragment(int fd, uint32_t frame_size)
 		{25, 8}   /* 25 x 2^8 = 6400 = 20 x 320 */
 	};
 	size_t i;
-	const uint32_t buf_size = 2 * frame_size;
+	const uint32_t buf_size = 2 * sampc;
 
 	for (i=0; i<ARRAY_SIZE(fragv); i++) {
 		const uint16_t frag_max  = fragv[i].max;
@@ -89,7 +89,7 @@ static int set_fragment(int fd, uint32_t frame_size)
 }
 
 
-static int oss_reset(int fd, uint32_t srate, uint8_t ch, int frame_size,
+static int oss_reset(int fd, uint32_t srate, uint8_t ch, int sampc,
 		     int nonblock)
 {
 	int format    = AFMT_S16_LE;
@@ -98,7 +98,7 @@ static int oss_reset(int fd, uint32_t srate, uint8_t ch, int frame_size,
 	int blocksize = 0;
 	int err;
 
-	err = set_fragment(fd, frame_size);
+	err = set_fragment(fd, sampc);
 	if (err)
 		return err;
 
@@ -206,10 +206,14 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 		     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
+	unsigned sampc;
 	int err;
 
 	(void)ctx;
 	(void)errh;
+
+	if (!stp || !as || !prm || !rh)
+		return EINVAL;
 
 	st = mem_zalloc(sizeof(*st), ausrc_destructor);
 	if (!st)
@@ -225,7 +229,9 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 
 	prm->fmt = AUFMT_S16LE;
 
-	st->mb = mbuf_alloc(2 * prm->frame_size);
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
+
+	st->mb = mbuf_alloc(2 * sampc);
 	if (!st->mb) {
 		err = ENOMEM;
 		goto out;
@@ -241,7 +247,7 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	if (err)
 		goto out;
 
-	err = oss_reset(st->fd, prm->srate, prm->ch, prm->frame_size, 1);
+	err = oss_reset(st->fd, prm->srate, prm->ch, sampc, 1);
 	if (err)
 		goto out;
 
@@ -262,7 +268,11 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 		      auplay_write_h *wh, void *arg)
 {
 	struct auplay_st *st;
+	unsigned sampc;
 	int err;
+
+	if (!stp || !ap || !prm || !wh)
+		return EINVAL;
 
 	st = mem_zalloc(sizeof(*st), auplay_destructor);
 	if (!st)
@@ -277,7 +287,9 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 
 	prm->fmt = AUFMT_S16LE;
 
-	st->sz  = 2 * prm->frame_size;
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
+
+	st->sz  = 2 * sampc;
 	st->buf = mem_alloc(st->sz, NULL);
 	if (!st->buf) {
 		err = ENOMEM;
@@ -290,7 +302,7 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 		goto out;
 	}
 
-	err = oss_reset(st->fd, prm->srate, prm->ch, prm->frame_size, 0);
+	err = oss_reset(st->fd, prm->srate, prm->ch, sampc, 0);
 	if (err)
 		goto out;
 

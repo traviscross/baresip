@@ -16,17 +16,10 @@
 #include "alsa.h"
 
 
-#define DEBUG_MODULE "alsa_play"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 struct auplay_st {
 	struct auplay *ap;      /* inheritance */
 	pthread_t thread;
 	bool run;
-	int frame_size;
-	int sample_size;
 	snd_pcm_t *write;
 	struct mbuf *mbw;
 	auplay_write_h *wh;
@@ -58,21 +51,13 @@ static void auplay_destructor(void *arg)
 static void *write_thread(void *arg)
 {
 	struct auplay_st *st = arg;
-	int err, n;
+	int n;
+	int num_frames;
 
-	err = snd_pcm_open(&st->write, st->device, SND_PCM_STREAM_PLAYBACK, 0);
-	if (err < 0) {
-		DEBUG_WARNING("open: %s %s\n", st->device, snd_strerror(err));
-		return NULL;
-	}
-
-	err = alsa_reset(st->write, st->prm.srate, st->prm.ch, st->prm.fmt,
-			 st->prm.frame_size);
-	if (err)
-		return NULL;
+	num_frames = st->prm.srate * st->prm.ptime / 1000;
 
 	while (st->run) {
-		const int samples = st->frame_size;
+		const int samples = num_frames;
 
 		st->wh(st->mbw->buf, st->mbw->size, st->arg);
 
@@ -82,20 +67,16 @@ static void *write_thread(void *arg)
 
 			n = snd_pcm_writei(st->write, st->mbw->buf, samples);
 			if (n != samples) {
-				DEBUG_WARNING("Write error: %s\n",
-					      snd_strerror(n));
-			}
-			else if (n < 0) {
-				DEBUG_WARNING("Write error %s\n",
-					      snd_strerror(n));
+				warning("alsa: write error: %s\n",
+					snd_strerror(n));
 			}
 		}
 		else if (n < 0) {
-			DEBUG_WARNING("write: %s\n", snd_strerror(n));
+			warning("alsa: write error: %s\n", snd_strerror(n));
 		}
 		else if (n != samples) {
-			DEBUG_WARNING("write: wrote %d of %d bytes\n",
-				      n, samples);
+			warning("alsa: write: wrote %d of %d bytes\n",
+				n, samples);
 		}
 	}
 
@@ -108,7 +89,14 @@ int alsa_play_alloc(struct auplay_st **stp, struct auplay *ap,
 		    auplay_write_h *wh, void *arg)
 {
 	struct auplay_st *st;
+	uint32_t sampc;
+	int num_frames;
 	int err;
+
+	if (!stp || !ap || !prm || !wh)
+		return EINVAL;
+	if (prm->fmt != AUFMT_S16LE)
+		return EINVAL;
 
 	if (!str_isset(device))
 		device = alsa_dev;
@@ -125,12 +113,28 @@ int alsa_play_alloc(struct auplay_st **stp, struct auplay *ap,
 	st->ap  = mem_ref(ap);
 	st->wh  = wh;
 	st->arg = arg;
-	st->sample_size = prm->ch * (prm->fmt == AUFMT_S16LE ? 2 : 1);
-	st->frame_size = prm->frame_size;
 
-	st->mbw = mbuf_alloc(st->sample_size * prm->frame_size);
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
+	num_frames = st->prm.srate * st->prm.ptime / 1000;
+
+	st->mbw = mbuf_alloc(2 * sampc);
 	if (!st->mbw) {
 		err = ENOMEM;
+		goto out;
+	}
+
+	err = snd_pcm_open(&st->write, st->device, SND_PCM_STREAM_PLAYBACK, 0);
+	if (err < 0) {
+		warning("alsa: could not open auplay device '%s' (%s)\n",
+			st->device, snd_strerror(err));
+		goto out;
+	}
+
+	err = alsa_reset(st->write, st->prm.srate, st->prm.ch, st->prm.fmt,
+			 num_frames);
+	if (err) {
+		warning("alsa: could not reset player '%s' (%s)\n",
+			st->device, snd_strerror(err));
 		goto out;
 	}
 

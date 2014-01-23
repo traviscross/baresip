@@ -12,7 +12,6 @@
 
 
 struct speex_st {
-	uint32_t nsamp;
 	int16_t *out;
 	SpeexEchoState *state;
 };
@@ -61,6 +60,7 @@ static void speex_aec_destructor(void *arg)
 static int aec_alloc(struct speex_st **stp, void **ctx, struct aufilt_prm *prm)
 {
 	struct speex_st *st;
+	uint32_t sampc;
 	int err, tmp, fl;
 
 	if (!stp || !ctx || !prm)
@@ -75,17 +75,17 @@ static int aec_alloc(struct speex_st **stp, void **ctx, struct aufilt_prm *prm)
 	if (!st)
 		return ENOMEM;
 
-	st->nsamp = prm->ch * prm->frame_size;
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
 
-	st->out = mem_alloc(2 * st->nsamp, NULL);
+	st->out = mem_alloc(2 * sampc, NULL);
 	if (!st->out) {
 		err = ENOMEM;
 		goto out;
 	}
 
 	/* Echo canceller with 200 ms tail length */
-	fl = 10 * prm->frame_size;
-	st->state = speex_echo_state_init(prm->frame_size, fl);
+	fl = 10 * sampc;
+	st->state = speex_echo_state_init(sampc, fl);
 	if (!st->state) {
 		err = ENOMEM;
 		goto out;
@@ -170,7 +170,7 @@ static int encode(struct aufilt_enc_st *st, int16_t *sampv, size_t *sampc)
 
 	if (*sampc) {
 		speex_echo_capture(sp->state, sampv, sp->out);
-		memcpy(sampv, sp->out, 2 * sp->nsamp);
+		memcpy(sampv, sp->out, *sampc * 2);
 	}
 
 	return 0;

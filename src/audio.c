@@ -293,6 +293,11 @@ static int add_audio_codec(struct audio *a, struct sdp_media *m,
  * Encoder audio and send via stream
  *
  * @note This function has REAL-TIME properties
+ *
+ * @param a     Audio object
+ * @param tx    Audio transmit object
+ * @param sampv Audio samples
+ * @param sampc Number of audio samples
  */
 static void encode_rtp_send(struct audio *a, struct autx *tx,
 			    int16_t *sampv, size_t sampc)
@@ -414,6 +419,10 @@ static void check_telev(struct audio *a, struct autx *tx)
  *
  * @note This function may be called from any thread
  *
+ * @param buf Buffer to fill with audio samples
+ * @param sz  Number of bytes in buffer
+ * @param arg Handler argument
+ *
  * @return true for valid audio samples, false for silence
  */
 static bool auplay_write_handler(uint8_t *buf, size_t sz, void *arg)
@@ -432,6 +441,10 @@ static bool auplay_write_handler(uint8_t *buf, size_t sz, void *arg)
  * @note This function has REAL-TIME properties
  *
  * @note This function may be called from any thread
+ *
+ * @param buf Buffer with audio samples
+ * @param sz  Number of bytes in buffer
+ * @param arg Handler argument
  */
 static void ausrc_read_handler(const uint8_t *buf, size_t sz, void *arg)
 {
@@ -494,11 +507,6 @@ static void handle_telev(struct audio *a, struct mbuf *mb)
 }
 
 
-/**
- * Decode incoming packets using the Audio decoder
- *
- * NOTE: mb=NULL if no packet received
- */
 static int aurx_stream_decode(struct aurx *rx, struct mbuf *mb)
 {
 	size_t sampc = AUDIO_SAMPSZ;
@@ -754,7 +762,7 @@ static void aufilt_param_set(struct aufilt_prm *prm,
 
 	prm->srate      = get_srate(ac);
 	prm->ch         = ac->ch;
-	prm->frame_size = calc_nsamp(get_srate(ac), ac->ch, ptime);
+	prm->ptime      = ptime;
 }
 
 
@@ -812,6 +820,10 @@ static int aurx_print_pipeline(struct re_printf *pf, const struct aurx *aurx)
  * Setup the audio-filter chain
  *
  * must be called before auplay/ausrc-alloc
+ *
+ * @param a Audio object
+ *
+ * @return 0 if success, otherwise errorcode
  */
 static int aufilt_setup(struct audio *a)
 {
@@ -871,30 +883,43 @@ static int start_player(struct aurx *rx, struct audio *a)
 {
 	const struct aucodec *ac = rx->ac;
 	uint32_t srate_dsp = get_srate(ac);
+	uint32_t channels_dsp;
+	bool resamp = false;
 	int err;
 
 	if (!ac)
 		return 0;
 
-	/* Optional resampler, if configured */
+	channels_dsp = ac->ch;
+
 	if (a->cfg.srate_play && a->cfg.srate_play != srate_dsp) {
-
+		resamp = true;
 		srate_dsp = a->cfg.srate_play;
+	}
+	if (a->cfg.channels_play && a->cfg.channels_play != channels_dsp) {
+		resamp = true;
+		channels_dsp = a->cfg.channels_play;
+	}
 
-		info("audio: enable auplay resampler: %u --> %u Hz\n",
-		     get_srate(ac), srate_dsp);
+	/* Optional resampler, if configured */
+	if (resamp && !rx->sampv_rs) {
 
-		if (!rx->sampv_rs) {
-			rx->sampv_rs = mem_zalloc(AUDIO_SAMPSZ * 2, NULL);
-			if (!rx->sampv_rs)
-				return ENOMEM;
-		}
+		info("audio: enable auplay resampler:"
+		     " %uHz/%uch --> %uHz/%uch\n",
+		     get_srate(ac), ac->ch, srate_dsp, channels_dsp);
+
+		rx->sampv_rs = mem_zalloc(AUDIO_SAMPSZ * 2, NULL);
+		if (!rx->sampv_rs)
+			return ENOMEM;
 
 		err = auresamp_setup(&rx->resamp,
 				     get_srate(ac), ac->ch,
-				     srate_dsp, ac->ch);
-		if (err)
+				     srate_dsp, channels_dsp);
+		if (err) {
+			warning("audio: could not setup auplay resampler"
+				" (%m)\n", err);
 			return err;
+		}
 	}
 
 	/* Start Audio Player */
@@ -904,11 +929,13 @@ static int start_player(struct aurx *rx, struct audio *a)
 
 		prm.fmt        = AUFMT_S16LE;
 		prm.srate      = srate_dsp;
-		prm.ch         = ac->ch;
-		prm.frame_size = calc_nsamp(prm.srate, prm.ch, rx->ptime);
+		prm.ch         = channels_dsp;
+		prm.ptime      = rx->ptime;
 
 		if (!rx->aubuf) {
-			const size_t psize = 2 * prm.frame_size;
+			size_t psize;
+
+			psize = 2 * calc_nsamp(prm.srate, prm.ch, prm.ptime);
 
 			err = aubuf_alloc(&rx->aubuf, psize * 1, psize * 8);
 			if (err)
@@ -932,31 +959,44 @@ static int start_player(struct aurx *rx, struct audio *a)
 static int start_source(struct autx *tx, struct audio *a)
 {
 	const struct aucodec *ac = tx->ac;
-	uint32_t srate_dsp = get_srate(tx->ac);
+	uint32_t srate_dsp = get_srate(ac);
+	uint32_t channels_dsp;
+	bool resamp = false;
 	int err;
 
 	if (!ac)
 		return 0;
 
-	/* Optional resampler, if configured */
+	channels_dsp = ac->ch;
+
 	if (a->cfg.srate_src && a->cfg.srate_src != srate_dsp) {
-
+		resamp = true;
 		srate_dsp = a->cfg.srate_src;
+	}
+	if (a->cfg.channels_src && a->cfg.channels_src != channels_dsp) {
+		resamp = true;
+		channels_dsp = a->cfg.channels_src;
+	}
 
-		info("audio: enable ausrc resampler: %u <-- %u Hz\n",
-		     get_srate(ac), srate_dsp);
+	/* Optional resampler, if configured */
+	if (resamp && !tx->sampv_rs) {
 
-		if (!tx->sampv_rs) {
-			tx->sampv_rs = mem_zalloc(AUDIO_SAMPSZ * 2, NULL);
-			if (!tx->sampv_rs)
-				return ENOMEM;
-		}
+		info("audio: enable ausrc resampler:"
+		     " %uHz/%uch <-- %uHz/%uch\n",
+		     get_srate(ac), ac->ch, srate_dsp, channels_dsp);
+
+		tx->sampv_rs = mem_zalloc(AUDIO_SAMPSZ * 2, NULL);
+		if (!tx->sampv_rs)
+			return ENOMEM;
 
 		err = auresamp_setup(&tx->resamp,
-				     srate_dsp, ac->ch,
+				     srate_dsp, channels_dsp,
 				     get_srate(ac), ac->ch);
-		if (err)
+		if (err) {
+			warning("audio: could not setup ausrc resampler"
+				" (%m)\n", err);
 			return err;
+		}
 	}
 
 	/* Start Audio Source */
@@ -966,10 +1006,10 @@ static int start_source(struct autx *tx, struct audio *a)
 
 		prm.fmt        = AUFMT_S16LE;
 		prm.srate      = srate_dsp;
-		prm.ch         = ac->ch;
-		prm.frame_size = calc_nsamp(prm.srate, prm.ch, tx->ptime);
+		prm.ch         = channels_dsp;
+		prm.ptime      = tx->ptime;
 
-		tx->psize = 2 * prm.frame_size;
+		tx->psize = 2 * calc_nsamp(prm.srate, prm.ch, prm.ptime);
 
 		if (!tx->aubuf) {
 			err = aubuf_alloc(&tx->aubuf, tx->psize * 2,

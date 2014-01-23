@@ -213,6 +213,9 @@ static int packet_handler(bool marker, const uint8_t *hdr, size_t hdr_len,
  * Encode video and send via RTP stream
  *
  * @note This function has REAL-TIME properties
+ *
+ * @param vtx   Video transmit object
+ * @param frame Video frame to send
  */
 static void encode_rtp_send(struct vtx *vtx, struct vidframe *frame)
 {
@@ -270,6 +273,9 @@ static void encode_rtp_send(struct vtx *vtx, struct vidframe *frame)
 
 /**
  * Read frames from video source
+ *
+ * @param frame Video frame
+ * @param arg   Handler argument
  *
  * @note This function has REAL-TIME properties
  */
@@ -345,6 +351,12 @@ static int vrx_alloc(struct vrx *vrx, struct video *video)
  * Decode incoming RTP packets using the Video decoder
  *
  * NOTE: mb=NULL if no packet received
+ *
+ * @param vrx Video receive object
+ * @param hdr RTP Header
+ * @param mb  Buffer with RTP payload
+ *
+ * @return 0 if success, otherwise errorcode
  */
 static int video_stream_decode(struct vrx *vrx, const struct rtp_header *hdr,
 			       struct mbuf *mb)

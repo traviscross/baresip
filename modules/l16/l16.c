@@ -10,19 +10,16 @@
 enum {NR_CODECS = 8};
 
 
-struct aucodec_st {
-	struct aucodec *ac;  /* inheritance */
-};
-
-
 static int encode(struct auenc_state *st, uint8_t *buf, size_t *len,
 		  const int16_t *sampv, size_t sampc)
 {
 	int16_t *p = (void *)buf;
-
 	(void)st;
 
-	if (sampc*2 > *len)
+	if (!buf || !len || !sampv)
+		return EINVAL;
+
+	if (*len < sampc*2)
 		return ENOMEM;
 
 	*len = sampc*2;
@@ -38,15 +35,18 @@ static int decode(struct audec_state *st, int16_t *sampv, size_t *sampc,
 		  const uint8_t *buf, size_t len)
 {
 	int16_t *p = (void *)buf;
-
 	(void)st;
 
-	if (len/2 > *sampc)
+	if (!buf || !len || !sampv)
+		return EINVAL;
+
+	if (*sampc < len/2)
 		return ENOMEM;
 
 	*sampc = len/2;
 
-	while ((len -= 2))
+	len /= 2;
+	while (len--)
 		*sampv++ = ntohs(*p++);
 
 	return 0;

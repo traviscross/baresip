@@ -87,7 +87,7 @@ int coreaudio_player_alloc(struct auplay_st **stp, struct auplay *ap,
 {
 	AudioStreamBasicDescription fmt;
 	struct auplay_st *st;
-	uint32_t bytc, i;
+	uint32_t sampc, bytc, i;
 	OSStatus status;
 	int err;
 
@@ -130,7 +130,8 @@ int coreaudio_player_alloc(struct auplay_st **stp, struct auplay *ap,
 		goto out;
 	}
 
-	bytc = prm->frame_size * bytesps(prm->fmt);
+	sampc = prm->srate * prm->ch * prm->ptime / 1000;
+	bytc  = sampc * bytesps(prm->fmt);
 
 	for (i=0; i<ARRAY_SIZE(st->buf); i++)  {
 

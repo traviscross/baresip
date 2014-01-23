@@ -21,7 +21,7 @@ struct auenc_state {
 	void *enc;
 	SpeexBits bits;
 
-	uint32_t frame_size;  /* Number of samples */
+	uint32_t frame_size;  /* Number of sample-frames */
 	uint8_t channels;
 };
 
@@ -32,7 +32,7 @@ struct audec_state {
 	SpeexStereoState stereo;
 	SpeexCallback callback;
 
-	uint32_t frame_size;  /* Number of samples */
+	uint32_t frame_size;  /* Number of sample-frames */
 	uint8_t channels;
 };
 
@@ -223,7 +223,7 @@ static int encode_update(struct auenc_state **aesp, const struct aucodec *ac,
 	if (!st)
 		return ENOMEM;
 
-	st->frame_size = 160 * ac->srate/8000;
+	st->frame_size = ac->srate * SPEEX_PTIME / 1000;
 	st->channels = ac->ch;
 
 	/* Encoder */
@@ -277,7 +277,7 @@ static int decode_update(struct audec_state **adsp,
 	if (!st)
 		return ENOMEM;
 
-	st->frame_size = 160 * ac->srate/8000;
+	st->frame_size = ac->srate * SPEEX_PTIME / 1000;
 	st->channels = ac->ch;
 
 	/* Decoder */

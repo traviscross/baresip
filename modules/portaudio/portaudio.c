@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2010 Creytiv.com
  */
+#include <stdlib.h>
 #include <string.h>
 #include <portaudio.h>
 #include <re.h>
@@ -19,7 +20,8 @@ struct ausrc_st {
 	PaStream *stream_rd;
 	ausrc_read_h *rh;
 	void *arg;
-	bool ready;
+	volatile bool ready;
+	unsigned ch;
 };
 
 struct auplay_st {
@@ -27,7 +29,8 @@ struct auplay_st {
 	PaStream *stream_wr;
 	auplay_write_h *wh;
 	void *arg;
-	bool ready;
+	volatile bool ready;
+	unsigned ch;
 };
 
 
@@ -35,7 +38,7 @@ static struct ausrc *ausrc;
 static struct auplay *auplay;
 
 
-/**
+/*
  * This routine will be called by the PortAudio engine when audio is needed.
  * It may called at interrupt level on some machines so don't do anything
  * that could mess up the system like calling malloc() or free().
@@ -46,13 +49,18 @@ static int read_callback(const void *inputBuffer, void *outputBuffer,
 			 PaStreamCallbackFlags statusFlags, void *userData)
 {
 	struct ausrc_st *st = userData;
+	unsigned sampc;
 
 	(void)outputBuffer;
 	(void)timeInfo;
 	(void)statusFlags;
 
-	if (st->ready)
-		st->rh(inputBuffer, 2*frameCount, st->arg);
+	if (!st->ready)
+		return paAbort;
+
+	sampc = frameCount * st->ch;
+
+	st->rh(inputBuffer, 2*sampc, st->arg);
 
 	return paContinue;
 }
@@ -64,13 +72,18 @@ static int write_callback(const void *inputBuffer, void *outputBuffer,
 			  PaStreamCallbackFlags statusFlags, void *userData)
 {
 	struct auplay_st *st = userData;
+	unsigned sampc;
 
 	(void)inputBuffer;
 	(void)timeInfo;
 	(void)statusFlags;
 
-	if (st->ready)
-		st->wh(outputBuffer, 2*frameCount, st->arg);
+	if (!st->ready)
+		return paAbort;
+
+	sampc = frameCount * st->ch;
+
+	st->wh(outputBuffer, 2*sampc, st->arg);
 
 	return paContinue;
 }
@@ -81,6 +94,7 @@ static int read_stream_open(struct ausrc_st *st, const struct ausrc_prm *prm,
 {
 	PaStreamParameters prm_in;
 	PaError err;
+	unsigned long frames_per_buffer = prm->srate * prm->ptime / 1000;
 
 	memset(&prm_in, 0, sizeof(prm_in));
 	prm_in.device           = dev;
@@ -90,7 +104,7 @@ static int read_stream_open(struct ausrc_st *st, const struct ausrc_prm *prm,
 
 	st->stream_rd = NULL;
 	err = Pa_OpenStream(&st->stream_rd, &prm_in, NULL, prm->srate,
-			    prm->frame_size, paNoFlag, read_callback, st);
+			    frames_per_buffer, paNoFlag, read_callback, st);
 	if (paNoError != err) {
 		warning("portaudio: read: Pa_OpenStream: %s\n",
 			Pa_GetErrorText(err));
@@ -113,6 +127,7 @@ static int write_stream_open(struct auplay_st *st,
 {
 	PaStreamParameters prm_out;
 	PaError err;
+	unsigned long frames_per_buffer = prm->srate * prm->ptime / 1000;
 
 	memset(&prm_out, 0, sizeof(prm_out));
 	prm_out.device           = dev;
@@ -122,7 +137,7 @@ static int write_stream_open(struct auplay_st *st,
 
 	st->stream_wr = NULL;
 	err = Pa_OpenStream(&st->stream_wr, NULL, &prm_out, prm->srate,
-			    prm->frame_size, paNoFlag, write_callback, st);
+			    frames_per_buffer, paNoFlag, write_callback, st);
 	if (paNoError != err) {
 		warning("portaudio: write: Pa_OpenStream: %s\n",
 			Pa_GetErrorText(err));
@@ -176,11 +191,20 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 		     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
+	PaDeviceIndex dev_index;
 	int err;
 
 	(void)ctx;
 	(void)device;
 	(void)errh;
+
+	if (!stp || !as || !prm)
+		return EINVAL;
+
+	if (str_isset(device))
+		dev_index = atoi(device);
+	else
+		dev_index = Pa_GetDefaultInputDevice();
 
 	prm->fmt = AUFMT_S16LE;
 
@@ -191,12 +215,13 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	st->as  = mem_ref(as);
 	st->rh  = rh;
 	st->arg = arg;
-
-	err = read_stream_open(st, prm, Pa_GetDefaultInputDevice());
-	if (err)
-		goto out;
+	st->ch  = prm->ch;
 
 	st->ready = true;
+
+	err = read_stream_open(st, prm, dev_index);
+	if (err)
+		goto out;
 
  out:
 	if (err)
@@ -213,9 +238,18 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 		      auplay_write_h *wh, void *arg)
 {
 	struct auplay_st *st;
+	PaDeviceIndex dev_index;
 	int err;
 
 	(void)device;
+
+	if (!stp || !ap || !prm)
+		return EINVAL;
+
+	if (str_isset(device))
+		dev_index = atoi(device);
+	else
+		dev_index = Pa_GetDefaultOutputDevice();
 
 	prm->fmt = AUFMT_S16LE;
 
@@ -226,12 +260,13 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 	st->ap  = mem_ref(ap);
 	st->wh  = wh;
 	st->arg = arg;
-
-	err = write_stream_open(st, prm, Pa_GetDefaultOutputDevice());
-	if (err)
-		goto out;
+	st->ch  = prm->ch;
 
 	st->ready = true;
+
+	err = write_stream_open(st, prm, dev_index);
+	if (err)
+		goto out;
 
  out:
 	if (err)
@@ -245,12 +280,12 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 
 static int pa_init(void)
 {
-	PaError error;
+	PaError paerr;
 	int i, n, err = 0;
 
-	error = Pa_Initialize();
-	if (paNoError != error) {
-		warning("portaudio: init: %s\n", Pa_GetErrorText(error));
+	paerr = Pa_Initialize();
+	if (paNoError != paerr) {
+		warning("portaudio: init: %s\n", Pa_GetErrorText(paerr));
 		return ENODEV;
 	}
 
@@ -259,12 +294,12 @@ static int pa_init(void)
 	info("portaudio: device count is %d\n", n);
 
 	for (i=0; i<n; i++) {
-		const PaDeviceInfo *info;
+		const PaDeviceInfo *devinfo;
 
-		info = Pa_GetDeviceInfo(i);
+		devinfo = Pa_GetDeviceInfo(i);
 
-		debug("portaudio: device %d: %s\n", i, info->name);
-		(void)info;
+		debug("portaudio: device %d: %s\n", i, devinfo->name);
+		(void)devinfo;
 	}
 
 	if (paNoDevice != Pa_GetDefaultInputDevice())

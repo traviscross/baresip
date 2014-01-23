@@ -8,7 +8,7 @@
 extern char alsa_dev[64];
 
 int alsa_reset(snd_pcm_t *pcm, uint32_t srate, uint32_t ch, enum aufmt fmt,
-	       uint32_t frame_size);
+	       uint32_t num_frames);
 int alsa_src_alloc(struct ausrc_st **stp, struct ausrc *as,
 		   struct media_ctx **ctx,
 		   struct ausrc_prm *prm, const char *device,

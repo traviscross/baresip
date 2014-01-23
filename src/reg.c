@@ -8,11 +8,6 @@
 #include "core.h"
 
 
-#define DEBUG_MODULE "reg"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /** Register client */
 struct reg {
 	struct le le;                /**< Linked list element                */
@@ -110,7 +105,7 @@ static void register_handler(int err, const struct sip_msg *msg, void *arg)
 	const struct sip_hdr *hdr;
 
 	if (err) {
-		DEBUG_WARNING("%s: Register: %m\n", ua_aor(reg->ua), err);
+		warning("reg: %s: Register: %m\n", ua_aor(reg->ua), err);
 
 		reg->scode = 999;
 
@@ -148,8 +143,8 @@ static void register_handler(int err, const struct sip_msg *msg, void *arg)
 	}
 	else if (msg->scode >= 300) {
 
-		DEBUG_WARNING("%s: %u %r (%s)\n", ua_aor(reg->ua),
-			      msg->scode, &msg->reason, reg->srv);
+		warning("reg: %s: %u %r (%s)\n", ua_aor(reg->ua),
+			msg->scode, &msg->reason, reg->srv);
 
 		reg->scode = msg->scode;
 		reg->sipfd = -1;

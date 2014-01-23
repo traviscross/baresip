@@ -7,11 +7,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "cons"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 enum {CONS_PORT = 5555};
 
 struct ui_st {
@@ -147,15 +142,15 @@ static int cons_alloc(struct ui_st **stp, struct ui_prm *prm,
 		goto out;
 	err = udp_listen(&st->us, &local, udp_recv, st);
 	if (err) {
-		DEBUG_WARNING("failed to listen on UDP port %d (%m)\n",
-			      sa_port(&local), err);
+		warning("cons: failed to listen on UDP port %d (%m)\n",
+			sa_port(&local), err);
 		goto out;
 	}
 
 	err = tcp_listen(&st->ts, &local, tcp_conn_handler, st);
 	if (err) {
-		DEBUG_WARNING("failed to listen on TCP port %d (%m)\n",
-			      sa_port(&local), err);
+		warning("cons: failed to listen on TCP port %d (%m)\n",
+			sa_port(&local), err);
 		goto out;
 	}
 

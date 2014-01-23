@@ -10,6 +10,7 @@
 #include "aubridge.h"
 
 
+/* The packet-time is fixed to 20 milliseconds */
 enum {PTIME = 20};
 
 
@@ -54,9 +55,12 @@ static void *device_thread(void *arg)
 	struct device *dev = arg;
 	struct auresamp rs;
 	int16_t *sampv_in, *sampv_out;
-	size_t sampc_in  = dev->auplay->prm.frame_size;
-	size_t sampc_out = dev->ausrc->prm.frame_size;
+	size_t sampc_in;
+	size_t sampc_out;
 	int err;
+
+	sampc_in = dev->auplay->prm.srate * dev->auplay->prm.ch * PTIME/1000;
+	sampc_out = dev->ausrc->prm.srate * dev->ausrc->prm.ch * PTIME/1000;
 
 	auresamp_init(&rs);
 

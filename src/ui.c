@@ -8,11 +8,6 @@
 #include "core.h"
 
 
-#define DEBUG_MODULE "ui"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /** User Interface */
 struct ui {
 	struct le le;
@@ -91,8 +86,8 @@ int ui_register(struct ui **uip, const char *name,
 
 		err = alloch(&ui->st, &prm, ui_handler, ui);
 		if (err) {
-			DEBUG_WARNING("register: module '%s' failed (%m)\n",
-				      ui->name, err);
+			warning("ui: register: module '%s' failed (%m)\n",
+				ui->name, err);
 		}
 	}
 

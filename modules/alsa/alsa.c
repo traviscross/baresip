@@ -15,9 +15,16 @@
 #include "alsa.h"
 
 
-#define DEBUG_MODULE "alsa"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
+/**
+ * @defgroup alsa alsa
+ *
+ * Advanced Linux Sound Architecture (ALSA) audio driver module
+ *
+ *
+ * References:
+ *
+ *    http://www.alsa-project.org/main/index.php/Main_Page
+ */
 
 
 char alsa_dev[64] = "default";
@@ -39,80 +46,80 @@ static inline snd_pcm_format_t audio_fmt(enum aufmt fmt)
 
 
 int alsa_reset(snd_pcm_t *pcm, uint32_t srate, uint32_t ch, enum aufmt fmt,
-	       uint32_t frame_size)
+	       uint32_t num_frames)
 {
 	snd_pcm_hw_params_t *hw_params = NULL;
 	const snd_pcm_format_t pcmfmt = audio_fmt(fmt);
-	snd_pcm_uframes_t period = frame_size, bufsize = frame_size * 10;
+	snd_pcm_uframes_t period = num_frames, bufsize = num_frames * 10;
 	int err;
 
 	err = snd_pcm_hw_params_malloc(&hw_params);
 	if (err < 0) {
-		DEBUG_WARNING("cannot allocate hw params (%s)\n",
-			      snd_strerror(err));
+		warning("alsa: cannot allocate hw params (%s)\n",
+			snd_strerror(err));
 		goto out;
 	}
 
 	err = snd_pcm_hw_params_any(pcm, hw_params);
 	if (err < 0) {
-		DEBUG_WARNING("cannot initialize hw params (%s)\n",
-			      snd_strerror(err));
+		warning("alsa: cannot initialize hw params (%s)\n",
+			snd_strerror(err));
 		goto out;
 	}
 
 	err = snd_pcm_hw_params_set_access(pcm, hw_params,
 					   SND_PCM_ACCESS_RW_INTERLEAVED);
 	if (err < 0) {
-		DEBUG_WARNING("cannot set access type (%s)\n",
-			      snd_strerror(err));
+		warning("alsa: cannot set access type (%s)\n",
+			snd_strerror(err));
 		goto out;
 	}
 
 	err = snd_pcm_hw_params_set_format(pcm, hw_params, pcmfmt);
 	if (err < 0) {
-		DEBUG_WARNING("cannot set sample format %d (%s)\n",
-			      pcmfmt, snd_strerror(err));
+		warning("alsa: cannot set sample format %d (%s)\n",
+			pcmfmt, snd_strerror(err));
 		goto out;
 	}
 
 	err = snd_pcm_hw_params_set_rate(pcm, hw_params, srate, 0);
 	if (err < 0) {
-		DEBUG_WARNING("cannot set sample rate (%s)\n",
-			      snd_strerror(err));
+		warning("alsa: cannot set sample rate to %u Hz (%s)\n",
+			srate, snd_strerror(err));
 		goto out;
 	}
 
 	err = snd_pcm_hw_params_set_channels(pcm, hw_params, ch);
 	if (err < 0) {
-		DEBUG_WARNING("cannot set channel count to %d (%s)\n",
-			      ch, snd_strerror(err));
+		warning("alsa: cannot set channel count to %d (%s)\n",
+			ch, snd_strerror(err));
 		goto out;
 	}
 
 	err = snd_pcm_hw_params_set_period_size_near(pcm, hw_params,
 						     &period, 0);
 	if (err < 0) {
-		DEBUG_WARNING("cannot set period size to %d (%s)\n",
-			      period, snd_strerror(err));
+		warning("alsa: cannot set period size to %d (%s)\n",
+			period, snd_strerror(err));
 	}
 
 	err = snd_pcm_hw_params_set_buffer_size_near(pcm, hw_params, &bufsize);
 	if (err < 0) {
-		DEBUG_WARNING("cannot set buffer size to %d (%s)\n",
-			      bufsize, snd_strerror(err));
+		warning("alsa: cannot set buffer size to %d (%s)\n",
+			bufsize, snd_strerror(err));
 	}
 
 	err = snd_pcm_hw_params(pcm, hw_params);
 	if (err < 0) {
-		DEBUG_WARNING("cannot set parameters (%s)\n",
-			      snd_strerror(err));
+		warning("alsa: cannot set parameters (%s)\n",
+			snd_strerror(err));
 		goto out;
 	}
 
 	err = snd_pcm_prepare(pcm);
 	if (err < 0) {
-		DEBUG_WARNING("cannot prepare audio interface for use (%s)\n",
-			      snd_strerror(err));
+		warning("alsa: cannot prepare audio interface for use (%s)\n",
+			snd_strerror(err));
 		goto out;
 	}
 
@@ -122,7 +129,7 @@ int alsa_reset(snd_pcm_t *pcm, uint32_t srate, uint32_t ch, enum aufmt fmt,
 	snd_pcm_hw_params_free(hw_params);
 
 	if (err) {
-		DEBUG_WARNING("init failed: err=%d\n", err);
+		warning("alsa: init failed: err=%d\n", err);
 	}
 
 	return err;

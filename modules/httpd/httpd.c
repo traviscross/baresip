@@ -7,11 +7,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "httpd"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 static struct http_sock *httpsock;
 
 

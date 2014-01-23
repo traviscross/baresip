@@ -1,3 +1,52 @@
+2014-01-23 Alfred E. Heggestad <aeh@db.org>
+
+	* Version 0.4.10
+
+	* baresip:
+	  - account: add account_set_display_name() -- thanks Dimitris
+	  - audio: use both srate/channels to check if resampler is needed
+	  - aufilt: change from frame_size to ptime
+	  - auplay: change from frame_size to ptime
+	  - ausrc: change from frame_size to ptime
+	  - config: add optional ausrc_channels and auplay_channels
+	  - config: create config dir with mode 0700 (suggested by Jann Horn)
+	  - play: update auplay usage with ptime
+
+	* alsa: update to new ausrc/auplay API with ptime
+		fix bug when snd_pcm_readi() returns -EPIPE (thanks Remik)
+		open device from main thread instead of alsa-thread (thanks EL)
+		(caused problems with Sennheiser Century SC 660 + USB adapter)
+	
+	* auloop: minor cleanups and improvements
+
+	* coreaudio: update to new ausrc/auplay API with ptime
+
+	* gst: update to new ausrc/auplay API with ptime
+
+	* l16: fix a bug with sample count
+
+	* opus: fix a memory corruption error in opus_decode_pkloss()
+
+	* oss: update to new ausrc/auplay API with ptime
+
+	* plc: update to new aufilt API with ptime
+
+	* portaudio: update to new ausrc/auplay API with ptime
+		     fix bugs when using channels=2 (stereo)
+		     configure device index using "device" parameter
+
+	* rst: update to new ausrc/auplay API with ptime
+
+	* speex_aec: update to new aufilt API with ptime
+
+	* speex_pp: update to new aufilt API with ptime
+
+	* winwave: update to new ausrc/auplay API with ptime
+
+	* zrtp:	update to use libzrtp from Travis Cross' github
+		use config dir to store ZRTP cache-file (thanks Juha Heinanen)
+	
+	
 2014-01-06 Alfred E. Heggestad <aeh@db.org>
 
 	* Version 0.4.9

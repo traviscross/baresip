@@ -8,11 +8,6 @@
 #include <zrtp.h>
 
 
-#define DEBUG_MODULE "zrtp"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /**
  * @defgroup zrtp zrtp
  *
@@ -25,6 +20,7 @@
  *     Briefly tested with Twinkle 1.4.2 and Jitsi 2.2.4603.9615
  *
  *     This module is using ZRTP implementation in Freeswitch
+ *     https://github.com/traviscross/libzrtp
  */
 
 
@@ -42,7 +38,7 @@ struct menc_media {
 
 
 static zrtp_global_t *zrtp_global;
-static zrtp_zid_t zrtp_zid;
+static zrtp_config_t zrtp_config;
 
 
 static void session_destructor(void *arg)
@@ -78,14 +74,14 @@ static bool udp_helper_send(int *err, struct sa *dst,
 
 	s = zrtp_process_rtp(st->zrtp_stream, (char *)mbuf_buf(mb), &length);
 	if (s != zrtp_status_ok) {
-		DEBUG_WARNING("zrtp_process_rtp failed (status = %d)\n", s);
+		warning("zrtp: zrtp_process_rtp failed (status = %d)\n", s);
 		return false;
 	}
 
 	/* make sure target buffer is large enough */
 	if (length > mbuf_get_space(mb)) {
-		DEBUG_WARNING("zrtp_process_rtp: length > space (%u > %u)\n",
-			      length, mbuf_get_space(mb));
+		warning("zrtp: zrtp_process_rtp: length > space (%u > %u)\n",
+			length, mbuf_get_space(mb));
 		*err = ENOMEM;
 	}
 
@@ -110,7 +106,7 @@ static bool udp_helper_recv(struct sa *src, struct mbuf *mb, void *arg)
 		if (s == zrtp_status_drop)
 			return true;
 
-		DEBUG_WARNING("zrtp_process_srtp: %d\n", s);
+		warning("zrtp: zrtp_process_srtp: %d\n", s);
 		return false;
 	}
 
@@ -137,10 +133,10 @@ static int session_alloc(struct menc_sess **sessp, struct sdp_session *sdp,
 	if (!st)
 		return ENOMEM;
 
-	s = zrtp_session_init(zrtp_global, NULL, zrtp_zid,
+	s = zrtp_session_init(zrtp_global, NULL,
 			      ZRTP_SIGNALING_ROLE_UNKNOWN, &st->zrtp_session);
 	if (s != zrtp_status_ok) {
-		DEBUG_WARNING("zrtp_session_init failed (status = %d)\n", s);
+		warning("zrtp: zrtp_session_init failed (status = %d)\n", s);
 		err = EPROTO;
 		goto out;
 	}
@@ -185,7 +181,7 @@ static int media_alloc(struct menc_media **stp, struct menc_sess *sess,
 
 	s = zrtp_stream_attach(sess->zrtp_session, &st->zrtp_stream);
 	if (s != zrtp_status_ok) {
-		DEBUG_WARNING("zrtp_stream_attached failed (status=%d)\n", s);
+		warning("zrtp: zrtp_stream_attach failed (status=%d)\n", s);
 		err = EPROTO;
 		goto out;
 	}
@@ -206,7 +202,7 @@ static int media_alloc(struct menc_media **stp, struct menc_sess *sess,
 
 		s = zrtp_stream_start(st->zrtp_stream, rtp_sess_ssrc(rtp));
 		if (s != zrtp_status_ok) {
-			DEBUG_WARNING("zrtp_stream_start: status = %d\n", s);
+			warning("zrtp: zrtp_stream_start: status = %d\n", s);
 		}
 	}
 
@@ -234,8 +230,8 @@ static int zrtp_send_rtp_callback(const zrtp_stream_t *stream,
 
 	err = udp_send(st->rtpsock, &st->raddr, mb);
 	if (err) {
-		DEBUG_WARNING("udp_send %u bytes (%m)\n",
-			      rtp_packet_length, err);
+		warning("zrtp: udp_send %u bytes (%m)\n",
+			rtp_packet_length, err);
 	}
 
 	mem_deref(mb);
@@ -251,20 +247,31 @@ static struct menc menc_zrtp = {
 
 static int module_init(void)
 {
-	zrtp_config_t config;
 	zrtp_status_t s;
+	char config_path[256] = "";
+	int err;
 
-	zrtp_config_defaults(&config);
+	zrtp_config_defaults(&zrtp_config);
 
-	config.cb.misc_cb.on_send_packet = zrtp_send_rtp_callback;
+	err = conf_path_get(config_path, sizeof(config_path));
+	if (err) {
+		warning("zrtp: could not get config path: %m\n", err);
+		return err;
+	}
+	if (re_snprintf(zrtp_config.cache_file_cfg.cache_path,
+			sizeof(zrtp_config.cache_file_cfg.cache_path),
+			"%s/zrtp_cache.dat", config_path) < 0)
+	        return ENOMEM;
 
-	s = zrtp_init(&config, &zrtp_global);
+	rand_bytes(zrtp_config.zid, sizeof(zrtp_config.zid));
+
+	zrtp_config.cb.misc_cb.on_send_packet = zrtp_send_rtp_callback;
+
+	s = zrtp_init(&zrtp_config, &zrtp_global);
 	if (zrtp_status_ok != s) {
-		DEBUG_WARNING("zrtp_init() failed (status = %d)\n", s);
+		warning("zrtp: zrtp_init() failed (status = %d)\n", s);
 		return ENOSYS;
 	}
-
-	rand_bytes(zrtp_zid, sizeof(zrtp_zid));
 
 	menc_register(&menc_zrtp);
 

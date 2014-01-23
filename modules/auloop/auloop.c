@@ -22,9 +22,12 @@ struct audio_loop {
 	const struct aucodec *ac;
 	struct auenc_state *enc;
 	struct audec_state *dec;
+	int16_t *sampv;
+	size_t sampc;
+	struct tmr tmr;
 	uint32_t srate;
 	uint32_t ch;
-	uint32_t fs;
+
 	uint32_t n_read;
 	uint32_t n_write;
 };
@@ -51,8 +54,10 @@ static void auloop_destructor(void *arg)
 {
 	struct audio_loop *al = arg;
 
+	tmr_cancel(&al->tmr);
 	mem_deref(al->ausrc);
 	mem_deref(al->auplay);
+	mem_deref(al->sampv);
 	mem_deref(al->ab);
 	mem_deref(al->enc);
 	mem_deref(al->dec);
@@ -61,40 +66,47 @@ static void auloop_destructor(void *arg)
 
 static void print_stats(struct audio_loop *al)
 {
-	(void)re_fprintf(stderr, "\r%uHz %dch frame_size=%u"
-			 " n_read=%u n_write=%u"
-			 " aubuf=%5u codec=%s",
-			 al->srate, al->ch, al->fs,
-			 al->n_read, al->n_write,
-			 aubuf_cur_size(al->ab), aucodec);
+	double rw_ratio = 0.0;
+
+	if (al->n_write)
+		rw_ratio = 1.0 * al->n_read / al->n_write;
+
+	(void)re_fprintf(stderr, "\r%uHz %dch "
+			 " n_read=%u n_write=%u rw_ratio=%.2f",
+			 al->srate, al->ch,
+			 al->n_read, al->n_write, rw_ratio);
+
+	if (str_isset(aucodec))
+		(void)re_fprintf(stderr, " codec='%s'", aucodec);
 }
 
 
-static int codec_read(struct audio_loop *al, uint8_t *buf, size_t sz)
+static void tmr_handler(void *arg)
 {
-	int16_t *sampv;
-	uint8_t x[1024];
-	size_t xlen = sizeof(x), sampc = sz/2;
+	struct audio_loop *al = arg;
+
+	tmr_start(&al->tmr, 100, tmr_handler, al);
+	print_stats(al);
+}
+
+
+static int codec_read(struct audio_loop *al, int16_t *sampv, size_t sampc)
+{
+	uint8_t x[2560];
+	size_t xlen = sizeof(x);
 	int err;
 
-	sampv = mem_alloc(sz, NULL);
-	if (!sampv) {
-		err = ENOMEM;
-		goto out;
-	}
+	aubuf_read_samp(al->ab, al->sampv, al->sampc);
 
-	aubuf_read_samp(al->ab, sampv, sampc);
-
-	err = al->ac->ench(al->enc, x, &xlen, sampv, sampc);
+	err = al->ac->ench(al->enc, x, &xlen, al->sampv, al->sampc);
 	if (err)
 		goto out;
 
-	err = al->ac->dech(al->dec, (void *)buf, &sampc, x, xlen);
+	err = al->ac->dech(al->dec, sampv, &sampc, x, xlen);
 	if (err)
 		goto out;
 
  out:
-	mem_deref(sampv);
 
 	return err;
 }
@@ -111,20 +123,23 @@ static void read_handler(const uint8_t *buf, size_t sz, void *arg)
 	if (err) {
 		warning("auloop: aubuf_write: %m\n", err);
 	}
-
-	print_stats(al);
 }
 
 
 static bool write_handler(uint8_t *buf, size_t sz, void *arg)
 {
 	struct audio_loop *al = arg;
+	int err;
 
 	++al->n_write;
 
 	/* read from beginning */
 	if (al->ac) {
-		(void)codec_read(al, buf, sz);
+		err = codec_read(al, (void *)buf, sz/2);
+		if (err) {
+			warning("auloop: codec_read error "
+				"on %u bytes (%m)\n", sz, err);
+		}
 	}
 	else {
 		aubuf_read(al->ab, buf, sz);
@@ -185,13 +200,22 @@ static int auloop_reset(struct audio_loop *al)
 	if (str_isset(aucodec))
 		start_codec(al, aucodec);
 
+	/* audio player/source must be stopped first */
 	al->auplay = mem_deref(al->auplay);
-	al->ausrc = mem_deref(al->ausrc);
-	al->ab = mem_deref(al->ab);
+	al->ausrc  = mem_deref(al->ausrc);
+
+	al->sampv  = mem_deref(al->sampv);
+	al->ab     = mem_deref(al->ab);
 
 	al->srate = configv[al->index].srate;
 	al->ch    = configv[al->index].ch;
-	al->fs    = al->srate * al->ch * PTIME / 1000;
+
+	if (str_isset(aucodec)) {
+		al->sampc = al->srate * al->ch * PTIME / 1000;
+		al->sampv = mem_alloc(al->sampc * 2, NULL);
+		if (!al->sampv)
+			return ENOMEM;
+	}
 
 	info("Audio-loop: %uHz, %dch\n", al->srate, al->ch);
 
@@ -202,7 +226,7 @@ static int auloop_reset(struct audio_loop *al)
 	auplay_prm.fmt        = AUFMT_S16LE;
 	auplay_prm.srate      = al->srate;
 	auplay_prm.ch         = al->ch;
-	auplay_prm.frame_size = al->fs;
+	auplay_prm.ptime      = PTIME;
 	err = auplay_alloc(&al->auplay, cfg->audio.play_mod, &auplay_prm,
 			   cfg->audio.play_dev, write_handler, al);
 	if (err) {
@@ -215,7 +239,7 @@ static int auloop_reset(struct audio_loop *al)
 	ausrc_prm.fmt        = AUFMT_S16LE;
 	ausrc_prm.srate      = al->srate;
 	ausrc_prm.ch         = al->ch;
-	ausrc_prm.frame_size = al->fs;
+	ausrc_prm.ptime      = PTIME;
 	err = ausrc_alloc(&al->ausrc, NULL, cfg->audio.src_mod,
 			  &ausrc_prm, cfg->audio.src_dev,
 			  read_handler, error_handler, al);
@@ -237,6 +261,8 @@ static int audio_loop_alloc(struct audio_loop **alp)
 	al = mem_zalloc(sizeof(*al), auloop_destructor);
 	if (!al)
 		return ENOMEM;
+
+	tmr_start(&al->tmr, 100, tmr_handler, al);
 
 	err = auloop_reset(al);
 	if (err)

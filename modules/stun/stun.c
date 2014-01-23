@@ -7,6 +7,13 @@
 #include <baresip.h>
 
 
+/**
+ * @defgroup stun stun
+ *
+ * Session Traversal Utilities for NAT (STUN) for media NAT traversal
+ */
+
+
 enum {LAYER = 0, INTERVAL = 30};
 
 struct mnat_sess {

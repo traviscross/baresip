@@ -214,10 +214,18 @@ static int alloc(struct vidisp_st **stp, struct vidisp *vd,
 
 
 /**
+ * Display a video frame
+ *
+ * @param st    Video display state
+ * @param title Window title
+ * @param frame Video frame
+ *
+ * @return 0 if success, otherwise errorcode
+ *
  * @note: On Darwin, this must be called from the main thread
  */
 static int display(struct vidisp_st *st, const char *title,
-		       const struct vidframe *frame)
+		   const struct vidframe *frame)
 {
 	SDL_Rect rect;
 

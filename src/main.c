@@ -17,11 +17,6 @@
 #include <baresip.h>
 
 
-#define DEBUG_MODULE "main"
-#define DEBUG_LEVEL 6
-#include <re_dbg.h>
-
-
 static void signal_handler(int sig)
 {
 	static bool term = false;
@@ -111,7 +106,7 @@ int main(int argc, char *argv[])
 
 	err = conf_configure();
 	if (err) {
-		DEBUG_WARNING("configure: %m\n", err);
+		warning("main: configure failed: %m\n", err);
 		goto out;
 	}
 

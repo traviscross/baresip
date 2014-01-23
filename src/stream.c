@@ -10,10 +10,6 @@
 #include "core.h"
 
 
-#define DEBUG_MODULE "stream"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
 #define MAGIC 0x00814ea5
 #include "magic.h"
 
@@ -372,7 +368,7 @@ static void stream_start_keepalive(struct stream *s)
 		err = rtpkeep_alloc(&s->rtpkeep, rtpkeep,
 				    IPPROTO_UDP, s->rtp, s->sdp);
 		if (err) {
-			DEBUG_WARNING("rtpkeep_alloc failed: %m\n", err);
+			warning("stream: rtpkeep_alloc failed: %m\n", err);
 		}
 	}
 }
@@ -456,7 +452,7 @@ void stream_update(struct stream *s)
 				      s->rtcp ? rtcp_sock(s->rtp) : NULL,
 				      s->sdp);
 		if (err) {
-			DEBUG_WARNING("mediaenc update: %m\n", err);
+			warning("stream: mediaenc update: %m\n", err);
 		}
 	}
 }
@@ -526,8 +522,8 @@ void stream_send_fir(struct stream *s, bool pli)
 	if (err) {
 		s->metric_tx.n_err++;
 
-		DEBUG_WARNING("failed to send RTCP %s: %m\n",
-			      pli ? "PLI" : "FIR", err);
+		warning("stream: failed to send RTCP %s: %m\n",
+			pli ? "PLI" : "FIR", err);
 	}
 }
 
