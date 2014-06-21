@@ -20,10 +20,23 @@
 #endif
 
 
+/**
+ * @defgroup oss oss
+ *
+ * Open Sound System (OSS) audio driver module
+ *
+ *
+ * References:
+ *
+ *    http://www.4front-tech.com/linux.html
+ */
+
+
 struct ausrc_st {
 	struct ausrc *as;      /* inheritance */
 	int fd;
-	struct mbuf *mb;
+	int16_t *sampv;
+	size_t sampc;
 	ausrc_read_h *rh;
 	ausrc_error_h *errh;
 	void *arg;
@@ -34,8 +47,8 @@ struct auplay_st {
 	pthread_t thread;
 	bool run;
 	int fd;
-	uint8_t *buf;
-	uint32_t sz;
+	int16_t *sampv;
+	size_t sampc;
 	auplay_write_h *wh;
 	void *arg;
 };
@@ -92,7 +105,7 @@ static int set_fragment(int fd, uint32_t sampc)
 static int oss_reset(int fd, uint32_t srate, uint8_t ch, int sampc,
 		     int nonblock)
 {
-	int format    = AFMT_S16_LE;
+	int format    = AFMT_S16_NE; /* native endian */
 	int speed     = srate;
 	int channels  = ch;
 	int blocksize = 0;
@@ -118,8 +131,8 @@ static int oss_reset(int fd, uint32_t srate, uint8_t ch, int sampc,
 
 	(void)ioctl(fd, SNDCTL_DSP_GETBLKSIZE, &blocksize);
 
-	info("oss: init: %u bit %d Hz %d ch, blocksize=%d\n",
-	     format, speed, channels, blocksize);
+	info("oss: init: %d Hz %d ch, blocksize=%d\n",
+	     speed, channels, blocksize);
 
 	return 0;
 }
@@ -139,7 +152,7 @@ static void auplay_destructor(void *arg)
 		(void)close(st->fd);
 	}
 
-	mem_deref(st->buf);
+	mem_deref(st->sampv);
 	mem_deref(st->ap);
 }
 
@@ -153,7 +166,7 @@ static void ausrc_destructor(void *arg)
 		(void)close(st->fd);
 	}
 
-	mem_deref(st->mb);
+	mem_deref(st->sampv);
 	mem_deref(st->as);
 }
 
@@ -161,22 +174,14 @@ static void ausrc_destructor(void *arg)
 static void read_handler(int flags, void *arg)
 {
 	struct ausrc_st *st = arg;
-	struct mbuf *mb = st->mb;
 	int n;
 	(void)flags;
 
-	n = read(st->fd, mbuf_buf(mb), mbuf_get_space(mb));
+	n = read(st->fd, st->sampv, st->sampc*2);
 	if (n <= 0)
 		return;
 
-	mb->pos += n;
-
-	if (mb->pos < mb->size)
-		return;
-
-	st->rh(mb->buf, mb->size, st->arg);
-
-	mb->pos = 0;
+	st->rh(st->sampv, n/2, st->arg);
 }
 
 
@@ -187,9 +192,9 @@ static void *play_thread(void *arg)
 
 	while (st->run) {
 
-		st->wh(st->buf, st->sz, st->arg);
+		st->wh(st->sampv, st->sampc, st->arg);
 
-		n = write(st->fd, st->buf, st->sz);
+		n = write(st->fd, st->sampv, st->sampc*2);
 		if (n < 0) {
 			warning("oss: write: %m\n", errno);
 			break;
@@ -206,7 +211,6 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 		     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
-	unsigned sampc;
 	int err;
 
 	(void)ctx;
@@ -227,12 +231,10 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	if (!device)
 		device = oss_dev;
 
-	prm->fmt = AUFMT_S16LE;
+	st->sampc = prm->srate * prm->ch * prm->ptime / 1000;
 
-	sampc = prm->srate * prm->ch * prm->ptime / 1000;
-
-	st->mb = mbuf_alloc(2 * sampc);
-	if (!st->mb) {
+	st->sampv = mem_alloc(2 * st->sampc, NULL);
+	if (!st->sampv) {
 		err = ENOMEM;
 		goto out;
 	}
@@ -247,7 +249,7 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	if (err)
 		goto out;
 
-	err = oss_reset(st->fd, prm->srate, prm->ch, sampc, 1);
+	err = oss_reset(st->fd, prm->srate, prm->ch, st->sampc, 1);
 	if (err)
 		goto out;
 
@@ -268,7 +270,6 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 		      auplay_write_h *wh, void *arg)
 {
 	struct auplay_st *st;
-	unsigned sampc;
 	int err;
 
 	if (!stp || !ap || !prm || !wh)
@@ -285,13 +286,10 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 	if (!device)
 		device = oss_dev;
 
-	prm->fmt = AUFMT_S16LE;
+	st->sampc = prm->srate * prm->ch * prm->ptime / 1000;
 
-	sampc = prm->srate * prm->ch * prm->ptime / 1000;
-
-	st->sz  = 2 * sampc;
-	st->buf = mem_alloc(st->sz, NULL);
-	if (!st->buf) {
+	st->sampv = mem_alloc(st->sampc * 2, NULL);
+	if (!st->sampv) {
 		err = ENOMEM;
 		goto out;
 	}
@@ -302,7 +300,7 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 		goto out;
 	}
 
-	err = oss_reset(st->fd, prm->srate, prm->ch, sampc, 0);
+	err = oss_reset(st->fd, prm->srate, prm->ch, st->sampc, 0);
 	if (err)
 		goto out;
 

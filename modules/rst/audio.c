@@ -26,8 +26,8 @@ struct ausrc_st {
 	ausrc_error_h *errh;
 	void *arg;
 	bool run;
-	uint32_t psize;
 	uint32_t ptime;
+	size_t sampc;
 };
 
 
@@ -60,10 +60,10 @@ static void *play_thread(void *arg)
 {
 	uint64_t now, ts = tmr_jiffies();
 	struct ausrc_st *st = arg;
-	uint8_t *buf;
+	int16_t *sampv;
 
-	buf = mem_alloc(st->psize, NULL);
-	if (!buf)
+	sampv = mem_alloc(st->sampc * 2, NULL);
+	if (!sampv)
 		return NULL;
 
 	while (st->run) {
@@ -76,19 +76,19 @@ static void *play_thread(void *arg)
 			continue;
 #if 1
 		if (now > ts + 100) {
-			re_printf("rst: cpu lagging behind (%u ms)\n",
-				  now - ts);
+			debug("rst: cpu lagging behind (%u ms)\n",
+			      now - ts);
 		}
 #endif
 
-		aubuf_read(st->aubuf, buf, st->psize);
+		aubuf_read_samp(st->aubuf, sampv, st->sampc);
 
-		st->rh(buf, st->psize, st->arg);
+		st->rh(sampv, st->sampc, st->arg);
 
 		ts += st->ptime;
 	}
 
-	mem_deref(buf);
+	mem_deref(sampv);
 
 	return NULL;
 }
@@ -110,8 +110,8 @@ static inline int decode(struct ausrc_st *st)
 
 	case MPG123_NEW_FORMAT:
 		mpg123_getformat(st->mp3, &srate, &ch, &encoding);
-		re_printf("rst: new format: %i hz, %i ch, encoding 0x%04x\n",
-		      srate, ch, encoding);
+		info("rst: new format: %i hz, %i ch, encoding 0x%04x\n",
+		     srate, ch, encoding);
 		/*@fallthrough@*/
 
 	case MPG123_OK:
@@ -122,8 +122,8 @@ static inline int decode(struct ausrc_st *st)
 		break;
 
 	default:
-		re_printf("rst: mpg123_read error: %s\n",
-			  mpg123_plain_strerror(err));
+		warning("rst: mpg123_read error: %s\n",
+			mpg123_plain_strerror(err));
 		break;
 	}
 
@@ -155,7 +155,6 @@ static int alloc_handler(struct ausrc_st **stp, struct ausrc *as,
 			 ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
-	unsigned sampc;
 	int err;
 
 	if (!stp || !as || !prm || !rh)
@@ -178,8 +177,8 @@ static int alloc_handler(struct ausrc_st **stp, struct ausrc *as,
 
 	err = mpg123_open_feed(st->mp3);
 	if (err != MPG123_OK) {
-		re_printf("rst: mpg123_open_feed: %s\n",
-			  mpg123_strerror(st->mp3));
+		warning("rst: mpg123_open_feed: %s\n",
+			mpg123_strerror(st->mp3));
 		err = ENODEV;
 		goto out;
 	}
@@ -189,17 +188,14 @@ static int alloc_handler(struct ausrc_st **stp, struct ausrc *as,
 	mpg123_format(st->mp3, prm->srate, prm->ch, MPG123_ENC_SIGNED_16);
 	mpg123_volume(st->mp3, 0.3);
 
-	sampc = prm->srate * prm->ch * prm->ptime / 1000;
+	st->sampc = prm->srate * prm->ch * prm->ptime / 1000;
 
 	st->ptime = prm->ptime;
-	st->psize = sampc * 2;
 
-	prm->fmt = AUFMT_S16LE;
-
-	re_printf("rst: audio ptime=%u psize=%u aubuf=[%u:%u]\n",
-		  st->ptime, st->psize,
-		  prm->srate * prm->ch * 2,
-		  prm->srate * prm->ch * 40);
+	info("rst: audio ptime=%u sampc=%zu aubuf=[%u:%u]\n",
+	     st->ptime, st->sampc,
+	     prm->srate * prm->ch * 2,
+	     prm->srate * prm->ch * 40);
 
 	/* 1 - 20 seconds of audio */
 	err = aubuf_alloc(&st->aubuf,
@@ -246,8 +242,7 @@ int rst_audio_init(void)
 
 	err = mpg123_init();
 	if (err != MPG123_OK) {
-		re_printf("rst: mpg123_init: %s\n",
-			  mpg123_plain_strerror(err));
+		warning("rst: mpg123_init: %s\n", mpg123_plain_strerror(err));
 		return ENODEV;
 	}
 

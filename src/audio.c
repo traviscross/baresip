@@ -81,7 +81,7 @@ struct autx {
 	struct auresamp resamp;       /**< Optional resampler for DSP      */
 	struct list filtl;            /**< Audio filters in encoding order */
 	struct mbuf *mb;              /**< Buffer for outgoing RTP packets */
-	char device[64];
+	char device[64];              /**< Audio source device name        */
 	int16_t *sampv;               /**< Sample buffer                   */
 	int16_t *sampv_rs;            /**< Sample buffer for resampler     */
 	uint32_t ptime;               /**< Packet time for sending         */
@@ -127,7 +127,7 @@ struct aurx {
 	struct aubuf *aubuf;          /**< Incoming audio buffer           */
 	struct auresamp resamp;       /**< Optional resampler for DSP      */
 	struct list filtl;            /**< Audio filters in decoding order */
-	char device[64];
+	char device[64];              /**< Audio player device name        */
 	int16_t *sampv;               /**< Sample buffer                   */
 	int16_t *sampv_rs;            /**< Sample buffer for resampler     */
 	uint32_t ptime;               /**< Packet time for receiving       */
@@ -302,6 +302,7 @@ static int add_audio_codec(struct audio *a, struct sdp_media *m,
 static void encode_rtp_send(struct audio *a, struct autx *tx,
 			    int16_t *sampv, size_t sampc)
 {
+	size_t frame_size;  /* number of samples per channel */
 	size_t len;
 	int err;
 
@@ -328,7 +329,12 @@ static void encode_rtp_send(struct audio *a, struct autx *tx,
 			goto out;
 	}
 
-	tx->ts += (uint32_t)(tx->is_g722 ? sampc/2 : sampc);
+	/* The RTP clock rate used for generating the RTP timestamp is
+	 * independent of the number of channels and the encoding
+	 */
+	frame_size = (tx->is_g722 ? sampc/2 : sampc) / tx->ac->ch;
+
+	tx->ts += frame_size;
 
  out:
 	tx->marker = false;
@@ -349,8 +355,7 @@ static void poll_aubuf_tx(struct audio *a)
 	sampc = tx->psize / 2;
 
 	/* timed read from audio-buffer */
-	if (aubuf_get_samp(tx->aubuf, tx->ptime, tx->sampv, sampc))
-		return;
+	aubuf_read_samp(tx->aubuf, tx->sampv, sampc);
 
 	/* optional resampler */
 	if (tx->resamp.resample) {
@@ -422,16 +427,12 @@ static void check_telev(struct audio *a, struct autx *tx)
  * @param buf Buffer to fill with audio samples
  * @param sz  Number of bytes in buffer
  * @param arg Handler argument
- *
- * @return true for valid audio samples, false for silence
  */
-static bool auplay_write_handler(uint8_t *buf, size_t sz, void *arg)
+static void auplay_write_handler(int16_t *sampv, size_t sampc, void *arg)
 {
 	struct aurx *rx = arg;
 
-	aubuf_read(rx->aubuf, buf, sz);
-
-	return true;
+	aubuf_read_samp(rx->aubuf, sampv, sampc);
 }
 
 
@@ -446,18 +447,27 @@ static bool auplay_write_handler(uint8_t *buf, size_t sz, void *arg)
  * @param sz  Number of bytes in buffer
  * @param arg Handler argument
  */
-static void ausrc_read_handler(const uint8_t *buf, size_t sz, void *arg)
+static void ausrc_read_handler(const int16_t *sampv, size_t sampc, void *arg)
 {
 	struct audio *a = arg;
 	struct autx *tx = &a->tx;
 
 	if (tx->muted)
-		memset((void *)buf, 0, sz);
+		memset((void *)sampv, 0, sampc*2);
 
-	(void)aubuf_write(tx->aubuf, buf, sz);
+	(void)aubuf_write_samp(tx->aubuf, sampv, sampc);
 
-	if (a->cfg.txmode == AUDIO_MODE_POLL)
-		poll_aubuf_tx(a);
+	if (a->cfg.txmode == AUDIO_MODE_POLL) {
+		unsigned i;
+
+		for (i=0; i<16; i++) {
+
+			if (aubuf_cur_size(tx->aubuf) < tx->psize)
+				break;
+
+			poll_aubuf_tx(a);
+		}
+	}
 
 	/* Exact timing: send Telephony-Events from here */
 	check_telev(a, tx);
@@ -696,7 +706,7 @@ int audio_alloc(struct audio **ap, const struct config *cfg,
 	auresamp_init(&tx->resamp);
 	str_ncpy(tx->device, a->cfg.src_dev, sizeof(tx->device));
 	tx->ptime  = ptime;
-	tx->ts     = 160;
+	tx->ts     = rand_u16();
 	tx->marker = true;
 
 	auresamp_init(&rx->resamp);
@@ -927,7 +937,6 @@ static int start_player(struct aurx *rx, struct audio *a)
 
 		struct auplay_prm prm;
 
-		prm.fmt        = AUFMT_S16LE;
 		prm.srate      = srate_dsp;
 		prm.ch         = channels_dsp;
 		prm.ptime      = rx->ptime;
@@ -1004,7 +1013,6 @@ static int start_source(struct autx *tx, struct audio *a)
 
 		struct ausrc_prm prm;
 
-		prm.fmt        = AUFMT_S16LE;
 		prm.srate      = srate_dsp;
 		prm.ch         = channels_dsp;
 		prm.ptime      = tx->ptime;
@@ -1270,7 +1278,7 @@ int audio_send_digit(struct audio *a, char key)
 
 
 /**
- * Mute the audio stream
+ * Mute the audio stream source (i.e. Microphone)
  *
  * @param a      Audio stream
  * @param muted  True to mute, false to un-mute
@@ -1281,6 +1289,22 @@ void audio_mute(struct audio *a, bool muted)
 		return;
 
 	a->tx.muted = muted;
+}
+
+
+/**
+ * Get the mute state of an audio source
+ *
+ * @param a      Audio stream
+ *
+ * @return True if muted, otherwise false
+ */
+bool audio_ismuted(const struct audio *a)
+{
+	if (!a)
+		return false;
+
+	return a->tx.muted;
 }
 
 
@@ -1366,4 +1390,70 @@ void audio_set_devicename(struct audio *a, const char *src, const char *play)
 
 	str_ncpy(a->tx.device, src, sizeof(a->tx.device));
 	str_ncpy(a->rx.device, play, sizeof(a->rx.device));
+}
+
+
+/*
+ * Reference:
+ *
+ * https://www.avm.de/de/Extern/files/x-rtp/xrtpv32.pdf
+ */
+int audio_print_rtpstat(struct re_printf *pf, const struct audio *a)
+{
+	const struct stream *s;
+	const struct rtcp_stats *rtcp;
+	int srate_tx = 8000;
+	int srate_rx = 8000;
+	int err;
+
+	if (!a)
+		return 1;
+
+	s = a->strm;
+	rtcp = &s->rtcp_stats;
+
+	if (!rtcp->tx.sent)
+		return 1;
+
+	if (a->tx.ac)
+		srate_tx = get_srate(a->tx.ac);
+	if (a->rx.ac)
+		srate_rx = get_srate(a->rx.ac);
+
+	err = re_hprintf(pf,
+			 "EX=BareSip;"   /* Reporter Identifier	             */
+			 "CS=%d;"        /* Call Setup in milliseconds       */
+			 "CD=%d;"        /* Call Duration in seconds	     */
+			 "PR=%u;PS=%u;"  /* Packets RX, TX                   */
+			 "PL=%d,%d;"     /* Packets Lost RX, TX              */
+			 "PD=%d,%d;"     /* Packets Discarded, RX, TX        */
+			 "JI=%.1f,%.1f;" /* Jitter RX, TX in timestamp units */
+			 "IP=%J,%J"      /* Local, Remote IPs                */
+			 ,
+			 call_setup_duration(s->call) * 1000,
+			 call_duration(s->call),
+
+			 s->metric_rx.n_packets,
+			 s->metric_tx.n_packets,
+
+			 rtcp->rx.lost, rtcp->tx.lost,
+
+			 s->metric_rx.n_err, s->metric_tx.n_err,
+
+			 /* timestamp units (ie: 8 ts units = 1 ms @ 8KHZ) */
+			 1.0 * rtcp->rx.jit/1000 * (srate_rx/1000),
+			 1.0 * rtcp->tx.jit/1000 * (srate_tx/1000),
+
+			 sdp_media_laddr(s->sdp),
+			 sdp_media_raddr(s->sdp)
+			 );
+
+	if (a->tx.ac) {
+		err |= re_hprintf(pf, ";EN=%s/%d", a->tx.ac->name, srate_tx );
+	}
+	if (a->rx.ac) {
+		err |= re_hprintf(pf, ";DE=%s/%d", a->rx.ac->name, srate_rx );
+	}
+
+	return err;
 }

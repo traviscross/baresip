@@ -13,7 +13,7 @@
 USE_VIDEO := 1
 
 PROJECT	  := baresip
-VERSION   := 0.4.10
+VERSION   := 0.4.11
 
 ifndef LIBRE_MK
 LIBRE_MK  := $(shell [ -f ../re/mk/re.mk ] && \
@@ -119,7 +119,7 @@ MOD_LFLAGS += -L$(SYSROOT)/local/lib
 endif
 
 LIBS      += -lrem -lm
-
+LIBS      += -L$(SYSROOT)/lib
 
 -include $(APP_OBJS:.o=.d)
 

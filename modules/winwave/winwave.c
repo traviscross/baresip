@@ -11,9 +11,12 @@
 #include "winwave.h"
 
 
-#define DEBUG_MODULE "winwave"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
+/**
+ * @defgroup winwave winwave
+ *
+ * Windows audio driver module
+ *
+ */
 
 
 static struct ausrc *ausrc;

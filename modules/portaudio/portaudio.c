@@ -11,9 +11,19 @@
 #include <baresip.h>
 
 
-/*
- * portaudio v19 is required
+/**
+ * @defgroup portaudio portaudio
+ *
+ * Portaudio audio driver
+ *
+ * (portaudio v19 is required)
+ *
+ *
+ * References:
+ *
+ *    http://www.portaudio.com/
  */
+
 
 struct ausrc_st {
 	struct ausrc *as;      /* inheritance */
@@ -49,7 +59,7 @@ static int read_callback(const void *inputBuffer, void *outputBuffer,
 			 PaStreamCallbackFlags statusFlags, void *userData)
 {
 	struct ausrc_st *st = userData;
-	unsigned sampc;
+	size_t sampc;
 
 	(void)outputBuffer;
 	(void)timeInfo;
@@ -60,7 +70,7 @@ static int read_callback(const void *inputBuffer, void *outputBuffer,
 
 	sampc = frameCount * st->ch;
 
-	st->rh(inputBuffer, 2*sampc, st->arg);
+	st->rh(inputBuffer, sampc, st->arg);
 
 	return paContinue;
 }
@@ -72,7 +82,7 @@ static int write_callback(const void *inputBuffer, void *outputBuffer,
 			  PaStreamCallbackFlags statusFlags, void *userData)
 {
 	struct auplay_st *st = userData;
-	unsigned sampc;
+	size_t sampc;
 
 	(void)inputBuffer;
 	(void)timeInfo;
@@ -83,7 +93,7 @@ static int write_callback(const void *inputBuffer, void *outputBuffer,
 
 	sampc = frameCount * st->ch;
 
-	st->wh(outputBuffer, 2*sampc, st->arg);
+	st->wh(outputBuffer, sampc, st->arg);
 
 	return paContinue;
 }
@@ -206,8 +216,6 @@ static int src_alloc(struct ausrc_st **stp, struct ausrc *as,
 	else
 		dev_index = Pa_GetDefaultInputDevice();
 
-	prm->fmt = AUFMT_S16LE;
-
 	st = mem_zalloc(sizeof(*st), ausrc_destructor);
 	if (!st)
 		return ENOMEM;
@@ -250,8 +258,6 @@ static int play_alloc(struct auplay_st **stp, struct auplay *ap,
 		dev_index = atoi(device);
 	else
 		dev_index = Pa_GetDefaultOutputDevice();
-
-	prm->fmt = AUFMT_S16LE;
 
 	st = mem_zalloc(sizeof(*st), auplay_destructor);
 	if (!st)

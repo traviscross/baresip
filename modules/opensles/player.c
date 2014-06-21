@@ -10,14 +10,10 @@
 #include "opensles.h"
 
 
-#define DEBUG_MODULE "opensles/player"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 struct auplay_st {
 	struct auplay *ap;      /* inheritance */
-	int16_t buf[160 * 2];
+	int16_t *sampv;
+	size_t sampc;
 	auplay_write_h *wh;
 	void *arg;
 
@@ -38,6 +34,7 @@ static void auplay_destructor(void *arg)
 	if (st->outputMixObject != NULL)
 		(*st->outputMixObject)->Destroy(st->outputMixObject);
 
+	mem_deref(st->sampv);
 	mem_deref(st->ap);
 }
 
@@ -46,9 +43,9 @@ static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
 	struct auplay_st *st = context;
 
-	st->wh((void *)st->buf, sizeof(st->buf), st->arg);
+	st->wh(st->sampv, st->sampc, st->arg);
 
-	(*st->BufferQueue)->Enqueue(bq, st->buf, sizeof(st->buf));
+	(*st->BufferQueue)->Enqueue(bq, st->sampv, st->sampc * 2);
 }
 
 
@@ -97,7 +94,7 @@ static int createPlayer(struct auplay_st *st, struct auplay_prm *prm)
 					       &audioSrc, &audioSnk,
 					       ARRAY_SIZE(ids), ids, req);
 	if (SL_RESULT_SUCCESS != r) {
-		DEBUG_WARNING("CreateAudioPlayer error: r = %d\n", r);
+		warning("opensles: CreateAudioPlayer error: r = %d\n", r);
 		return ENODEV;
 	}
 
@@ -150,6 +147,14 @@ int opensles_player_alloc(struct auplay_st **stp, struct auplay *ap,
 	st->ap  = mem_ref(ap);
 	st->wh  = wh;
 	st->arg = arg;
+
+	st->sampc = prm->srate * prm->ch * prm->ptime / 1000;
+
+	st->sampv = mem_alloc(2 * st->sampc, NULL);
+	if (!st->sampv) {
+		err = ENOMEM;
+		goto out;
+	}
 
 	err = createOutput(st);
 	if (err)

@@ -11,11 +11,6 @@
 #include "winwave.h"
 
 
-#define DEBUG_MODULE "winwave"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 #define WRITE_BUFFERS  4
 #define INC_WPOS(a) ((a) = (((a) + 1) % WRITE_BUFFERS))
 
@@ -75,7 +70,7 @@ static int dsp_write(struct auplay_st *st)
 	wh->lpData = (LPSTR)mb->buf;
 
 	if (st->wh) {
-		st->wh(mb->buf, mb->size, st->arg);
+		st->wh((void *)mb->buf, mb->size/2, st->arg);
 	}
 
 	wh->dwBufferLength = mb->size;
@@ -88,7 +83,8 @@ static int dsp_write(struct auplay_st *st)
 
 	res = waveOutWrite(st->waveout, wh, sizeof(*wh));
 	if (res != MMSYSERR_NOERROR)
-		DEBUG_WARNING("dsp_write: waveOutWrite: failed: %08x\n", res);
+		warning("winwave: dsp_write: waveOutWrite: failed: %08x\n",
+			res);
 	else
 		st->inuse++;
 
@@ -165,7 +161,7 @@ static int write_stream_open(struct auplay_st *st,
 			  (DWORD_PTR) st,
 			  CALLBACK_FUNCTION | WAVE_FORMAT_DIRECT);
 	if (res != MMSYSERR_NOERROR) {
-		DEBUG_WARNING("waveOutOpen: failed %d\n", res);
+		warning("winwave: waveOutOpen: failed %d\n", res);
 		return EINVAL;
 	}
 	waveOutClose(st->waveout);
@@ -174,7 +170,7 @@ static int write_stream_open(struct auplay_st *st,
 			  (DWORD_PTR) st,
 			  CALLBACK_FUNCTION | WAVE_FORMAT_DIRECT);
 	if (res != MMSYSERR_NOERROR) {
-		DEBUG_WARNING("waveOutOpen: failed %d\n", res);
+		warning("winwave: waveOutOpen: failed %d\n", res);
 		return EINVAL;
 	}
 
@@ -200,8 +196,6 @@ int winwave_play_alloc(struct auplay_st **stp, struct auplay *ap,
 	st->ap  = mem_ref(ap);
 	st->wh  = wh;
 	st->arg = arg;
-
-	prm->fmt = AUFMT_S16LE;
 
 	err = write_stream_open(st, prm);
 	if (err)

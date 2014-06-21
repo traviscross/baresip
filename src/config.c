@@ -334,6 +334,8 @@ static const char *default_audio_device(void)
 	return "oss,/dev/dsp";
 #elif defined (WIN32)
 	return "winwave,nil";
+#elif defined (ANDROID)
+	return "opensles";
 #else
 	return "alsa,default";
 #endif
@@ -344,7 +346,13 @@ static const char *default_audio_device(void)
 static const char *default_video_device(void)
 {
 #ifdef DARWIN
+
+#ifdef QTCAPTURE_RUNLOOP
 	return "qtcapture,nil";
+#else
+	return "avcapture,nil";
+#endif
+
 #else
 	return "v4l2,/dev/video0";
 #endif
@@ -583,6 +591,8 @@ int config_write_template(const char *file, const struct config *cfg)
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "mda" MOD_EXT "\n");
 #elif defined (DARWIN)
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "coreaudio" MOD_EXT "\n");
+#elif defined (ANDROID)
+	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "opensles" MOD_EXT "\n");
 #else
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "oss" MOD_EXT "\n");
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "alsa" MOD_EXT "\n");
@@ -604,7 +614,13 @@ int config_write_template(const char *file, const struct config *cfg)
 
 	(void)re_fprintf(f, "\n# Video source modules\n");
 #if defined (DARWIN)
+
+#ifdef QTCAPTURE_RUNLOOP
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "qtcapture" MOD_EXT "\n");
+#else
+	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "avcapture" MOD_EXT "\n");
+#endif
+
 #else
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "v4l" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "v4l2" MOD_EXT "\n");

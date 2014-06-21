@@ -11,7 +11,7 @@
 #include "core.h"
 
 
-enum {SILENCE_DUR = 2000, PTIME = 100};
+enum {SILENCE_DUR = 2000, PTIME = 40};
 
 /** Audio file player */
 struct play {
@@ -83,9 +83,10 @@ static void tmr_polling(void *arg)
 /**
  * NOTE: DSP cannot be destroyed inside handler
  */
-static bool write_handler(uint8_t *buf, size_t sz, void *arg)
+static void write_handler(int16_t *sampv, size_t sampc, void *arg)
 {
 	struct play *play = arg;
+	size_t sz = sampc * 2;
 
 	lock_write_get(play->lock);
 
@@ -93,19 +94,22 @@ static bool write_handler(uint8_t *buf, size_t sz, void *arg)
 		goto silence;
 
 	if (mbuf_get_left(play->mb) < sz) {
+
+		memset(sampv, 0, sz);
+		(void)mbuf_read_mem(play->mb, (void *)sampv,
+				    mbuf_get_left(play->mb));
+
 		play->eof = true;
 	}
 	else {
-		(void)mbuf_read_mem(play->mb, buf, sz);
+		(void)mbuf_read_mem(play->mb, (void *)sampv, sz);
 	}
 
  silence:
 	if (play->eof)
-		memset(buf, 0, sz);
+		memset(sampv, 0, sz);
 
 	lock_rel(play->lock);
-
-	return true;
 }
 
 
@@ -143,6 +147,7 @@ static int aufile_load(struct mbuf *mb, const char *filename,
 	while (!err) {
 		uint8_t buf[4096];
 		size_t i, n;
+		int16_t *p = (void *)buf;
 
 		n = sizeof(buf);
 
@@ -153,7 +158,12 @@ static int aufile_load(struct mbuf *mb, const char *filename,
 		switch (prm.fmt) {
 
 		case AUFMT_S16LE:
-			err = mbuf_write_mem(mb, buf, n);
+			/* convert from Little-Endian to Native-Endian */
+			for (i=0; i<n/2; i++) {
+				int16_t s = sys_ltohs(*p++);
+				err |= mbuf_write_u16(mb, s);
+			}
+
 			break;
 
 		case AUFMT_PCMA:
@@ -227,7 +237,6 @@ int play_tone(struct play **playp, struct mbuf *tone, uint32_t srate,
 	if (err)
 		goto out;
 
-	wprm.fmt        = AUFMT_S16LE;
 	wprm.ch         = ch;
 	wprm.srate      = srate;
 	wprm.ptime      = PTIME;
@@ -266,8 +275,8 @@ int play_file(struct play **playp, const char *filename, int repeat)
 {
 	struct mbuf *mb;
 	char path[512];
-	uint32_t srate;
-	uint8_t ch;
+	uint32_t srate = 0;
+	uint8_t ch = 0;
 	int err;
 
 	if (playp && *playp)

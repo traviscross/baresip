@@ -6,6 +6,6 @@
 
 MOD		:= srtp
 $(MOD)_SRCS	+= srtp.c sdes.c
-$(MOD)_LFLAGS	+= -lsrtp
+$(MOD)_LFLAGS	+=
 
 include mk/mod.mk

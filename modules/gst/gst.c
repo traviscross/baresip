@@ -15,11 +15,6 @@
 #include "gst.h"
 
 
-#define DEBUG_MODULE "gst"
-#define DEBUG_LEVEL 5
-#include <re_dbg.h>
-
-
 /**
  * Defines the Gstreamer state
  *
@@ -43,6 +38,7 @@ struct ausrc_st {
 	struct ausrc_prm prm;       /**< Read parameters         */
 	struct aubuf *aubuf;        /**< Packet buffer           */
 	uint32_t psize;             /**< Packet size in bytes    */
+	size_t sampc;
 
 	/* Gstreamer */
 	char *uri;
@@ -61,7 +57,6 @@ static void *thread(void *arg)
 	struct ausrc_st *st = arg;
 
 	/* Now set to playing and iterate. */
-	DEBUG_NOTICE("Setting pipeline to PLAYING\n");
 	gst_element_set_state(st->pipeline, GST_STATE_PLAYING);
 
 	while (st->run) {
@@ -86,8 +81,6 @@ static gboolean bus_watch_handler(GstBus *bus, GstMessage *msg, gpointer data)
 	switch (GST_MESSAGE_TYPE(msg)) {
 
 	case GST_MESSAGE_EOS:
-		DEBUG_NOTICE("End-of-stream\n");
-
 		/* XXX decrementing repeat count? */
 
 		/* Re-start stream */
@@ -103,9 +96,9 @@ static gboolean bus_watch_handler(GstBus *bus, GstMessage *msg, gpointer data)
 	case GST_MESSAGE_ERROR:
 		gst_message_parse_error(msg, &err, &d);
 
-		DEBUG_WARNING("Error: %d(%m) message=%s\n", err->code,
-			      err->code, err->message);
-		DEBUG_WARNING("Debug: %s\n", d);
+		warning("gst: Error: %d(%m) message=%s\n", err->code,
+			err->code, err->message);
+		warning("gst: Debug: %s\n", d);
 
 		g_free(d);
 
@@ -123,7 +116,7 @@ static gboolean bus_watch_handler(GstBus *bus, GstMessage *msg, gpointer data)
 		gst_message_parse_tag(msg, &tag_list);
 
 		if (gst_tag_list_get_string(tag_list, GST_TAG_TITLE, &title)) {
-			DEBUG_NOTICE("Title: %s\n", title);
+			info("gst: title: %s\n", title);
 			g_free(title);
 		}
 		break;
@@ -150,33 +143,33 @@ static void format_check(struct ausrc_st *st, GstStructure *s)
 	gst_structure_get_boolean(s, "signed", &sign);
 
 	if ((int)st->prm.srate != rate) {
-		DEBUG_WARNING("expected %u Hz (got %u Hz)\n", st->prm.srate,
-			      rate);
+		warning("gst: expected %u Hz (got %u Hz)\n", st->prm.srate,
+			rate);
 	}
 	if (st->prm.ch != channels) {
-		DEBUG_WARNING("expected %d channels (got %d)\n",
-			      st->prm.ch, channels);
+		warning("gst: expected %d channels (got %d)\n",
+			st->prm.ch, channels);
 	}
 	if (16 != width) {
-		DEBUG_WARNING("expected 16-bit width (got %d)\n", width);
+		warning("gst: expected 16-bit width (got %d)\n", width);
 	}
 	if (!sign) {
-		DEBUG_WARNING("expected signed 16-bit format\n");
+		warning("gst: expected signed 16-bit format\n");
 	}
 }
 
 
 static void play_packet(struct ausrc_st *st)
 {
-	uint8_t buf[st->psize];
+	int16_t buf[st->sampc];
 
 	/* timed read from audio-buffer */
-	if (aubuf_get(st->aubuf, st->prm.ptime, buf, sizeof(buf)))
+	if (aubuf_get_samp(st->aubuf, st->prm.ptime, buf, st->sampc))
 		return;
 
 	/* call read handler */
 	if (st->rh)
-		st->rh(buf, sizeof(buf), st->arg);
+		st->rh(buf, st->sampc, st->arg);
 }
 
 
@@ -195,7 +188,7 @@ static void packet_handler(struct ausrc_st *st, GstBuffer *buffer)
 	err = aubuf_write(st->aubuf, GST_BUFFER_DATA(buffer),
 			  GST_BUFFER_SIZE(buffer));
 	if (err) {
-		DEBUG_WARNING("aubuf_write: %m\n", err);
+		warning("gst: aubuf_write: %m\n", err);
 	}
 
 	/* Empty buffer now */
@@ -274,7 +267,7 @@ static int gst_setup(struct ausrc_st *st)
 
 	st->pipeline = gst_pipeline_new("pipeline");
 	if (!st->pipeline) {
-		DEBUG_WARNING("failed to create pipeline element\n");
+		warning("gst: failed to create pipeline element\n");
 		return ENOMEM;
 	}
 
@@ -282,7 +275,7 @@ static int gst_setup(struct ausrc_st *st)
 
 	st->source = gst_element_factory_make("playbin", "source");
 	if (!st->source) {
-		DEBUG_WARNING("failed to create playbin source element\n");
+		warning("gst: failed to create playbin source element\n");
 		return ENOMEM;
 	}
 
@@ -292,7 +285,7 @@ static int gst_setup(struct ausrc_st *st)
 
 	st->capsfilt = gst_element_factory_make("capsfilter", NULL);
 	if (!st->capsfilt) {
-		DEBUG_WARNING("failed to create capsfilter element\n");
+		warning("gst: failed to create capsfilter element\n");
 		return ENOMEM;
 	}
 
@@ -300,7 +293,7 @@ static int gst_setup(struct ausrc_st *st)
 
 	st->sink = gst_element_factory_make("fakesink", "sink");
 	if (!st->sink) {
-		DEBUG_WARNING("failed to create sink element\n");
+		warning("gst: failed to create sink element\n");
 		return ENOMEM;
 	}
 
@@ -360,7 +353,6 @@ static int gst_alloc(struct ausrc_st **stp, struct ausrc *as,
 		     ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
 {
 	struct ausrc_st *st;
-	unsigned sampc;
 	int err;
 
 	(void)ctx;
@@ -370,8 +362,6 @@ static int gst_alloc(struct ausrc_st **stp, struct ausrc *as,
 
 	if (!prm)
 		return EINVAL;
-
-	prm->fmt = AUFMT_S16LE;
 
 	st = mem_zalloc(sizeof(*st), gst_destructor);
 	if (!st)
@@ -388,9 +378,8 @@ static int gst_alloc(struct ausrc_st **stp, struct ausrc *as,
 
 	st->prm   = *prm;
 
-	sampc = prm->srate * prm->ch * prm->ptime / 1000;
-
-	st->psize = 2 * sampc;
+	st->sampc = prm->srate * prm->ch * prm->ptime / 1000;
+	st->psize = 2 * st->sampc;
 
 	err = aubuf_alloc(&st->aubuf, st->psize, 0);
 	if (err)
@@ -425,7 +414,7 @@ static int mod_gst_init(void)
 
 	s = gst_version_string();
 
-	DEBUG_NOTICE("init: %s\n", s);
+	info("gst: init: %s\n", s);
 
 	g_free(s);
 
