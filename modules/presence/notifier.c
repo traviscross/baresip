@@ -22,7 +22,6 @@ struct notifier {
 	struct ua *ua;
 };
 
-static enum presence_status my_status = PRESENCE_OPEN;
 static struct list notifierl;
 static struct sipevent_sock *evsock;
 
@@ -178,56 +177,24 @@ static int notifier_add(struct sipevent_sock *sock, const struct sip_msg *msg,
 	if (err)
 		return err;
 
-	(void)notify(not, my_status);
+	(void)notify(not, ua_presence_status(ua));
 
 	return 0;
 }
 
 
-static void notifier_update_status(enum presence_status status)
+void notifier_update_status(struct ua *ua)
 {
 	struct le *le;
-
-	if (status == my_status)
-		return;
-
-	info("presence: update my status from '%s' to '%s'\n",
-	     contact_presence_str(my_status),
-	     contact_presence_str(status));
-
-	my_status = status;
 
 	for (le = notifierl.head; le; le = le->next) {
 
 		struct notifier *not = le->data;
 
-		(void)notify(not, status);
+		if (not->ua == ua)
+			(void)notify(not, ua_presence_status(not->ua));
 	}
 }
-
-
-static int cmd_online(struct re_printf *pf, void *arg)
-{
-	(void)pf;
-	(void)arg;
-	notifier_update_status(PRESENCE_OPEN);
-	return 0;
-}
-
-
-static int cmd_offline(struct re_printf *pf, void *arg)
-{
-	(void)pf;
-	(void)arg;
-	notifier_update_status(PRESENCE_CLOSED);
-	return 0;
-}
-
-
-static const struct cmd cmdv[] = {
-	{'[', 0, "Set presence online",   cmd_online  },
-	{']', 0, "Set presence offline",  cmd_offline },
-};
 
 
 static bool sub_handler(const struct sip_msg *msg, void *arg)
@@ -255,16 +222,13 @@ int notifier_init(void)
 	int err;
 
 	err = sipevent_listen(&evsock, uag_sip(), 32, 32, sub_handler, NULL);
-	if (err)
-		return err;
 
-	return cmd_register(cmdv, ARRAY_SIZE(cmdv));
+	return err;
 }
 
 
 void notifier_close(void)
 {
-	cmd_unregister(cmdv);
 	list_flush(&notifierl);
 	evsock = mem_deref(evsock);
 }

@@ -58,7 +58,6 @@ Features:
 * Audio-codecs:
   - AMR narrowband, AMR wideband
   - BroadVoice32 BV32
-  - CELT
   - G.711
   - G.722
   - G.726
@@ -93,7 +92,7 @@ Features:
 
 * Video-drivers:
   - iOS avcapture video-source
-  - FFmpeg libavformat/avdevice input
+  - FFmpeg/libav libavformat/avdevice input
   - Cairo video-source test module
   - Direct Show video-source
   - MacOSX QTcapture/quicktime video-source
@@ -141,11 +140,10 @@ aubridge      Audio bridge module
 audiounit     AudioUnit audio driver for MacOSX/iOS
 auloop        Audio-loop test module
 avcapture     Video source using iOS AVFoundation video capture
-avcodec       Video codec using FFmpeg
-avformat      Video source using FFmpeg libavformat
+avcodec       Video codec using FFmpeg/libav libavcodec
+avformat      Video source using FFmpeg/libav libavformat
 bv32          BroadVoice32 audio codec
 cairo         Cairo video source
-celt          CELT audio codec (obsolete, use opus instead)
 cons          UDP/TCP console UI driver
 contact       Contacts module
 coreaudio     Apple Coreaudio driver
@@ -179,7 +177,7 @@ plc           Packet Loss Concealment (PLC) using spandsp
 portaudio     Portaudio driver
 presence      Presence module
 qtcapture     Apple QTCapture video source driver
-quicktime     Apple Quicktime video source driver
+quicktime     Apple Quicktime video source driver (deprecated)
 rst           Radio streamer using mpg123
 sdl           Simple DirectMedia Layer (SDL) video output driver
 sdl2          Simple DirectMedia Layer v2 (SDL2) video output driver
@@ -241,6 +239,7 @@ IETF RFC/I-Ds:
 * RFC 5576  Source-Specific Media Attributes in SDP
 * RFC 5577  RTP Payload Format for ITU-T Recommendation G.722.1
 * RFC 5626  Managing Client-Initiated Connections in SIP
+* RFC 5627  Obtaining and Using GRUUs in SIP
 * RFC 5761  Multiplexing RTP Data and Control Packets on a Single Port
 * RFC 5763  Framework for Establishing a SRTP Security Context Using DTLS
 * RFC 5764  DTLS Extension to Establish Keys for SRTP
@@ -305,7 +304,7 @@ Supported compilers:
 
 External dependencies:
 
-libre v0.4.9 or later
+libre v0.4.11 or later
 librem v0.4.6 or later
 
 

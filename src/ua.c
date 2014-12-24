@@ -31,7 +31,9 @@ struct ua {
 	struct pl extensionv[8];     /**< Vector of SIP extensions           */
 	size_t    extensionc;        /**< Number of SIP extensions           */
 	char *cuser;                 /**< SIP Contact username               */
+	char *pub_gruu;              /**< SIP Public GRUU                    */
 	int af;                      /**< Preferred Address Family           */
+	enum presence_status my_status; /**< Presence Status                 */
 };
 
 struct ua_eh {
@@ -118,9 +120,10 @@ void ua_event(struct ua *ua, enum ua_event ev, struct call *call,
 	va_end(ap);
 
 	/* send event to all clients */
-	for (le = uag.ehl.head; le; le = le->next) {
-
+	le = uag.ehl.head;
+	while (le) {
 		struct ua_eh *eh = le->data;
+		le = le->next;
 
 		eh->h(ua, ev, call, buf, eh->arg);
 	}
@@ -188,6 +191,28 @@ int ua_register(struct ua *ua)
 	}
 
 	return 0;
+}
+
+
+/**
+ * Unregister all Register clients of a User-Agent
+ *
+ * @param ua User-Agent
+ */
+void ua_unregister(struct ua *ua)
+{
+	struct le *le;
+
+	if (!ua)
+		return;
+
+	ua_event(ua, UA_EVENT_UNREGISTERING, NULL, NULL);
+
+	for (le = ua->regl.head; le; le = le->next) {
+		struct reg *reg = le->data;
+
+		reg_unregister(reg);
+	}
 }
 
 
@@ -320,7 +345,7 @@ static void call_event_handler(struct call *call, enum call_event ev,
 		}
 
 		if (err) {
-			(void)call_notify_sipfrag(call, 500, "%m", err);
+			(void)call_notify_sipfrag(call, 500, "Call Error");
 			mem_deref(call2);
 		}
 		break;
@@ -352,6 +377,7 @@ static int ua_call_alloc(struct call **callp, struct ua *ua,
 
 static void handle_options(struct ua *ua, const struct sip_msg *msg)
 {
+	struct sip_contact contact;
 	struct call *call = NULL;
 	struct mbuf *desc = NULL;
 	int err;
@@ -366,14 +392,20 @@ static void handle_options(struct ua *ua, const struct sip_msg *msg)
 	if (err)
 		goto out;
 
+	sip_contact_set(&contact, ua_cuser(ua), &msg->dst, msg->tp);
+
 	err = sip_treplyf(NULL, NULL, uag.sip,
 			  msg, true, 200, "OK",
-			  "Contact: <sip:%s@%J%s>\r\n"
+			  "Allow: %s\r\n"
+			  "%H"
+			  "%H"
 			  "Content-Type: application/sdp\r\n"
 			  "Content-Length: %zu\r\n"
 			  "\r\n"
 			  "%b",
-			  ua->cuser, &msg->dst, sip_transp_param(msg->tp),
+			  uag_allowed_methods(),
+			  ua_print_supported, ua,
+			  sip_contact_print, &contact,
 			  mbuf_get_left(desc),
 			  mbuf_buf(desc),
 			  mbuf_get_left(desc));
@@ -404,6 +436,7 @@ static void ua_destructor(void *arg)
 	list_flush(&ua->regl);
 	mem_deref(ua->play);
 	mem_deref(ua->cuser);
+	mem_deref(ua->pub_gruu);
 	mem_deref(ua->acc);
 }
 
@@ -504,6 +537,9 @@ int ua_alloc(struct ua **uap, const char *aor)
 	}
 
 	/* Register clients */
+	if (str_isset(uag.cfg->uuid))
+	        add_extension(ua, "gruu");
+
 	if (0 == str_casecmp(ua->acc->sipnat, "outbound")) {
 
 		size_t i;
@@ -555,6 +591,47 @@ int ua_alloc(struct ua **uap, const char *aor)
 }
 
 
+static int uri_complete(struct ua *ua, struct mbuf *buf, const char *uri)
+{
+	size_t len;
+	int err = 0;
+
+	len = str_len(uri);
+
+	/* Append sip: scheme if missing */
+	if (0 != re_regex(uri, len, "sip:"))
+		err |= mbuf_printf(buf, "sip:");
+
+	err |= mbuf_write_str(buf, uri);
+
+	/* Append domain if missing */
+	if (0 != re_regex(uri, len, "[^@]+@[^]+", NULL, NULL)) {
+#if HAVE_INET6
+		if (AF_INET6 == ua->acc->luri.af)
+			err |= mbuf_printf(buf, "@[%r]",
+					   &ua->acc->luri.host);
+		else
+#endif
+			err |= mbuf_printf(buf, "@%r",
+					   &ua->acc->luri.host);
+
+		/* Also append port if specified and not 5060 */
+		switch (ua->acc->luri.port) {
+
+		case 0:
+		case SIP_PORT:
+			break;
+
+		default:
+			err |= mbuf_printf(buf, ":%u", ua->acc->luri.port);
+			break;
+		}
+	}
+
+	return err;
+}
+
+
 /**
  * Connect an outgoing call to a given SIP uri
  *
@@ -574,13 +651,10 @@ int ua_connect(struct ua *ua, struct call **callp,
 	struct call *call = NULL;
 	struct mbuf *dialbuf;
 	struct pl pl;
-	size_t len;
 	int err = 0;
 
 	if (!ua || !str_isset(uri))
 		return EINVAL;
-
-	len = str_len(uri);
 
 	dialbuf = mbuf_alloc(64);
 	if (!dialbuf)
@@ -589,35 +663,7 @@ int ua_connect(struct ua *ua, struct call **callp,
 	if (params)
 		err |= mbuf_printf(dialbuf, "<");
 
-	/* Append sip: scheme if missing */
-	if (0 != re_regex(uri, len, "sip:"))
-		err |= mbuf_printf(dialbuf, "sip:");
-
-	err |= mbuf_write_str(dialbuf, uri);
-
-	/* Append domain if missing */
-	if (0 != re_regex(uri, len, "[^@]+@[^]+", NULL, NULL)) {
-#if HAVE_INET6
-		if (AF_INET6 == ua->acc->luri.af)
-			err |= mbuf_printf(dialbuf, "@[%r]",
-					   &ua->acc->luri.host);
-		else
-#endif
-			err |= mbuf_printf(dialbuf, "@%r",
-					   &ua->acc->luri.host);
-
-		/* Also append port if specified and not 5060 */
-		switch (ua->acc->luri.port) {
-
-		case 0:
-		case SIP_PORT:
-			break;
-
-		default:
-			err |= mbuf_printf(dialbuf, ":%u", ua->acc->luri.port);
-			break;
-		}
-	}
+	err |= uri_complete(ua, dialbuf, uri);
 
 	if (params) {
 		err |= mbuf_printf(dialbuf, ";%s", params);
@@ -740,18 +786,31 @@ int ua_print_status(struct re_printf *pf, const struct ua *ua)
 int ua_options_send(struct ua *ua, const char *uri,
 		    options_resp_h *resph, void *arg)
 {
-	int err;
+	struct mbuf *dialbuf;
+	int err = 0;
 
-	if (!ua)
+	(void)arg;
+
+	if (!ua || !str_isset(uri))
 		return EINVAL;
 
-	err = sip_req_send(ua, "OPTIONS", uri, resph, arg,
+	dialbuf = mbuf_alloc(64);
+	if (!dialbuf)
+		return ENOMEM;
+
+	err |= uri_complete(ua, dialbuf, uri);
+
+	dialbuf->buf[dialbuf->end] = '\0';
+
+	err = sip_req_send(ua, "OPTIONS", (char *)dialbuf->buf, resph, NULL,
 			   "Accept: application/sdp\r\n"
 			   "Content-Length: 0\r\n"
 			   "\r\n");
 	if (err) {
 		warning("ua: send options: (%m)\n", err);
 	}
+
+	mem_deref(dialbuf);
 
 	return err;
 }
@@ -767,6 +826,34 @@ int ua_options_send(struct ua *ua, const char *uri,
 const char *ua_aor(const struct ua *ua)
 {
 	return ua ? ua->acc->aor : NULL;
+}
+
+
+/**
+ * Get presence status of a User-Agent
+ *
+ * @param ua User-Agent object
+ *
+ * @return presence status
+ */
+enum presence_status ua_presence_status(const struct ua *ua)
+{
+	return ua ? ua->my_status : PRESENCE_UNKNOWN;
+}
+
+
+/**
+ * Set presence status of a User-Agent
+ *
+ * @param ua     User-Agent object
+ * @param status Presence status
+ */
+void ua_presence_status_set(struct ua *ua, const enum presence_status status)
+{
+	if (!ua)
+		return;
+
+	ua->my_status = status;
 }
 
 
@@ -827,6 +914,7 @@ int ua_debug(struct re_printf *pf, const struct ua *ua)
 
 	err  = re_hprintf(pf, "--- %s ---\n", ua->acc->aor);
 	err |= re_hprintf(pf, " cuser:     %s\n", ua->cuser);
+	err |= re_hprintf(pf, " pub-gruu:  %s\n", ua->pub_gruu);
 	err |= re_hprintf(pf, " af:        %s\n", net_af2name(ua->af));
 	err |= re_hprintf(pf, " %H", ua_print_supported, ua);
 
@@ -960,7 +1048,7 @@ static void sipsess_conn_handler(const struct sip_msg *msg, void *arg)
 	const struct sip_hdr *hdr;
 	struct ua *ua;
 	struct call *call = NULL;
-	char str[256], to_uri[256];
+	char to_uri[256];
 	int err;
 
 	(void)arg;
@@ -1013,8 +1101,7 @@ static void sipsess_conn_handler(const struct sip_msg *msg, void *arg)
 
  error:
 	mem_deref(call);
-	(void)re_snprintf(str, sizeof(str), "Error (%m)", err);
-	(void)sip_treply(NULL, uag.sip, msg, 500, str);
+	(void)sip_treply(NULL, uag.sip, msg, 500, "Call Error");
 }
 
 
@@ -1067,7 +1154,6 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls,
 
 	uag.cfg = &cfg->sip;
 	bsize = cfg->sip.trans_bsize;
-	ui_init(&cfg->input);
 
 	play_init();
 
@@ -1132,6 +1218,7 @@ void ua_close(void)
 	cmd_unregister(cmdv);
 	net_close();
 	play_close();
+	ui_reset();
 
 	uag.evsock   = mem_deref(uag.evsock);
 	uag.sock     = mem_deref(uag.sock);
@@ -1441,7 +1528,10 @@ struct ua *uag_find_param(const char *name, const char *value)
 
 
 /**
- * Get the contact user of a User-Agent (UA)
+ * Get the contact user/uri of a User-Agent (UA)
+ *
+ * If the Public GRUU is set, it will be returned.
+ * Otherwise the local contact-user (cuser) will be returned.
  *
  * @param ua User-Agent
  *
@@ -1449,7 +1539,48 @@ struct ua *uag_find_param(const char *name, const char *value)
  */
 const char *ua_cuser(const struct ua *ua)
 {
+	if (!ua)
+		return NULL;
+
+	if (str_isset(ua->pub_gruu))
+		return ua->pub_gruu;
+
+	return ua->cuser;
+}
+
+
+const char *ua_local_cuser(const struct ua *ua)
+{
 	return ua ? ua->cuser : NULL;
+}
+
+
+/**
+ * Get Account of a User-Agent
+ *
+ * @param ua User-Agent
+ *
+ * @return Pointer to UA's account
+ */
+struct account *ua_account(const struct ua *ua)
+{
+	return ua ? ua->acc : NULL;
+}
+
+
+/**
+ * Set Public GRUU of a User-Agent (UA)
+ *
+ * @param ua   User-Agent
+ * @param pval Public GRUU
+ */
+void ua_pub_gruu_set(struct ua *ua, const struct pl *pval)
+{
+	if (!ua)
+		return;
+
+	ua->pub_gruu = mem_deref(ua->pub_gruu);
+	(void)pl_strdup(&ua->pub_gruu, pval);
 }
 
 
@@ -1466,7 +1597,8 @@ struct list *uag_list(void)
  */
 const char *uag_allowed_methods(void)
 {
-	return "INVITE,ACK,BYE,CANCEL,OPTIONS,REFER,NOTIFY,SUBSCRIBE,INFO";
+	return "INVITE,ACK,BYE,CANCEL,OPTIONS,REFER,"
+		"NOTIFY,SUBSCRIBE,INFO,MESSAGE";
 }
 
 

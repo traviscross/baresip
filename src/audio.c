@@ -271,9 +271,9 @@ static bool aucodec_equal(const struct aucodec *a, const struct aucodec *b)
 static int add_audio_codec(struct audio *a, struct sdp_media *m,
 			   struct aucodec *ac)
 {
-	if (!in_range(&a->cfg.srate, ac->srate)) {
+	if (!in_range(&a->cfg.srate, get_srate(ac))) {
 		debug("audio: skip %uHz codec (audio range %uHz - %uHz)\n",
-		      ac->srate, a->cfg.srate.min, a->cfg.srate.max);
+		      get_srate(ac), a->cfg.srate.min, a->cfg.srate.max);
 		return 0;
 	}
 
@@ -334,7 +334,7 @@ static void encode_rtp_send(struct audio *a, struct autx *tx,
 	 */
 	frame_size = (tx->is_g722 ? sampc/2 : sampc) / tx->ac->ch;
 
-	tx->ts += frame_size;
+	tx->ts += (uint32_t)frame_size;
 
  out:
 	tx->marker = false;

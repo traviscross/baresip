@@ -1,5 +1,5 @@
 /**
- * @file avcodec.c  Video codecs using FFmpeg libavcodec
+ * @file avcodec.c  Video codecs using libavcodec
  *
  * Copyright (C) 2010 Creytiv.com
  */
@@ -17,13 +17,13 @@
 int avcodec_resolve_codecid(const char *s)
 {
 	if (0 == str_casecmp(s, "H263"))
-		return CODEC_ID_H263;
+		return AV_CODEC_ID_H263;
 	else if (0 == str_casecmp(s, "H264"))
-		return CODEC_ID_H264;
+		return AV_CODEC_ID_H264;
 	else if (0 == str_casecmp(s, "MP4V-ES"))
-		return CODEC_ID_MPEG4;
+		return AV_CODEC_ID_MPEG4;
 	else
-		return CODEC_ID_NONE;
+		return AV_CODEC_ID_NONE;
 }
 
 
@@ -136,7 +136,7 @@ static int module_init(void)
 #ifdef USE_X264
 	debug("avcodec: x264 build %d\n", X264_BUILD);
 #else
-	debug("avcodec: using FFmpeg H.264 encoder\n");
+	debug("avcodec: using libavcodec H.264 encoder\n");
 #endif
 
 #if LIBAVCODEC_VERSION_INT < ((53<<16)+(10<<8)+0)
@@ -145,13 +145,13 @@ static int module_init(void)
 
 	avcodec_register_all();
 
-	if (avcodec_find_decoder(CODEC_ID_H264))
+	if (avcodec_find_decoder(AV_CODEC_ID_H264))
 		vidcodec_register(&h264);
 
-	if (avcodec_find_decoder(CODEC_ID_H263))
+	if (avcodec_find_decoder(AV_CODEC_ID_H263))
 		vidcodec_register(&h263);
 
-	if (avcodec_find_decoder(CODEC_ID_MPEG4))
+	if (avcodec_find_decoder(AV_CODEC_ID_MPEG4))
 		vidcodec_register(&mpg4);
 
 	return 0;

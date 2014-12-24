@@ -310,6 +310,9 @@ int stream_alloc(struct stream **sp, const struct config_avt *cfg,
 
 	s->pt_enc = -1;
 
+	metric_init(&s->metric_tx);
+	metric_init(&s->metric_rx);
+
 	list_append(call_streaml(call), &s->le, s);
 
  out:
@@ -520,7 +523,7 @@ void stream_set_bw(struct stream *s, uint32_t bps)
 	if (!s)
 		return;
 
-	sdp_media_set_lbandwidth(s->sdp, SDP_BANDWIDTH_AS, bps / 1024);
+	sdp_media_set_lbandwidth(s->sdp, SDP_BANDWIDTH_AS, bps / 1000);
 }
 
 

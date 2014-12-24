@@ -1,5 +1,5 @@
 /**
- * @file avcodec/decode.c  Video codecs using FFmpeg libavcodec -- decoder
+ * @file avcodec/decode.c  Video codecs using libavcodec -- decoder
  *
  * Copyright (C) 2010 - 2013 Creytiv.com
  */
@@ -40,10 +40,10 @@ static void destructor(void *arg)
 
 static int init_decoder(struct viddec_state *st, const char *name)
 {
-	enum CodecID codec_id;
+	enum AVCodecID codec_id;
 
 	codec_id = avcodec_resolve_codecid(name);
-	if (codec_id == CODEC_ID_NONE)
+	if (codec_id == AV_CODEC_ID_NONE)
 		return EINVAL;
 
 	st->codec = avcodec_find_decoder(codec_id);

@@ -58,6 +58,7 @@ struct account {
 	char *outbound[2];           /**< Optional SIP outbound proxies      */
 	uint32_t ptime;              /**< Configured packet time in [ms]     */
 	uint32_t regint;             /**< Registration interval in [seconds] */
+	uint32_t pubint;             /**< Publication interval in [seconds]  */
 	char *regq;                  /**< Registration Q-value               */
 	char *rtpkeep;               /**< RTP Keepalive mechanism            */
 	char *sipnat;                /**< SIP Nat mechanism                  */
@@ -226,6 +227,7 @@ struct metric {
 	uint32_t n_bytes_last;
 };
 
+void     metric_init(struct metric *metric);
 void     metric_reset(struct metric *metric);
 void     metric_add_packet(struct metric *metric, size_t packetsize);
 uint32_t metric_avg_bitrate(const struct metric *metric);

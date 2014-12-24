@@ -8,12 +8,13 @@
 #   USE_ALSA          ALSA audio driver
 #   USE_AMR           Adaptive Multi-Rate (AMR) audio codec
 #   USE_AVCAPTURE     AVFoundation video capture for OSX/iOS
+#   USE_AVCODEC       avcodec video codec module
+#   USE_AVFORMAT      avformat video source module
 #   USE_BV32          BroadVoice32 Wideband Audio codec
 #   USE_CAIRO         Cairo module
 #   USE_CONS          Console input driver
 #   USE_COREAUDIO     MacOSX Coreaudio audio driver
 #   USE_EVDEV         Event Device module
-#   USE_FFMPEG        FFmpeg video codec libraries
 #   USE_G711          G.711 audio codec
 #   USE_G722          G.722 audio codec
 #   USE_G722_1        G.722.1 audio codec
@@ -38,7 +39,6 @@
 #   USE_SRTP          Secure RTP module using libre
 #   USE_STDIO         stdio input driver
 #   USE_SYSLOG        Syslog module
-#   USE_UUID          UUID module
 #   USE_V4L           Video4Linux module
 #   USE_V4L2          Video4Linux2 module
 #   USE_WINWAVE       Windows audio driver
@@ -63,6 +63,12 @@ USE_AMR   := $(shell [ -d $(SYSROOT)/include/opencore-amrnb ] || \
 	[ -d $(SYSROOT_ALT)/include/opencore-amrnb ] || \
 	[ -d $(SYSROOT)/local/include/amrnb ] || \
 	[ -d $(SYSROOT)/include/amrnb ] && echo "yes")
+USE_AVCODEC := $(shell [ -f $(SYSROOT)/include/libavcodec/avcodec.h ] || \
+	[ -f $(SYSROOT)/local/include/libavcodec/avcodec.h ] || \
+	[ -f $(SYSROOT_ALT)/include/libavcodec/avcodec.h ] && echo "yes")
+USE_AVFORMAT := $(shell [ -f $(SYSROOT)/include/libavformat/avformat.h ] || \
+	[ -f $(SYSROOT)/local/include/libavformat/avformat.h ] || \
+	[ -f $(SYSROOT_ALT)/include/libavformat/avformat.h ] && echo "yes")
 USE_BV32  := $(shell [ -f $(SYSROOT)/include/bv32/bv32.h ] || \
 	[ -f $(SYSROOT)/local/include/bv32/bv32.h ] && echo "yes")
 USE_CAIRO  := $(shell [ -f $(SYSROOT)/include/cairo/cairo.h ] || \
@@ -74,12 +80,6 @@ USE_DTLS := $(shell [ -f $(SYSROOT)/include/openssl/dtls1.h ] || \
 USE_DTLS_SRTP := $(shell [ -f $(SYSROOT)/include/openssl/srtp.h ] || \
 	[ -f $(SYSROOT)/local/include/openssl/srtp.h ] || \
 	[ -f $(SYSROOT_ALT)/include/openssl/srtp.h ] && echo "yes")
-USE_FFMPEG := $(shell [ -f $(SYSROOT)/include/libavcodec/avcodec.h ] || \
-	[ -f $(SYSROOT)/local/include/libavcodec/avcodec.h ] || \
-	[ -f $(SYSROOT)/include/ffmpeg/libavcodec/avcodec.h ] || \
-	[ -f $(SYSROOT)/include/ffmpeg/avcodec.h ] || \
-	[ -f $(SYSROOT)/local/ffmpeg/avcodec.h ] || \
-	[ -f $(SYSROOT_ALT)/include/libavcodec/avcodec.h ] && echo "yes")
 USE_G722 := $(shell [ -f $(SYSROOT)/include/spandsp/g722.h ] || \
 	[ -f $(SYSROOT_ALT)/include/spandsp/g722.h ] || \
 	[ -f $(SYSROOT)/local/include/spandsp/g722.h ] && echo "yes")
@@ -154,7 +154,6 @@ USE_LIBSRTP := $(shell [ -f $(SYSROOT)/include/srtp/srtp.h ] || \
 USE_SYSLOG := $(shell [ -f $(SYSROOT)/include/syslog.h ] || \
 	[ -f $(SYSROOT_ALT)/include/syslog.h ] || \
 	[ -f $(SYSROOT)/local/include/syslog.h ] && echo "yes")
-USE_UUID  := $(shell [ -f $(SYSROOT)/include/uuid/uuid.h ] && echo "yes")
 USE_V4L  := $(shell [ -f $(SYSROOT)/include/libv4l1.h ] || \
 	[ -f $(SYSROOT)/local/include/libv4l1.h ] \
 	&& echo "yes")
@@ -178,18 +177,6 @@ endif
 ifeq ($(OS),darwin)
 USE_COREAUDIO := yes
 USE_OPENGL    := yes
-
-ifneq ($(USE_FFMPEG),)
-ifneq ($(shell echo | $(CC) -E -dM - | grep '__LP64__'), )
-LP64      := 1
-endif
-
-ifndef LP64
-USE_QUICKTIME := yes
-endif
-
-endif
-
 
 USE_AVFOUNDATION := \
 	$(shell [ -d /System/Library/Frameworks/AVFoundation.framework ] \
@@ -221,6 +208,8 @@ MODULES   += stun turn ice natbd auloop presence
 MODULES   += menu contact vumeter mwi account natpmp httpd
 MODULES   += selftest
 MODULES   += srtp
+MODULES   += uuid
+
 ifneq ($(HAVE_PTHREAD),)
 MODULES   += aubridge
 endif
@@ -241,6 +230,12 @@ endif
 ifneq ($(USE_AVCAPTURE),)
 MODULES   += avcapture
 endif
+ifneq ($(USE_AVCODEC),)
+MODULES   += avcodec
+ifneq ($(USE_AVFORMAT),)
+MODULES   += avformat
+endif
+endif
 ifneq ($(USE_BV32),)
 MODULES   += bv32
 endif
@@ -259,24 +254,12 @@ endif
 ifneq ($(USE_DTLS_SRTP),)
 MODULES   += dtls_srtp
 endif
-ifneq ($(USE_QUICKTIME),)
-MODULES   += quicktime
-endif
 ifneq ($(USE_QTCAPTURE),)
 MODULES   += qtcapture
 CFLAGS    += -DQTCAPTURE_RUNLOOP
 endif
 ifneq ($(USE_EVDEV),)
 MODULES   += evdev
-endif
-ifneq ($(USE_FFMPEG),)
-USE_FFMPEG_AVFORMAT := 1
-CFLAGS    += -I/usr/include/ffmpeg
-CFLAGS    += -DUSE_FFMPEG
-MODULES   += avcodec
-ifneq ($(USE_FFMPEG_AVFORMAT),)
-MODULES   += avformat
-endif
 endif
 ifneq ($(USE_G711),)
 MODULES   += g711
@@ -352,9 +335,6 @@ MODULES   += stdio
 endif
 ifneq ($(USE_SYSLOG),)
 MODULES   += syslog
-endif
-ifneq ($(USE_UUID),)
-MODULES   += uuid
 endif
 ifneq ($(USE_V4L),)
 MODULES   += v4l

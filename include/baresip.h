@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.11"
+#define BARESIP_VERSION "0.4.12"
 
 
 /* forward declarations */
@@ -41,6 +41,8 @@ int account_auth(const struct account *acc, char **username, char **password,
 struct list *account_aucodecl(const struct account *acc);
 struct list *account_vidcodecl(const struct account *acc);
 struct sip_addr *account_laddr(const struct account *acc);
+uint32_t account_regint(const struct account *acc);
+uint32_t account_pubint(const struct account *acc);
 
 
 /*
@@ -129,11 +131,6 @@ enum audio_mode {
 
 /** Core configuration */
 struct config {
-	/** Input */
-	struct config_input {
-		char device[64];        /**< Input device name */
-		uint32_t port;          /**< Input port number */
-	} input;
 
 	/** SIP User-Agent */
 	struct config_sip {
@@ -360,11 +357,10 @@ struct list *aufilt_list(void);
  */
 
 enum log_level {
-	DEBUG = 0,
-	INFO,
-	WARN,
-#undef ERROR
-	ERROR,
+	LEVEL_DEBUG = 0,
+	LEVEL_INFO,
+	LEVEL_WARN,
+	LEVEL_ERROR,
 };
 
 typedef void (log_h)(uint32_t level, const char *msg);
@@ -498,13 +494,19 @@ int  ua_print_calls(struct re_printf *pf, const struct ua *ua);
 int  ua_print_status(struct re_printf *pf, const struct ua *ua);
 int  ua_print_supported(struct re_printf *pf, const struct ua *ua);
 int  ua_register(struct ua *ua);
+void ua_unregister(struct ua *ua);
 bool ua_isregistered(const struct ua *ua);
+void ua_pub_gruu_set(struct ua *ua, const struct pl *pval);
 const char     *ua_aor(const struct ua *ua);
 const char     *ua_cuser(const struct ua *ua);
+const char     *ua_local_cuser(const struct ua *ua);
+struct account *ua_account(const struct ua *ua);
 const char     *ua_outbound(const struct ua *ua);
 struct call    *ua_call(const struct ua *ua);
 struct account *ua_prm(const struct ua *ua);
 struct list    *ua_calls(const struct ua *ua);
+enum presence_status ua_presence_status(const struct ua *ua);
+void ua_presence_status_set(struct ua *ua, const enum presence_status status);
 
 
 /* One instance */
@@ -532,27 +534,25 @@ struct sipevent_sock *uag_sipevent_sock(void);
  * User Interface
  */
 
-struct ui;
-struct ui_st;
+typedef int  (ui_output_h)(const char *str);
 
-/** User Interface parameters */
-struct ui_prm {
-	char *device;   /**< Device name */
-	uint16_t port;  /**< Port number */
+/** Defines a User-Interface module */
+struct ui {
+	struct le le;          /**< Linked-list element                   */
+	const char *name;      /**< Name of the UI-module                 */
+	ui_output_h *outputh;  /**< Handler for output strings (optional) */
 };
-typedef void (ui_input_h)(char key, struct re_printf *pf, void *arg);
 
-typedef int  (ui_alloc_h)(struct ui_st **stp, struct ui_prm *prm,
-			  ui_input_h *ih, void *arg);
-typedef int  (ui_output_h)(struct ui_st *st, const char *str);
+void ui_register(struct ui *ui);
+void ui_unregister(struct ui *ui);
 
-void ui_init(const struct config_input *cfg);
+void ui_reset(void);
 void ui_input(char key);
+void ui_input_key(char key, struct re_printf *pf);
 void ui_input_str(const char *str);
 int  ui_input_pl(struct re_printf *pf, const struct pl *pl);
-void ui_output(const char *str);
-int  ui_register(struct ui **uip, const char *name,
-		 ui_alloc_h *alloch, ui_output_h *outh);
+void ui_output(const char *fmt, ...);
+bool ui_isediting(void);
 
 
 /*

@@ -279,6 +279,9 @@ static int sip_params_decode(struct account *acc, const struct sip_addr *aor)
 	acc->regint = REG_INTERVAL + (rand_u32()&0xff);
 	err |= param_u32(&acc->regint, &aor->params, "regint");
 
+	acc->pubint = 0;
+	err |= param_u32(&acc->pubint, &aor->params, "pubint");
+
 	err |= param_dstr(&acc->regq, &aor->params, "regq");
 
 	for (i=0; i<ARRAY_SIZE(acc->outbound); i++) {
@@ -320,6 +323,7 @@ static int encode_uri_user(struct re_printf *pf, const struct uri *uri)
 }
 
 
+/* TODO: move interactive code away from CORE, to a module */
 static int password_prompt(struct account *acc)
 {
 	char pwd[64];
@@ -501,6 +505,18 @@ struct list *account_vidcodecl(const struct account *acc)
 struct sip_addr *account_laddr(const struct account *acc)
 {
 	return acc ? (struct sip_addr *)&acc->laddr : NULL;
+}
+
+
+uint32_t account_regint(const struct account *acc)
+{
+	return acc ? acc->regint : 0;
+}
+
+
+uint32_t account_pubint(const struct account *acc)
+{
+	return acc ? acc->pubint : 0;
 }
 
 
