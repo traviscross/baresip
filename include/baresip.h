@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.12"
+#define BARESIP_VERSION "0.4.13"
 
 
 /* forward declarations */
@@ -214,9 +214,13 @@ enum presence_status {
 
 struct contact;
 
+int  contact_init(void);
+void contact_close(void);
 int  contact_add(struct contact **contactp, const struct pl *addr);
 int  contacts_print(struct re_printf *pf, void *unused);
 void contact_set_presence(struct contact *c, enum presence_status status);
+bool contact_block_access(const char *uri);
+struct contact  *contact_find(const char *uri);
 struct sip_addr *contact_addr(const struct contact *c);
 struct list     *contact_list(void);
 const char      *contact_str(const struct contact *c);
@@ -262,7 +266,7 @@ struct ausrc_prm {
 typedef void (ausrc_read_h)(const int16_t *sampv, size_t sampc, void *arg);
 typedef void (ausrc_error_h)(int err, const char *str, void *arg);
 
-typedef int  (ausrc_alloc_h)(struct ausrc_st **stp, struct ausrc *ausrc,
+typedef int  (ausrc_alloc_h)(struct ausrc_st **stp, const struct ausrc *ausrc,
 			     struct media_ctx **ctx,
 			     struct ausrc_prm *prm, const char *device,
 			     ausrc_read_h *rh, ausrc_error_h *errh, void *arg);
@@ -292,7 +296,7 @@ struct auplay_prm {
 
 typedef void (auplay_write_h)(int16_t *sampv, size_t sampc, void *arg);
 
-typedef int  (auplay_alloc_h)(struct auplay_st **stp, struct auplay *ap,
+typedef int  (auplay_alloc_h)(struct auplay_st **stp, const struct auplay *ap,
 			      struct auplay_prm *prm, const char *device,
 			      auplay_write_h *wh, void *arg);
 
@@ -606,7 +610,7 @@ struct vidsrc_prm {
 typedef void (vidsrc_frame_h)(struct vidframe *frame, void *arg);
 typedef void (vidsrc_error_h)(int err, void *arg);
 
-typedef int  (vidsrc_alloc_h)(struct vidsrc_st **vsp, struct vidsrc *vs,
+typedef int  (vidsrc_alloc_h)(struct vidsrc_st **vsp, const struct vidsrc *vs,
 			      struct media_ctx **ctx, struct vidsrc_prm *prm,
 			      const struct vidsz *size,
 			      const char *fmt, const char *dev,
@@ -641,7 +645,7 @@ struct vidisp_prm {
 typedef void (vidisp_resize_h)(const struct vidsz *size, void *arg);
 
 typedef int  (vidisp_alloc_h)(struct vidisp_st **vp,
-			      struct vidisp *vd, struct vidisp_prm *prm,
+			      const struct vidisp *vd, struct vidisp_prm *prm,
 			      const char *dev,
 			      vidisp_resize_h *resizeh, void *arg);
 typedef int  (vidisp_update_h)(struct vidisp_st *st, bool fullscreen,
@@ -758,6 +762,8 @@ struct vidcodec {
 void vidcodec_register(struct vidcodec *vc);
 void vidcodec_unregister(struct vidcodec *vc);
 const struct vidcodec *vidcodec_find(const char *name, const char *variant);
+const struct vidcodec *vidcodec_find_encoder(const char *name);
+const struct vidcodec *vidcodec_find_decoder(const char *name);
 struct list *vidcodec_list(void);
 
 

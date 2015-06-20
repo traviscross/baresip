@@ -1,15 +1,17 @@
 /**
  * @file modules/contact/contact.c  Contacts module
  *
- * Copyright (C) 2010 Creytiv.com
+ * Copyright (C) 2010 - 2015 Creytiv.com
  */
 #include <string.h>
 #include <re.h>
 #include <baresip.h>
 
 
-/*
- * Contact module
+/**
+ * @defgroup contact contact
+ *
+ * Contact module reading contacts from a file
  *
  * - read contact entries from ~/.baresip/contacts
  * - populate local database of contacts
@@ -149,10 +151,18 @@ static int write_template(const char *file)
 			 "#\n"
 			 "#  addr-params:\n"
 			 "#    ;presence={none,p2p}\n"
+			 "#    ;access={allow,block}\n"
 			 "#\n"
 			 "\n"
+			 "\n"
 			 "\"Echo Server\" <sip:echo@creytiv.com>\n"
-			 "\"%s\" <sip:%s@%s>;presence=p2p\n",
+			 "\"%s\" <sip:%s@%s>;presence=p2p\n"
+			 "\n"
+			 "# Access rules\n"
+			 "\"Catch All\" <sip:*@*>;access=block\n"
+			 "\"Good Friend\" <sip:good@friend.com>;access=allow\n"
+			 "\n"
+			 ,
 			 user, user, domain);
 
 	if (f)

@@ -1,7 +1,7 @@
 /**
- * @file avf.c  libavformat video-source
+ * @file avformat.c  libavformat video-source
  *
- * Copyright (C) 2010 Creytiv.com
+ * Copyright (C) 2010 - 2015 Creytiv.com
  */
 #define _BSD_SOURCE 1
 #include <unistd.h>
@@ -15,6 +15,19 @@
 #include <libavdevice/avdevice.h>
 #include <libavcodec/avcodec.h>
 #include <libswscale/swscale.h>
+
+
+/**
+ * @defgroup avformat avformat
+ *
+ * Video source using FFmpeg/libav libavformat
+ *
+ *
+ * Example config:
+ \verbatim
+  video_source            avformat,/tmp/testfile.mp4
+ \endverbatim
+ */
 
 
 /* extra const-correctness added in 0.9.0 */
@@ -43,7 +56,7 @@
 
 
 struct vidsrc_st {
-	struct vidsrc *vs;  /* inheritance */
+	const struct vidsrc *vs;  /* inheritance */
 	pthread_t thread;
 	bool run;
 	AVFormatContext *ic;
@@ -84,27 +97,31 @@ static void destructor(void *arg)
 		av_close_input_file(st->ic);
 #endif
 	}
-
-	mem_deref(st->vs);
 }
 
 
 static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 {
 	AVPicture pict;
+	AVFrame *frame = NULL;
 	struct vidframe vf;
 	struct vidsz sz;
 	unsigned i;
 
 	if (st->codec) {
-		AVFrame frame;
 		int got_pict, ret;
 
+#if LIBAVUTIL_VERSION_INT >= ((52<<16)+(20<<8)+100)
+		frame = av_frame_alloc();
+#else
+		frame = avcodec_alloc_frame();
+#endif
+
 #if LIBAVCODEC_VERSION_INT <= ((52<<16)+(23<<8)+0)
-		ret = avcodec_decode_video(st->ctx, &frame, &got_pict,
+		ret = avcodec_decode_video(st->ctx, frame, &got_pict,
 					   pkt->data, pkt->size);
 #else
-		ret = avcodec_decode_video2(st->ctx, &frame,
+		ret = avcodec_decode_video2(st->ctx, frame,
 					    &got_pict, pkt);
 #endif
 		if (ret < 0 || !got_pict)
@@ -146,7 +163,7 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 			return;
 
 		ret = sws_scale(st->sws,
-				SRCSLICE_CAST frame.data, frame.linesize,
+				SRCSLICE_CAST frame->data, frame->linesize,
 				0, st->sz.h, pict.data, pict.linesize);
 		if (ret <= 0)
 			goto end;
@@ -168,6 +185,14 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
  end:
 	if (st->codec)
 		avpicture_free(&pict);
+
+	if (frame) {
+#if LIBAVUTIL_VERSION_INT >= ((52<<16)+(20<<8)+100)
+		av_frame_free(&frame);
+#else
+		av_free(frame);
+#endif
+	}
 }
 
 
@@ -202,7 +227,7 @@ static void *read_thread(void *data)
 }
 
 
-static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
+static int alloc(struct vidsrc_st **stp, const struct vidsrc *vs,
 		 struct media_ctx **mctx, struct vidsrc_prm *prm,
 		 const struct vidsz *size, const char *fmt,
 		 const char *dev, vidsrc_frame_h *frameh,
@@ -226,7 +251,7 @@ static int alloc(struct vidsrc_st **stp, struct vidsrc *vs,
 	if (!st)
 		return ENOMEM;
 
-	st->vs     = mem_ref(vs);
+	st->vs     = vs;
 	st->app_sz = *size;
 	st->frameh = frameh;
 	st->arg    = arg;

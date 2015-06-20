@@ -198,6 +198,9 @@ ifeq ($(OS),win32)
 USE_WINWAVE := yes
 MODULES   += wincons
 endif
+ifeq ($(OS),openbsd)
+MODULES   += sndio
+endif
 
 endif
 
@@ -211,7 +214,7 @@ MODULES   += srtp
 MODULES   += uuid
 
 ifneq ($(HAVE_PTHREAD),)
-MODULES   += aubridge
+MODULES   += aubridge aufile
 endif
 ifneq ($(USE_VIDEO),)
 MODULES   += vidloop selfview vidbridge
