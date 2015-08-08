@@ -371,6 +371,8 @@ static int cmd_ua_next(struct re_printf *pf, void *unused)
 
 	if (!le_cur)
 		le_cur = list_head(uag_list());
+	if (!le_cur)
+		return 0;
 
 	le_cur = le_cur->next ? le_cur->next : list_head(uag_list());
 
@@ -511,6 +513,14 @@ static int call_holdresume(struct re_printf *pf, void *arg)
 }
 
 
+static int hold_prev_call(struct re_printf *pf, void *unused)
+{
+	(void)pf;
+	(void)unused;
+	return call_hold(ua_prev_call(uag_cur()), true);
+}
+
+
 #ifdef USE_VIDEO
 static int call_videoenc_cycle(struct re_printf *pf, void *unused)
 {
@@ -567,6 +577,7 @@ static const struct cmd callcmdv[] = {
 	{'m',       0, "Call mute/un-mute",   call_mute             },
 	{'r', CMD_IPRM,"Transfer call",       call_xfer             },
 	{'x',       0, "Call hold",           call_holdresume       },
+	{'H',       0, "Hold previous call",  hold_prev_call        },
 
 #ifdef USE_VIDEO
 	{'E',       0, "Cycle video encoder", call_videoenc_cycle   },

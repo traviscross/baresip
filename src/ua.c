@@ -7,6 +7,7 @@
 #include <re.h>
 #include <baresip.h>
 #include "core.h"
+#include <ctype.h>
 
 
 /** Magic number */
@@ -359,6 +360,10 @@ static void call_event_handler(struct call *call, enum call_event ev,
 			mem_deref(call2);
 		}
 		break;
+
+	case CALL_EVENT_TRANSFER_FAILED:
+		ua_event(ua, UA_EVENT_CALL_TRANSFER_FAILED, call, str);
+		break;
 	}
 }
 
@@ -605,6 +610,10 @@ static int uri_complete(struct ua *ua, struct mbuf *buf, const char *uri)
 {
 	size_t len;
 	int err = 0;
+
+	/* Skip initial whitespace */
+	while (isspace(*uri))
+		++uri;
 
 	len = str_len(uri);
 
@@ -908,6 +917,27 @@ struct call *ua_call(const struct ua *ua)
 		/* todo: check if call is on-hold */
 
 		return call;
+	}
+
+	return NULL;
+}
+
+
+struct call *ua_prev_call(const struct ua *ua)
+{
+	struct le *le;
+	int prev = 0;
+
+	if (!ua)
+		return NULL;
+
+	for (le = ua->calls.tail; le; le = le->prev) {
+		if ( prev == 1) {
+			struct call *call = le->data;
+			return call;
+		}
+		if ( prev == 0)
+			prev = 1;
 	}
 
 	return NULL;
@@ -1415,15 +1445,16 @@ const char *uag_event_str(enum ua_event ev)
 {
 	switch (ev) {
 
-	case UA_EVENT_REGISTERING:      return "REGISTERING";
-	case UA_EVENT_REGISTER_OK:      return "REGISTER_OK";
-	case UA_EVENT_REGISTER_FAIL:    return "REGISTER_FAIL";
-	case UA_EVENT_UNREGISTERING:    return "UNREGISTERING";
-	case UA_EVENT_CALL_INCOMING:    return "CALL_INCOMING";
-	case UA_EVENT_CALL_RINGING:     return "CALL_RINGING";
-	case UA_EVENT_CALL_PROGRESS:    return "CALL_PROGRESS";
-	case UA_EVENT_CALL_ESTABLISHED: return "CALL_ESTABLISHED";
-	case UA_EVENT_CALL_CLOSED:      return "CALL_CLOSED";
+	case UA_EVENT_REGISTERING:          return "REGISTERING";
+	case UA_EVENT_REGISTER_OK:          return "REGISTER_OK";
+	case UA_EVENT_REGISTER_FAIL:        return "REGISTER_FAIL";
+	case UA_EVENT_UNREGISTERING:        return "UNREGISTERING";
+	case UA_EVENT_CALL_INCOMING:        return "CALL_INCOMING";
+	case UA_EVENT_CALL_RINGING:         return "CALL_RINGING";
+	case UA_EVENT_CALL_PROGRESS:        return "CALL_PROGRESS";
+	case UA_EVENT_CALL_ESTABLISHED:     return "CALL_ESTABLISHED";
+	case UA_EVENT_CALL_CLOSED:          return "CALL_CLOSED";
+	case UA_EVENT_CALL_TRANSFER_FAILED: return "TRANSFER_FAILED";
 	default: return "?";
 	}
 }

@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.13"
+#define BARESIP_VERSION "0.4.14"
 
 
 /* forward declarations */
@@ -56,6 +56,7 @@ enum call_event {
 	CALL_EVENT_ESTABLISHED,
 	CALL_EVENT_CLOSED,
 	CALL_EVENT_TRANSFER,
+	CALL_EVENT_TRANSFER_FAILED,
 };
 
 struct call;
@@ -467,6 +468,7 @@ enum ua_event {
 	UA_EVENT_CALL_PROGRESS,
 	UA_EVENT_CALL_ESTABLISHED,
 	UA_EVENT_CALL_CLOSED,
+	UA_EVENT_CALL_TRANSFER_FAILED,
 
 	UA_EVENT_MAX,
 };
@@ -507,6 +509,7 @@ const char     *ua_local_cuser(const struct ua *ua);
 struct account *ua_account(const struct ua *ua);
 const char     *ua_outbound(const struct ua *ua);
 struct call    *ua_call(const struct ua *ua);
+struct call    *ua_prev_call(const struct ua *ua);
 struct account *ua_prm(const struct ua *ua);
 struct list    *ua_calls(const struct ua *ua);
 enum presence_status ua_presence_status(const struct ua *ua);
@@ -735,10 +738,10 @@ typedef int (videnc_packet_h)(bool marker, const uint8_t *hdr, size_t hdr_len,
 
 typedef int (videnc_update_h)(struct videnc_state **vesp,
 			      const struct vidcodec *vc,
-			      struct videnc_param *prm, const char *fmtp);
-typedef int (videnc_encode_h)(struct videnc_state *ves, bool update,
-			      const struct vidframe *frame,
+			      struct videnc_param *prm, const char *fmtp,
 			      videnc_packet_h *pkth, void *arg);
+typedef int (videnc_encode_h)(struct videnc_state *ves, bool update,
+			      const struct vidframe *frame);
 
 typedef int (viddec_update_h)(struct viddec_state **vdsp,
 			      const struct vidcodec *vc, const char *fmtp);
@@ -898,6 +901,9 @@ const char *sdp_rattr(const struct sdp_session *s, const struct sdp_media *m,
 #else
 #define DECL_EXPORTS(name) exports
 #endif
+
+
+int module_preload(const char *module);
 
 
 #ifdef __cplusplus

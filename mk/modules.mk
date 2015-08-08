@@ -20,7 +20,10 @@
 #   USE_G722_1        G.722.1 audio codec
 #   USE_G726          G.726 audio codec
 #   USE_GSM           GSM audio codec
-#   USE_GST           Gstreamer audio module
+#   USE_GST           Gstreamer 0.10 audio module
+#   USE_GST1          Gstreamer 1.0 audio module
+#   USE_GST_VIDEO     Gstreamer 0.10 video module
+#   USE_GST_VIDEO1    Gstreamer 1.0 video module
 #   USE_ILBC          iLBC audio codec
 #   USE_ISAC          iSAC audio codec
 #   USE_L16           L16 audio codec
@@ -43,6 +46,7 @@
 #   USE_V4L2          Video4Linux2 module
 #   USE_WINWAVE       Windows audio driver
 #   USE_X11           X11 video output
+#   USE_GTK           GTK+ user interface
 #
 
 
@@ -96,6 +100,14 @@ USE_GSM := $(shell [ -f $(SYSROOT)/include/gsm.h ] || \
 	[ -f $(SYSROOT)/local/include/gsm/gsm.h ] && echo "yes")
 USE_GST := $(shell [ -f $(SYSROOT)/include/gstreamer-0.10/gst/gst.h ] || \
 	[ -f $(SYSROOT_ALT)/include/gstreamer-0.10/gst/gst.h ] && echo "yes")
+USE_GST1 := $(shell [ -f $(SYSROOT)/include/gstreamer-1.0/gst/gst.h ] || \
+	[ -f $(SYSROOT_ALT)/include/gstreamer-1.0/gst/gst.h ] && echo "yes")
+USE_GST_VIDEO := \
+	$(shell [ -f $(SYSROOT)/include/gstreamer-0.10/gst/gst.h ] || \
+	[ -f $(SYSROOT_ALT)/include/gstreamer-0.10/gst/gst.h ] && echo "yes")
+USE_GST_VIDEO1 := \
+	$(shell [ -f $(SYSROOT)/include/gstreamer-1.0/gst/gst.h ] || \
+	[ -f $(SYSROOT_ALT)/include/gstreamer-1.0/gst/gst.h ] && echo "yes")
 USE_ILBC := $(shell [ -f $(SYSROOT)/include/iLBC_define.h ] || \
 	[ -f $(SYSROOT)/local/include/iLBC_define.h ] && echo "yes")
 USE_ISAC := $(shell [ -f $(SYSROOT)/include/isac.h ] || \
@@ -171,6 +183,14 @@ USE_VPX  := $(shell [ -f $(SYSROOT)/include/vpx/vp8.h ] \
 	|| [ -f $(SYSROOT)/local/include/vpx/vp8.h ] \
 	|| [ -f $(SYSROOT_ALT)/include/vpx/vp8.h ] \
 	&& echo "yes")
+USE_GTK := $(shell [ -f $(SYSROOT)/include/gtk-2.0/gtk/gtk.h ] || \
+	[ -f $(SYSROOT)/local/include/gtk-2.0/gtk/gtk.h ] || \
+	[ -f $(SYSROOT_ALT)/include/gtk-2.0/gtk/gtk.h ] && echo "yes")
+else
+# Windows.
+# Accounts for mingw with Windows SDK (formerly known as Platform SDK)
+# mounted at /winsdk
+USE_DSHOW := $(shell [ -f /winsdk/Include/um/dshow.h ] && echo "yes")
 endif
 
 # Platform specific modules
@@ -200,6 +220,9 @@ MODULES   += wincons
 endif
 ifeq ($(OS),openbsd)
 MODULES   += sndio
+endif
+ifeq ($(OS),freebsd)
+MODULES   += dtmfio
 endif
 
 endif
@@ -282,6 +305,15 @@ endif
 ifneq ($(USE_GST),)
 MODULES   += gst
 endif
+ifneq ($(USE_GST1),)
+MODULES   += gst1
+endif
+ifneq ($(USE_GST_VIDEO),)
+MODULES   += gst_video
+endif
+ifneq ($(USE_GST_VIDEO1),)
+MODULES   += gst_video1
+endif
 ifneq ($(USE_ILBC),)
 MODULES   += ilbc
 endif
@@ -353,4 +385,11 @@ MODULES   += winwave
 endif
 ifneq ($(USE_X11),)
 MODULES   += x11 x11grab
+endif
+ifneq ($(USE_GTK),)
+MODULES   += gtk
+endif
+
+ifneq ($(USE_DSHOW),)
+MODULES   += dshow
 endif
